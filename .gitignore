@@ -1,0 +1,35 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Logs / runtime
+*.log
+logs/
+log/
+runtime/
+tmp/
+temp/
+cache/
+.cache/
+
+# Dependencies / build outputs
+node_modules/
+vendor/
+dist/
+build/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Backups
+*.bak
+*.backup
+*.old
+*.orig
+*~

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>仙途·无尽深渊</title>
+<link rel="stylesheet" href="css/style.css?v=20260518r">
+</head>
+<body>
+<div id="game-container">
+  <canvas id="game-canvas"></canvas>
+  <div id="map-layer-container">
+    <div id="map-layer"></div>
+  </div>
+  <div id="death-dom-screen"></div>
+  <div id="hud-overlay">
+    <div id="hud-top">
+      <span id="hud-realm">境界: 炼气期</span>
+      <span id="hud-spirit-stones">💎 灵石: 0</span>
+    </div>
+    <div id="hud-weapon" class="empty">
+      <div class="weapon-icon-wrap">
+        <span class="weapon-icon">⚔️</span>
+        <span class="rarity-corner">-</span>
+      </div>
+      <span class="weapon-name">未装备</span>
+    </div>
+    <div id="hud-bottom">
+      <span id="hud-floor">深渊第 1 层</span>
+        <span id="hud-biome">❄️ 雪原</span>
+      <div id="hud-stats">
+        <div class="stat-bar"><span class="stat-label">生命</span><div class="bar-bg"><div id="hp-fill" class="bar-fill hp"></div></div><span id="hp-text">100/100</span></div>
+        <div class="stat-bar"><span class="stat-label">灵力</span><div class="bar-bg"><div id="mp-fill" class="bar-fill mp"></div></div><span id="mp-text">50/50</span></div>
+        <div class="stat-bar"><span class="stat-label">经验</span><div class="bar-bg"><div id="xp-fill" class="bar-fill xp"></div></div><span id="xp-text">0/100</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="message-log"></div>
+  <div id="menu-bar">
+    <button class="menu-btn" id="btn-bag">🎒背包</button>
+    <button class="menu-btn primary" id="btn-character">👤属性</button>
+    <button class="menu-btn" id="btn-skills">📜技能</button>
+    <button class="menu-btn" id="btn-alchemy">🔥炼丹</button>
+    <button class="menu-btn" id="btn-break">⚡突破</button>
+    <button class="menu-btn" id="btn-save" style="font-size:14px">💾</button>
+  </div>
+  <div id="touch-controls">
+    <div id="joystick-zone">
+      <div id="joystick-base">
+        <div id="joystick-thumb"></div>
+      </div>
+    </div>
+    <div id="action-buttons">
+      <button class="act-btn" id="btn-attack">⚔️攻击</button>
+      <button class="act-btn" id="btn-defend">🛡️防御</button>
+      <button class="act-btn" id="btn-flee">🏃逃跑</button>
+    </div>
+  </div>
+</div>
+<script src="js/dungeon.js?v=1779000004"></script>
+<script src="js/entities.js?v=1778974640"></script>
+<script src="js/combat.js?v=20260518r"></script>
+<script src="js/loot.js?v=20260518c"></script>
+<script src="js/skills.js?v=20260518r"></script>
+<script src="js/alchemy.js?v=1778508100"></script>
+<script src="js/particles.js?v=1779000001"></script>
+<script src="js/ui.js?v=1779000002"></script>
+<script src="js/save.js?v=1779000003"></script>
+<script src="js/main.js?v=20260518r"></script>
+</body>
+</html>
