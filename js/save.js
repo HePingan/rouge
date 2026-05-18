@@ -3,6 +3,10 @@
 
 const SAVE_KEY = 'xian_save_v1';
 
+function getEquipmentSlotOrder() {
+  return typeof EQUIPMENT_SLOT_ORDER !== 'undefined' ? EQUIPMENT_SLOT_ORDER : Object.keys(player?.equipment || {});
+}
+
 function saveGame() {
   try {
     const data = {
@@ -21,11 +25,7 @@ function saveGame() {
       hpRatio: player.maxHp > 0 ? player.hp / player.maxHp : 1,
       mpRatio: player.maxMp > 0 ? player.mp / player.maxMp : 1,
       // Equipment & inventory
-      equipment: {
-        weapon: player.equipment.weapon ? serializeItem(player.equipment.weapon) : null,
-        armor: player.equipment.armor ? serializeItem(player.equipment.armor) : null,
-        accessory: player.equipment.accessory ? serializeItem(player.equipment.accessory) : null,
-      },
+      equipment: Object.fromEntries((getEquipmentSlotOrder()).map(slot => [slot, player.equipment[slot] ? serializeItem(player.equipment[slot]) : null])),
       inventory: player.inventory.map(serializeItem),
       // Skills
       skillPoints: availableSkillPoints,
@@ -44,11 +44,23 @@ function saveGame() {
 }
 
 function serializeItem(item) {
+  if (typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
   return {
     name: item.name,
     icon: item.icon,
     slot: item.slot,
+    subType: item.subType,
+    baseStat: item.baseStat,
+    baseValue: item.baseValue,
+    baseStats: { ...(item.baseStats || item.stats || {}) },
     stats: { ...item.stats },
+    affixes: (item.affixes || []).map(a => ({ ...a })),
+    enhanceLevel: Number(item.enhanceLevel) || 0,
+    enhanceBonus: { ...(item.enhanceBonus || {}) },
+    setId: item.setId || null,
+    setName: item.setName || null,
+    setIcon: item.setIcon || null,
+    floorLevel: item.floorLevel,
     rarity: item.rarity,
     rarityColor: item.rarityColor,
   };
@@ -71,7 +83,7 @@ function loadGame() {
     player.baseDef = data.baseDef ?? 3;
 
     // Restore equipment
-    for (const slot of ['weapon', 'armor', 'accessory']) {
+    for (const slot of (getEquipmentSlotOrder())) {
       if (data.equipment?.[slot]) {
         player.equipment[slot] = deserializeItem(data.equipment[slot]);
       } else {
@@ -114,14 +126,26 @@ function loadGame() {
 }
 
 function deserializeItem(data) {
-  return {
+  const item = {
     name: data.name,
     icon: data.icon,
     slot: data.slot,
-    stats: { ...data.stats },
+    subType: data.subType,
+    baseStat: data.baseStat || (typeof SLOT_NAMES !== 'undefined' ? SLOT_NAMES?.[data.slot]?.baseStat : undefined),
+    baseValue: data.baseValue,
+    baseStats: { ...(data.baseStats || data.stats || {}) },
+    stats: { ...(data.stats || {}) },
+    affixes: (data.affixes || []).map(a => ({ ...a })),
+    enhanceLevel: Number(data.enhanceLevel) || 0,
+    enhanceBonus: { ...(data.enhanceBonus || {}) },
+    setId: data.setId || null,
+    setName: data.setName || null,
+    setIcon: data.setIcon || null,
+    floorLevel: data.floorLevel,
     rarity: data.rarity,
     rarityColor: data.rarityColor,
   };
+  return typeof rebuildEquipmentStats === 'function' ? rebuildEquipmentStats(item) : item;
 }
 
 function deleteSave() {

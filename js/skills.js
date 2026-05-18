@@ -152,11 +152,85 @@ const SKILL_TREES = {
       },
     ],
   },
+  wood: {
+    name: '🌿 木系功法',
+    color: '#55cc88',
+    skills: [
+      {
+        name: '青木藤缚', icon: '🌿', kind: 'active', mpCost: 11, dmgMult: 1.18,
+        desc: '灵藤缠绕妖物，刺入经络削弱攻势。', unlockRealm: 0,
+        effectText: '主动：造成伤害，并使敌人攻击降低 16% 2 回合，同时留下 2 回合藤刺流血。',
+        effects: [{ type: 'weaken', turns: 2, ratio: 0.16 }, { type: 'bleed', turns: 2, ratio: 0.1 }],
+      },
+      {
+        name: '回春诀', icon: '🍃', kind: 'active', mpCost: 18, dmgMult: 1.05,
+        desc: '以木灵生机护住经脉，攻守之间回补自身。', unlockRealm: 2,
+        effectText: '主动：造成伤害，恢复 16% 最大生命，并获得 2 回合生机护盾。',
+        effects: [{ type: 'healSelf', ratio: 0.16 }, { type: 'guard', turns: 2, ratio: 0.24 }],
+      },
+      {
+        name: '万木成林', icon: '🌳', kind: 'active', mpCost: 34, dmgMult: 1.55,
+        desc: '木灵化林，枝叶同时压制周围妖物。', unlockRealm: 4,
+        effectText: '主动：造成伤害并削弱敌人；木灵扩散额外波及本层最多 2 个其它妖物。',
+        effects: [{ type: 'weaken', turns: 3, ratio: 0.22 }, { type: 'splash', count: 2, ratio: 0.32 }],
+      },
+      {
+        name: '木灵体', icon: '🌱', kind: 'passive', mpCost: 0, dmgMult: 0,
+        desc: '筋骨如灵木扎根，生命与防御更稳。', unlockRealm: 1,
+        effectText: '被动：最大生命 +10%，防御 +4%。',
+        effects: [{ type: 'passiveStat', stat: 'maxHpPct', value: 0.1 }, { type: 'passiveStat', stat: 'defPct', value: 0.04 }],
+      },
+      {
+        name: '生生不息', icon: '🌸', kind: 'trigger', mpCost: 0, dmgMult: 0,
+        desc: '木灵循环不绝，战斗轮转与胜利后持续回元。', unlockRealm: 3,
+        effectText: '触发：每次重新轮到你行动时恢复 3% 最大灵力；击败敌人时恢复 4% 最大生命。',
+        effects: [{ type: 'turnMpRegen', ratio: 0.03 }, { type: 'victoryRecover', hpRatio: 0.04, mpRatio: 0 }],
+      },
+    ],
+  },
+  earth: {
+    name: '⛰️ 土系功法',
+    color: '#c79a48',
+    skills: [
+      {
+        name: '岩突', icon: '🪨', kind: 'active', mpCost: 10, dmgMult: 1.28,
+        desc: '地脉突起击碎妖甲，让后续攻势更容易破防。', unlockRealm: 0,
+        armorPierce: 0.18,
+        effectText: '主动：无视敌人 18% 防御，并使敌人防御降低 15% 2 回合。',
+        effects: [{ type: 'defBreak', turns: 2, ratio: 0.15 }],
+      },
+      {
+        name: '磐石护身', icon: '🛡️', kind: 'active', mpCost: 20, dmgMult: 1.1,
+        desc: '厚土化甲，反压敌势。', unlockRealm: 2,
+        effectText: '主动：造成伤害，获得 3 回合 40% 减伤护盾，并削弱敌人攻击 15%。',
+        effects: [{ type: 'guard', turns: 3, ratio: 0.4 }, { type: 'weaken', turns: 2, ratio: 0.15 }],
+      },
+      {
+        name: '山崩地裂', icon: '🏔️', kind: 'active', mpCost: 36, dmgMult: 1.8,
+        desc: '引动地脉崩裂，重创并震慑目标。', unlockRealm: 4,
+        armorPierce: 0.25,
+        effectText: '主动：高额伤害并无视 25% 防御；35% 概率麻痹 1 回合，护甲再降低 25%。',
+        effects: [{ type: 'stunChance', chance: 0.35, turns: 1 }, { type: 'defBreak', turns: 3, ratio: 0.25 }],
+      },
+      {
+        name: '厚土根基', icon: '⛰️', kind: 'passive', mpCost: 0, dmgMult: 0,
+        desc: '根基如山，血肉与护体灵罡更坚实。', unlockRealm: 1,
+        effectText: '被动：最大生命 +12%，防御 +8%。',
+        effects: [{ type: 'passiveStat', stat: 'maxHpPct', value: 0.12 }, { type: 'passiveStat', stat: 'defPct', value: 0.08 }],
+      },
+      {
+        name: '反震罡甲', icon: '🟫', kind: 'trigger', mpCost: 0, dmgMult: 0,
+        desc: '危急时厚土罡甲自动凝结，扛住下一轮冲击。', unlockRealm: 3,
+        effectText: '触发：每场战斗一次，生命低于 35% 时恢复 10% 最大生命，并获得 1 回合 45% 减伤护盾。',
+        effects: [{ type: 'lowHpHeal', threshold: 0.35, healRatio: 0.1, guardRatio: 0.45, turns: 1 }],
+      },
+    ],
+  },
 };
 
 const SKILL_KIND_LABELS = { active: '主动', passive: '被动', trigger: '触发' };
 const SKILL_EFFECT_LABELS = {
-  burn: '灼烧', bleed: '流血', splash: '溅射', healSelf: '治疗', guard: '护盾', weaken: '虚弱', defBreak: '破甲', freeze: '冻结',
+  burn: '灼烧', bleed: '流血', splash: '溅射', healSelf: '治疗', guard: '护盾', weaken: '虚弱', defBreak: '破甲', freeze: '冻结', stun: '麻痹',
   shockOnCrit: '暴击震慑', stunChance: '麻痹', execute: '斩杀', refundOnKill: '击杀返灵',
   passiveStat: '属性强化', burnAmp: '灼烧强化', lowHpHeal: '濒死回春', turnMpRegen: '潮汐回灵',
   critBonusPassive: '暴击精通', critWeakenChance: '暴击虚弱', armorPiercePassive: '破甲精通', victoryRecover: '击杀回元',
@@ -234,6 +308,20 @@ function getSkillPassiveBonuses() {
     }
   }
   return bonuses;
+}
+
+function getVictoryRecoverValues() {
+  let hpRatio = 0;
+  let mpRatio = 0;
+  for (const skill of getLearnedSkillDefinitions('trigger')) {
+    for (const eff of skill.effects || []) {
+      if (eff.type === 'victoryRecover') {
+        hpRatio += eff.hpRatio || 0;
+        mpRatio += eff.mpRatio || 0;
+      }
+    }
+  }
+  return { hpRatio, mpRatio };
 }
 
 function sumLearnedEffect(type, field = 'value') {
@@ -478,12 +566,14 @@ function applyPassiveOnVictory() {
   for (const skill of getLearnedSkillDefinitions('trigger')) {
     for (const eff of skill.effects || []) {
       if (eff.type === 'victoryRecover') {
-        const hpGain = Math.max(1, Math.floor(player.maxHp * (eff.hpRatio || 0)));
-        const mpGain = Math.max(1, Math.floor(player.maxMp * (eff.mpRatio || 0)));
+        const hpGain = Math.floor(player.maxHp * (eff.hpRatio || 0));
+        const mpGain = Math.floor(player.maxMp * (eff.mpRatio || 0));
         const hpBefore = player.hp, mpBefore = player.mp;
-        player.hp = Math.min(player.maxHp, player.hp + hpGain);
-        player.mp = Math.min(player.maxMp, player.mp + mpGain);
-        combatLog(`✨ ${skill.name}回元：生命+${player.hp - hpBefore} 灵力+${player.mp - mpBefore}`, '#ddddff');
+        if (hpGain > 0) player.hp = Math.min(player.maxHp, player.hp + hpGain);
+        if (mpGain > 0) player.mp = Math.min(player.maxMp, player.mp + mpGain);
+        const hpDelta = player.hp - hpBefore;
+        const mpDelta = player.mp - mpBefore;
+        if (hpDelta > 0 || mpDelta > 0) combatLog(`✨ ${skill.name}回元：生命+${hpDelta} 灵力+${mpDelta}`, '#ddddff');
       }
     }
   }

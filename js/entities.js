@@ -37,7 +37,12 @@ class Player {
     // Inventory
     this.equipment = {
       weapon: null,
+      helmet: null,
       armor: null,
+      gloves: null,
+      belt: null,
+      pants: null,
+      boots: null,
       accessory: null,
     };
     this.inventory = [];
@@ -55,20 +60,34 @@ class Player {
     this.maxMp = Math.floor(this.baseMp * r.mpMult);
     this.atk = this.baseAtk + r.atkBonus;
     this.def = this.baseDef + r.defBonus;
+    this._equipmentSetEffects = {};
+    this._equipmentSetActive = [];
+    const applyStatBonus = (stat, value) => {
+      switch (stat) {
+        case 'atk': this.atk += value; break;
+        case 'def': this.def += value; break;
+        case 'hp':
+        case 'maxHp': this.maxHp += value; break;
+        case 'mp':
+        case 'maxMp': this.maxMp += value; break;
+        case 'atkPct': this.atk = Math.floor(this.atk * (1 + value)); break;
+        case 'defPct': this.def = Math.floor(this.def * (1 + value)); break;
+        case 'maxHpPct': this.maxHp = Math.floor(this.maxHp * (1 + value)); break;
+        case 'maxMpPct': this.maxMp = Math.floor(this.maxMp * (1 + value)); break;
+        default: this[stat] = (this[stat] || 0) + value; break;
+      }
+    };
     if (this.equipment) {
       for (const item of Object.values(this.equipment)) {
         if (!item) continue;
-        for (const [stat, value] of Object.entries(item.stats || {})) {
-          switch (stat) {
-            case 'atk': this.atk += value; break;
-            case 'def': this.def += value; break;
-            case 'hp':
-            case 'maxHp': this.maxHp += value; break;
-            case 'mp':
-            case 'maxMp': this.maxMp += value; break;
-            default: this[stat] = (this[stat] || 0) + value; break;
-          }
-        }
+        if (typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
+        for (const [stat, value] of Object.entries(item.stats || {})) applyStatBonus(stat, value);
+      }
+      if (typeof getEquipmentSetBonuses === 'function') {
+        const setBonuses = getEquipmentSetBonuses(this.equipment);
+        this._equipmentSetEffects = setBonuses.effects || {};
+        this._equipmentSetActive = setBonuses.active || [];
+        for (const [stat, value] of Object.entries(setBonuses.stats || {})) applyStatBonus(stat, value);
       }
     }
     if (typeof getSkillPassiveBonuses === 'function') {

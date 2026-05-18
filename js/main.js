@@ -12,18 +12,93 @@
      let showCharacterPanel = false;
      let characterPanelTouchState = null;
      let characterPanelLastHtml = '';
+     let characterEquipmentDetailSlot = null;
     let inventoryBulkRarity = '普通';
     let selectedSkillTreeNode = null;
     let skillDetailModalOpen = false;
     let skillsLastTouchActionAt = 0;
     let inventoryLastTouchActionAt = 0;
+    const INVENTORY_TAP_MOVE_THRESHOLD = 12;
      function markInventoryTouchActionDom() {
        inventoryLastTouchActionAt = Date.now();
      }
      function shouldIgnoreInventorySyntheticClickDom() {
        return Date.now() - inventoryLastTouchActionAt < 700;
      }
-    function init() {
+     function inventoryScrollableParentDom(el) {
+       let node = el?.parentElement || null;
+       while (node) {
+         const style = window.getComputedStyle(node);
+         const canScrollY = /(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+         if (canScrollY) return node;
+         if (node.classList?.contains('inv-body') || node.classList?.contains('char-body')) return node;
+         node = node.parentElement;
+       }
+       return el?.closest?.('.char-body, .inv-body, .bag-list, .equip-list, .material-list') || null;
+     }
+     function bindInventoryTapDom(el, onTap, options = {}) {
+       let start = null;
+       let moved = false;
+       let suppressClickUntil = 0;
+       const threshold = options.threshold || INVENTORY_TAP_MOVE_THRESHOLD;
+       const ignoreSelector = options.ignoreSelector || '';
+       const point = e => {
+         const t = e.changedTouches?.[0] || e.touches?.[0] || e;
+         return { x: Number(t.clientX) || 0, y: Number(t.clientY) || 0 };
+       };
+       const scrollTop = () => inventoryScrollableParentDom(el)?.scrollTop || 0;
+       const begin = e => {
+         if (ignoreSelector && e.target.closest(ignoreSelector)) return;
+         const p = point(e);
+         start = { x: p.x, y: p.y, scrollTop: scrollTop() };
+         moved = false;
+       };
+       const move = e => {
+         if (!start) return;
+         const p = point(e);
+         if (Math.hypot(p.x - start.x, p.y - start.y) > threshold || Math.abs(scrollTop() - start.scrollTop) > 2) moved = true;
+       };
+       const end = () => {
+         if (start && (moved || Math.abs(scrollTop() - start.scrollTop) > 2)) suppressClickUntil = Date.now() + 450;
+         start = null;
+         moved = false;
+       };
+       el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') begin(e); }, { passive: true });
+       el.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse') move(e); }, { passive: true });
+       el.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') end(e); }, { passive: true });
+       el.addEventListener('pointercancel', e => { if (e.pointerType !== 'mouse') { suppressClickUntil = Date.now() + 450; end(e); } }, { passive: true });
+       el.addEventListener('touchstart', begin, { passive: true });
+       el.addEventListener('touchmove', move, { passive: true });
+       el.addEventListener('touchend', end, { passive: true });
+       el.addEventListener('touchcancel', () => { suppressClickUntil = Date.now() + 450; end(); }, { passive: true });
+       el.addEventListener('click', e => {
+         if (ignoreSelector && e.target.closest(ignoreSelector)) return;
+         if (Date.now() < suppressClickUntil) {
+           e.preventDefault();
+           e.stopPropagation();
+           return;
+         }
+         e.preventDefault();
+         e.stopPropagation();
+         onTap(e);
+       });
+    }
+    function bindPanelActionDom(el, onAction) {
+      if (!el || typeof onAction !== 'function') return;
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (shouldIgnoreInventorySyntheticClickDom()) return;
+        onAction(e);
+      });
+      el.addEventListener('touchstart', e => {
+        markInventoryTouchActionDom();
+        e.preventDefault();
+        e.stopPropagation();
+        onAction(e);
+      }, { passive: false });
+    }
+   function init() {
       canvas = document.getElementById('game-canvas');
       canvas.width = canvasW;
       canvas.height = canvasH;
@@ -112,7 +187,11 @@
     syncBodyPanelState();
   }
 
-  function escapeHtml(value) {
+  function getRealmThreshold(realmIdx) {
+  if (!REALMS || !REALMS[realmIdx]) return 0;
+  return REALMS[realmIdx].xpNeeded || 0;
+}
+function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   }
   const ITEM_RARITIES_DOM = ['普通', '魔法', '稀有', '传说', '神话'];
@@ -130,24 +209,40 @@
     lifesteal: '吸血', armorPen: '破甲',
     goldFind: '灵石', xpBonus: '经验',
     hpRegen: '生命恢复', mpRegen: '灵力恢复', allRes: '全抗',
+    killMpRestore: '击杀回灵', thorns: '反震', bossDmg: '首领伤害',
+    extraHitChance: '连击', weakenOnHit: '虚弱命中', lowHpGuard: '濒危减伤',
+    dmgReduce: '伤害减免', atkPct: '攻击加成', defPct: '防御加成', maxHpPct: '生命加成', maxMpPct: '灵力加成',
   };
   function statLabelDom(key) {
     return STAT_NAMES[key] || (typeof getCharacterStatMeta === 'function' ? getCharacterStatMeta(key)[0] : key) || key;
   }
   function formatStatValueDom(key, value) {
     const n = Number(value || 0);
-    const suffix = /crit|dodge|rate|Find|Bonus|lifesteal/i.test(key) ? '%' : '';
+    const suffix = /crit|dodge|rate|Find|Bonus|lifesteal|Pen|Dmg|Chance|Guard|Reduce|Pct/i.test(key) ? '%' : '';
     return `${n > 0 ? '+' : ''}${Number.isInteger(n) ? n : n.toFixed(1)}${suffix}`;
   }
   function itemStatsTextDom(item) {
     return Object.entries(item?.stats || {}).filter(([, v]) => Number(v || 0) !== 0).map(([k, v]) => `${statLabelDom(k)}${formatStatValueDom(k, v)}`).join(' ');
   }
   function itemStatsHtmlDom(item) {
-    const order = ['atk', 'def', 'maxHp', 'hp', 'maxMp', 'mp', 'crit', 'dodge', 'armorPen', 'lifesteal', 'speed', 'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg'];
+    const order = ['atk', 'def', 'maxHp', 'hp', 'maxMp', 'mp', 'crit', 'dodge', 'armorPen', 'lifesteal', 'speed', 'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg', 'killMpRestore', 'thorns', 'bossDmg', 'extraHitChance', 'weakenOnHit', 'lowHpGuard'];
     const entries = Object.entries(item?.stats || {}).filter(([, v]) => Number(v || 0) !== 0)
       .sort(([a], [b]) => (order.indexOf(a) < 0 ? 999 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 999 : order.indexOf(b)) || a.localeCompare(b));
     if (!entries.length) return '<span class="stat-chip empty">无词条</span>';
     return entries.map(([k, v]) => `<span class="stat-chip"><em>${escapeHtml(statLabelDom(k))}</em><b>${escapeHtml(formatStatValueDom(k, v))}</b></span>`).join('');
+  }
+  function itemAffixesHtmlDom(item) {
+    const affixes = item?.affixes || [];
+    if (!affixes.length) return '<div class="affix-list empty">无额外词条</div>';
+    return `<div class="affix-list">${affixes.map(affix => `<span class="affix-chip ${escapeHtml(affix.type || '')}"><b>${escapeHtml(affix.name)}</b><em>${escapeHtml(affix.desc || statLabelDom(affix.stat))}</em><strong>${escapeHtml(formatStatValueDom(affix.stat, affix.value))}</strong></span>`).join('')}</div>`;
+  }
+  function itemSetHtmlDom(item) {
+    if (!item?.setId || typeof getEquipmentSet !== 'function') return '<div class="set-panel empty">非套装装备</div>';
+    const set = getEquipmentSet(item.setId);
+    const equippedCount = Object.values(player?.equipment || {}).filter(eq => eq?.setId === item.setId).length;
+    const count = Math.max(equippedCount, player?.equipment?.[item.slot] === item ? equippedCount : equippedCount + 1);
+    const bonuses = (set?.bonuses || []).map(b => `<div class="set-bonus ${count >= b.count ? 'active' : ''}"><b>${b.count}件</b><span>${escapeHtml(b.label)}</span></div>`).join('');
+    return `<div class="set-panel" style="--set-color:${escapeHtml(set?.color || item.rarityColor || '#d4a0ff')}"><div class="set-title">${escapeHtml(set?.icon || item.setIcon || '◇')} ${escapeHtml(set?.name || item.setName)}套装 <small>${count}/8</small></div>${bonuses}</div>`;
   }
   function rarityValueDom(rarity) {
     return ({ '普通': 1, '魔法': 2, '稀有': 4, '传说': 8, '神话': 14 }[rarity] || 1);
@@ -170,11 +265,69 @@
     if (r >= 14) result.starDust = 1;
     return result;
   }
-  function materialTextDom(materials) {
-    return Object.entries(materials).map(([id, count]) => {
+  function materialTextDom(materials, options = {}) {
+    const entries = Object.entries(materials || {});
+    if (!entries.length) return '无';
+    return entries.map(([id, count]) => {
       const mat = MATERIALS?.find(m => m.id === id);
-      return `${mat?.name || id}x${count}`;
-    }).join('、');
+      const owned = Number(playerMaterials?.[id] || 0);
+      const lackClass = options.withOwned && owned < Number(count || 0) ? ' lack' : '';
+      const text = options.withOwned ? `${mat?.name || id} ${owned}/${count}` : `${mat?.name || id}x${count}`;
+      return options.asHtml ? `<span class="mat-cost${lackClass}">${escapeHtml(text)}</span>` : text;
+    }).join(options.asHtml ? '' : '、');
+  }
+  function equipmentEnhanceLevelDom(item) {
+    return typeof getEquipmentEnhanceLevel === 'function' ? getEquipmentEnhanceLevel(item) : Math.max(0, Number(item?.enhanceLevel) || 0);
+  }
+  function equipmentEnhanceStatDom(item) {
+    return typeof getEquipmentEnhanceStat === 'function' ? getEquipmentEnhanceStat(item) : (item?.baseStat || Object.keys(item?.stats || {})[0] || 'atk');
+  }
+  function equipmentEnhanceCostHtmlDom(cost) {
+    if (!cost) return '';
+    const stoneClass = Number(player?.spiritStones || 0) < Number(cost.spiritStones || 0) ? ' lack' : '';
+    return `<span class="mat-cost${stoneClass}">灵石 ${Number(player?.spiritStones || 0)}/${cost.spiritStones || 0}</span>${materialTextDom(cost.materials || {}, { asHtml: true, withOwned: true })}`;
+  }
+  function itemEnhanceHtmlDom(item) {
+    if (!item || typeof getEquipmentEnhanceCost !== 'function') return '';
+    if (typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
+    const level = equipmentEnhanceLevelDom(item);
+    const maxLevel = typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15;
+    const stat = equipmentEnhanceStatDom(item);
+    const curBonus = item?.enhanceBonus?.[stat] || 0;
+    const nextBonus = typeof equipmentEnhanceBonusValue === 'function' ? equipmentEnhanceBonusValue(item, Math.min(maxLevel, level + 1)) : curBonus;
+    const chance = typeof getEquipmentEnhanceChance === 'function' ? Math.round(getEquipmentEnhanceChance(level) * 100) : 100;
+    const maxed = level >= maxLevel;
+    const cost = maxed ? null : getEquipmentEnhanceCost(item, level + 1);
+    const risk = maxed ? '已达最高强化' : level + 1 <= 5 ? '必定成功' : level + 1 <= 10 ? '失败不掉级' : '失败掉1级（最低+10）';
+    return `<div class="enhance-panel">
+      <div class="enhance-head"><b>强化 +${level}</b><span>${escapeHtml(risk)}</span></div>
+      <div class="enhance-main"><span>${escapeHtml(statLabelDom(stat))}强化</span><b>${escapeHtml(formatStatValueDom(stat, curBonus))}${maxed ? '' : ` → ${escapeHtml(formatStatValueDom(stat, nextBonus))}`}</b></div>
+      <div class="enhance-meta">成功率：${maxed ? '—' : `${chance}%`} · 上限 +${maxLevel}</div>
+      ${maxed ? '<div class="enhance-cost maxed">这件装备已强化至最高等级</div>' : `<div class="enhance-cost">${equipmentEnhanceCostHtmlDom(cost)}</div>`}
+    </div>`;
+  }
+  function enhanceInventoryTargetDom(detail) {
+    const item = detail?.item;
+    if (!item || typeof enhanceEquipment !== 'function') return false;
+    const result = enhanceEquipment(item, playerMaterials, player);
+    if (!result.ok) {
+      showMessage(result.reason === 'max_level' ? '已强化到最高等级' : '强化材料不足', '#ff7777');
+      refreshEquipmentPanelsDom();
+      return false;
+    }
+    if (player?.recalcStats) player.recalcStats();
+    autoSave();
+    if (typeof updateUI === 'function') updateUI();
+    const name = item.name || '装备';
+    if (result.success) {
+      showMessage(`${name} 强化成功：+${result.beforeLevel} → +${result.afterLevel}`, '#77ff99');
+    } else if (result.degraded) {
+      showMessage(`${name} 强化失败，等级回落到 +${result.afterLevel}`, '#ff9966');
+    } else {
+      showMessage(`${name} 强化失败，等级保持 +${result.afterLevel}`, '#ffcc66');
+    }
+    refreshEquipmentPanelsDom();
+    return true;
   }
   function removeInventoryItemDom(index) {
     if (!player || index < 0 || index >= player.inventory.length) return null;
@@ -190,7 +343,7 @@
     autoSave();
     if (typeof updateUI === 'function') updateUI();
     showMessage(`售卖 ${item.name}，获得 ${value} 灵石`, '#ffcc44');
-    renderInventoryDomPanel();
+    refreshEquipmentPanelsDom();
     return true;
   }
   function decomposeInventoryItemDom(index, skipConfirm = false) {
@@ -205,7 +358,7 @@
     autoSave();
     if (typeof updateUI === 'function') updateUI();
     showMessage(`分解 ${item.name}，获得 ${materialTextDom(gains)}`, '#aaddff');
-    renderInventoryDomPanel();
+    refreshEquipmentPanelsDom();
     return true;
   }
   function inventoryItemsByRarityDom(rarity) {
@@ -224,7 +377,7 @@
     autoSave();
     if (typeof updateUI === 'function') updateUI();
     showMessage(`已售卖 ${entries.length} 件${rarity}装备，获得 ${total} 灵石`, '#ffcc44');
-    renderInventoryDomPanel();
+    refreshEquipmentPanelsDom();
     return true;
   }
   function bulkDecomposeInventoryByRarityDom(rarity) {
@@ -243,7 +396,7 @@
     autoSave();
     if (typeof updateUI === 'function') updateUI();
     showMessage(`已分解 ${entries.length} 件${rarity}装备，获得 ${materialTextDom(totalGains)}`, '#aaddff');
-    renderInventoryDomPanel();
+    refreshEquipmentPanelsDom();
     return true;
   }
   function itemPrimaryStatsHtmlDom(item, limit = 2) {
@@ -260,35 +413,39 @@
     const more = total > limit ? `<span class="stat-chip more">+${total - limit}</span>` : '';
     return chips + more;
   }
+  function previewEquipItemDom(index) {
+    const item = player?.inventory?.[Number(index)];
+    if (!item) return false;
+    inventoryDetailTarget = { type: 'compare', index: Number(index) };
+    renderInventoryDomPanel();
+    return true;
+  }
   function drawInventorySlotCardDom(slot, item, active = false) {
     const slotInfo = SLOT_NAMES?.[slot] || { name: slot || '装备' };
     const color = item?.rarityColor || '#7d708d';
     const icon = itemIconDom(item, slot);
-    const stats = item ? itemStatsInlineDom(item, 3) : '<span class="stat-chip empty">空槽位</span>';
-    return `<div class="equip-slot-card ${item ? '' : 'empty'}${active ? ' active' : ''}" data-slot="${escapeHtml(slot)}" style="--rarity-color:${escapeHtml(color)}">
+    if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
+    const stats = item ? itemStatsInlineDom(item, 2) : '<span class="stat-chip empty">空</span>';
+    const level = item ? equipmentEnhanceLevelDom(item) : 0;
+    const name = item ? `${item.name}${level > 0 ? ` +${level}` : ''}` : '未装备';
+    return `<div class="equip-slot-card ${item ? '' : 'empty'}${active ? ' active' : ''}" data-slot="${escapeHtml(slot)}" role="button" aria-label="${escapeHtml(slotInfo.name)} ${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
       <div class="slot-icon"><span>${escapeHtml(icon)}</span>${item ? `<i>${escapeHtml(rarityShortDom(item.rarity))}</i>` : '<i>空</i>'}</div>
-      <div class="slot-info"><b>${escapeHtml(slotInfo.name)}</b><span>${item ? escapeHtml(item.name) : '未装备'}</span></div>
+      <div class="slot-info"><b>${escapeHtml(slotInfo.name)}</b><span>${escapeHtml(name)}</span></div>
       <div class="slot-stats">${stats}</div>
-      <div class="slot-actions">${item ? `<button class="item-action detail" type="button" data-detail-slot="${escapeHtml(slot)}">详情</button><button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(slot)}">卸下</button>` : '<span class="empty-tip">点背包装备</span>'}</div>
+      <div class="slot-actions">${item ? `<button class="item-action detail" type="button" data-detail-slot="${escapeHtml(slot)}" title="详情">详</button><button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(slot)}" title="卸下">卸</button>` : ''}</div>
     </div>`;
   }
   function drawBagItemCardDom(item, index, active = false) {
+    if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
     const color = item?.rarityColor || '#d4a0ff';
     const typeName = SLOT_NAMES?.[item.slot]?.name || '装备';
-    return `<div class="bag-item-card${active ? ' active' : ''}" data-index="${index}" style="--rarity-color:${escapeHtml(color)}">
+    const level = equipmentEnhanceLevelDom(item);
+    const name = `${item.name}${level > 0 ? ` +${level}` : ''}`;
+    return `<button class="bag-item-card icon-card${active ? ' active' : ''}" type="button" data-index="${index}" aria-label="查看${escapeHtml(name)}详情" title="${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
       <div class="bag-icon"><span>${escapeHtml(itemIconDom(item))}</span><i>${escapeHtml(rarityShortDom(item.rarity))}</i></div>
-      <div class="bag-main">
-        <div class="bag-name-row"><span class="slot-pill">${escapeHtml(typeName)}</span><b>${escapeHtml(item.name)}</b></div>
-        <div class="bag-meta">${escapeHtml(item.rarity || '未知')} · ${escapeHtml(item.floorLevel ? item.floorLevel + '层' : '当前层')} · 战力 ${itemPowerDom(item)} · 卖 ${itemSellValueDom(item)}</div>
-        <div class="bag-stats">${itemStatsInlineDom(item, 3)}</div>
-      </div>
-      <div class="bag-actions">
-        <button class="item-action equip" type="button" data-equip-action-index="${index}">装备</button>
-        <button class="item-action detail" type="button" data-detail-index="${index}">详情</button>
-        <button class="item-action sell" type="button" data-sell-index="${index}">卖出</button>
-        <button class="item-action decompose" type="button" data-decompose-index="${index}">分解</button>
-      </div>
-    </div>`;
+      ${level > 0 ? `<span class="enhance-badge">+${level}</span>` : ''}
+      <span class="bag-slot-tag">${escapeHtml(typeName.slice(0, 1))}</span>
+    </button>`;
   }
   function itemCardMetaDom(item, label = '') {
     const parts = [];
@@ -299,7 +456,43 @@
     return parts.filter(Boolean).join(' · ');
   }
   function itemIconDom(item, slot) {
-    return item?.icon || { weapon: '⚔️', armor: '🛡️', accessory: '💍' }[slot || item?.slot] || '■';
+    const fallbackIcons = { weapon: '⚔️', helmet: '⛑️', armor: '🛡️', gloves: '🧤', belt: '🪢', pants: '👖', boots: '🥾', accessory: '💍' };
+    return item?.icon || fallbackIcons[slot || item?.slot] || '■';
+  }
+  function sortedItemStatEntriesDom(item) {
+    const order = ['atk', 'def', 'maxHp', 'hp', 'maxMp', 'mp', 'crit', 'dodge', 'armorPen', 'lifesteal', 'speed', 'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg', 'hpRegen', 'mpRegen', 'allRes', 'goldFind', 'xpBonus'];
+    return Object.entries(item?.stats || {}).filter(([, v]) => Number(v || 0) !== 0)
+      .sort(([a], [b]) => (order.indexOf(a) < 0 ? 999 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 999 : order.indexOf(b)) || a.localeCompare(b));
+  }
+  function itemMiniCardDom(item, label = '', extraClass = '') {
+    if (!item) {
+      return `<div class="compare-item-card empty ${escapeHtml(extraClass)}"><div class="compare-empty-icon">∅</div><div><b>${escapeHtml(label || '当前')}</b><span>未装备</span></div></div>`;
+    }
+    const color = item.rarityColor || '#d4a0ff';
+    const meta = itemCardMetaDom(item, label || (SLOT_NAMES?.[item.slot]?.name || '装备'));
+    return `<div class="compare-item-card ${escapeHtml(extraClass)}" style="--rarity-color:${escapeHtml(color)}">
+      <div class="item-icon-box compare-icon"><span>${escapeHtml(itemIconDom(item))}</span><span class="rarity-corner">${escapeHtml(rarityShortDom(item.rarity))}</span></div>
+      <div class="compare-item-main"><b>${escapeHtml(item.name)}</b><span>${escapeHtml(meta)}</span></div>
+    </div>`;
+  }
+  function statDeltaHtmlDom(nextItem, currentItem) {
+    const keys = Array.from(new Set([...Object.keys(currentItem?.stats || {}), ...Object.keys(nextItem?.stats || {})]));
+    if (!keys.length) return '<span class="stat-chip empty">无属性变化</span>';
+    const order = ['atk', 'def', 'maxHp', 'hp', 'maxMp', 'mp', 'crit', 'dodge', 'armorPen', 'lifesteal', 'speed', 'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg', 'hpRegen', 'mpRegen', 'allRes', 'goldFind', 'xpBonus'];
+    keys.sort((a, b) => (order.indexOf(a) < 0 ? 999 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 999 : order.indexOf(b)) || a.localeCompare(b));
+    return keys.map(key => {
+      const cur = Number(currentItem?.stats?.[key] || 0);
+      const nxt = Number(nextItem?.stats?.[key] || 0);
+      const delta = nxt - cur;
+      const cls = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+      const text = delta === 0 ? '不变' : formatStatValueDom(key, delta);
+      return `<span class="stat-delta ${cls}"><em>${escapeHtml(statLabelDom(key))}</em><b>${escapeHtml(text)}</b><small>${escapeHtml(formatStatValueDom(key, cur))} → ${escapeHtml(formatStatValueDom(key, nxt))}</small></span>`;
+    }).join('');
+  }
+  function equipmentSlotKeys() {
+    if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined') return EQUIPMENT_SLOT_ORDER.slice();
+    if (typeof SLOT_NAMES !== 'undefined') return Object.keys(SLOT_NAMES);
+    return ['weapon','helmet','armor','gloves','belt','pants','boots','accessory'];
   }
   let inventoryDetailTarget = null;
   function inventoryDetailItemDom() {
@@ -307,33 +500,134 @@
     if (inventoryDetailTarget.type === 'equipped') {
       const slot = inventoryDetailTarget.slot;
       const item = player.equipment?.[slot];
-      return item ? { item, label: SLOT_NAMES?.[slot]?.name || slot || '装备', slot } : null;
+      return item ? { type: 'detail', item, label: SLOT_NAMES?.[slot]?.name || slot || '装备', slot } : null;
     }
     if (inventoryDetailTarget.type === 'bag') {
       const index = Number(inventoryDetailTarget.index);
       const item = player.inventory?.[index];
-      return item ? { item, label: SLOT_NAMES?.[item.slot]?.name || item.slot || '装备', index } : null;
+      return item ? { type: 'detail', item, label: SLOT_NAMES?.[item.slot]?.name || item.slot || '装备', index } : null;
+    }
+    if (inventoryDetailTarget.type === 'compare') {
+      const index = Number(inventoryDetailTarget.index);
+      const item = player.inventory?.[index];
+      if (!item) return null;
+      const slot = item.slot;
+      return {
+        type: 'compare',
+        item,
+        current: player.equipment?.[slot] || null,
+        label: SLOT_NAMES?.[slot]?.name || slot || '装备',
+        slot,
+        index,
+      };
     }
     return null;
   }
-  function itemDetailHtmlDom(detail) {
-    if (!detail?.item) return '<div class="item-detail empty">选择一件装备查看详细信息</div>';
+  function itemCompareHtmlDom(detail) {
     const item = detail.item;
+    const current = detail.current;
+    const color = item.rarityColor || '#d4a0ff';
+    const title = current ? `替换${detail.label}` : `装备到${detail.label}`;
+    return `<div class="item-detail compare-detail" style="--rarity-color:${escapeHtml(color)}">
+      <button class="detail-close" type="button" data-detail-close="1">×</button>
+      <div class="compare-title">${escapeHtml(title)} · 属性对比</div>
+      <div class="compare-items">
+        ${itemMiniCardDom(current, `当前${detail.label}`, 'current')}
+        <div class="compare-arrow">➜</div>
+        ${itemMiniCardDom(item, `背包${detail.label}`, 'next')}
+      </div>
+      <div class="compare-delta-list">${statDeltaHtmlDom(item, current)}</div>
+      <div class="compare-actions">
+        <button class="item-action equip confirm-equip" type="button" data-confirm-equip-index="${detail.index}">${current ? '确认替换' : '确认装备'}</button>
+        <button class="item-action detail" type="button" data-detail-index="${detail.index}">看详情</button>
+        <button class="item-action cancel" type="button" data-detail-close="1">取消</button>
+      </div>
+    </div>`;
+  }
+  function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；再选择对比、售卖或分解') {
+    if (!detail?.item) return `<div class="item-detail empty">${escapeHtml(emptyText)}</div>`;
+    if (detail.type === 'compare') return itemCompareHtmlDom(detail);
+    const item = detail.item;
+    if (typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
     const color = item.rarityColor || '#d4a0ff';
     const floor = item.floorLevel ? `掉落层数：${item.floorLevel}` : `当前层数：${dungeonLevel || 1}`;
     const typeText = detail.label || SLOT_NAMES?.[item.slot]?.name || item.slot || '装备';
+    const level = equipmentEnhanceLevelDom(item);
+    const enhancedName = `${item.name}${level > 0 ? ` +${level}` : ''}`;
+    const maxLevel = typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15;
+    const enhanceButton = level >= maxLevel ? `<button class="item-action enhance disabled" type="button" disabled>已满级</button>` : `<button class="item-action enhance" type="button" data-enhance-target="1">强化</button>`;
+    const bagActions = Number.isInteger(detail.index) ? `<div class="detail-actions enhance-actions">
+        ${enhanceButton}
+        <button class="item-action equip" type="button" data-equip-action-index="${detail.index}">对比</button>
+        <button class="item-action sell" type="button" data-sell-index="${detail.index}">售卖</button>
+        <button class="item-action decompose" type="button" data-decompose-index="${detail.index}">分解</button>
+      </div>` : '';
+    const equipActions = detail.slot ? `<div class="detail-actions enhance-actions">${enhanceButton}<button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(detail.slot)}">卸下</button></div>` : '';
     return `<div class="item-detail" style="--rarity-color:${escapeHtml(color)}">
       <button class="detail-close" type="button" data-detail-close="1">×</button>
       <div class="detail-top">
         <div class="item-icon-box detail-icon"><span>${escapeHtml(itemIconDom(item))}</span><span class="rarity-corner">${escapeHtml(rarityShortDom(item.rarity))}</span></div>
         <div class="detail-main">
-          <div class="detail-name">${escapeHtml(item.name)}</div>
-          <div class="detail-meta">${escapeHtml(typeText)} · ${escapeHtml(item.rarity || '未知')} · 战力 ${itemPowerDom(item)}</div>
+          <div class="detail-name">${escapeHtml(enhancedName)}</div>
+          <div class="detail-meta">${escapeHtml(typeText)} · ${escapeHtml(item.rarity || '未知')} · 强化 +${level} · 战力 ${itemPowerDom(item)}</div>
         </div>
       </div>
       <div class="detail-stats">${itemStatsHtmlDom(item)}</div>
+      ${itemEnhanceHtmlDom(item)}
+      ${itemAffixesHtmlDom(item)}
+      ${itemSetHtmlDom(item)}
       <div class="detail-extra"><span>${escapeHtml(floor)}</span><span>售卖估值：${itemSellValueDom(item)} 灵石</span><span>分解：${escapeHtml(materialTextDom(itemBreakdownDom(item)))}</span></div>
+      ${bagActions || equipActions}
     </div>`;
+  }
+  function materialCardsHtmlDom() {
+    if (typeof MATERIALS === 'undefined') return '<div class="empty-note">暂无材料定义</div>';
+    const cards = MATERIALS.map(mat => {
+      const count = Number(playerMaterials?.[mat.id] || 0);
+      const empty = count <= 0 ? ' empty' : '';
+      return `<div class="mat-card${empty}" style="--mat-color:${escapeHtml(mat.color || '#aaa')}"><span class="mat-dot">✦</span><div><b>${escapeHtml(mat.name || mat.id)}</b><em>${escapeHtml(mat.rarity || '')}</em></div><strong>x${count}</strong></div>`;
+    }).join('');
+    return cards || '<div class="empty-note">暂无材料</div>';
+  }
+  function refreshEquipmentPanelsDom() {
+    if (typeof updateUI === 'function') updateUI();
+    if (showInventory) renderInventoryDomPanel();
+    if (showCharacterPanel) {
+      characterPanelLastHtml = '';
+      renderCharacterDomPanel();
+    }
+  }
+  function bindInventoryDetailActionsDom(root, detailWrap, getDetail = () => inventoryDetailItemDom(), rerender = () => renderInventoryDomPanel(), clearDetail = () => { inventoryDetailTarget = null; }) {
+    if (!detailWrap) return;
+    detailWrap.querySelectorAll('[data-detail-close]').forEach(btn => {
+      bindPanelActionDom(btn, () => { clearDetail(); rerender(); });
+    });
+    detailWrap.querySelectorAll('[data-equip-action-index]').forEach(btn => {
+      bindPanelActionDom(btn, () => previewEquipItemDom(Number(btn.dataset.equipActionIndex)));
+    });
+    detailWrap.querySelectorAll('[data-confirm-equip-index]').forEach(btn => {
+      bindPanelActionDom(btn, () => {
+        equipItem(player, Number(btn.dataset.confirmEquipIndex));
+        clearDetail();
+        refreshEquipmentPanelsDom();
+      });
+    });
+    detailWrap.querySelectorAll('[data-enhance-target]').forEach(btn => {
+      bindPanelActionDom(btn, () => enhanceInventoryTargetDom(getDetail()));
+    });
+    detailWrap.querySelectorAll('[data-unequip-slot]').forEach(btn => {
+      bindPanelActionDom(btn, () => {
+        unequipItem(player, btn.dataset.unequipSlot);
+        clearDetail();
+        refreshEquipmentPanelsDom();
+      });
+    });
+    detailWrap.querySelectorAll('[data-sell-index]').forEach(btn => {
+      bindPanelActionDom(btn, () => { clearDetail(); sellInventoryItemDom(Number(btn.dataset.sellIndex)); });
+    });
+    detailWrap.querySelectorAll('[data-decompose-index]').forEach(btn => {
+      bindPanelActionDom(btn, () => { clearDetail(); decomposeInventoryItemDom(Number(btn.dataset.decomposeIndex)); });
+    });
   }
   function ensureInventoryDomPanel() {
     let panel = document.getElementById('inventory-dom-panel');
@@ -343,15 +637,15 @@
     panel.innerHTML = `
       <div class="inv-head">
         <button class="inv-close" type="button" aria-label="关闭背包">×</button>
-        <div class="inv-title">🎒 装备栏</div>
-        <div class="inv-sub">上方装备槽一眼看品质；下方背包点装备/详情</div>
+        <div class="inv-title">🎒 背包</div>
+        <div class="inv-sub">装备和材料集中在这里；装备详情在下方固定区域直接显示</div>
       </div>
       <div class="inv-body">
-        <section class="inv-section equip-section"><div class="section-title">已装备</div><div class="equip-list"></div></section>
-        <section class="inv-section bag-section"><div class="section-title bag-title">背包 0/24</div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div><div class="bag-list"></div></section>
+        <section class="inv-section bag-section"><div class="section-title bag-title">装备 0/24</div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div><div class="bag-list"></div></section>
+        <section class="inv-section material-section"><div class="section-title">材料</div><div class="material-list"></div></section>
       </div>
       <div class="inv-detail-wrap"></div>
-      <div class="inv-hint">售卖/分解会二次确认；可按品质批量处理背包装备</div>`;
+      <div class="inv-hint">点装备小图标看详情；材料只展示数量；装备栏已移到「属性」页</div>`;
     const container = document.getElementById('game-container') || document.body;
     container.appendChild(panel);
     const close = () => closeAllPanels();
@@ -362,17 +656,12 @@
   function renderInventoryDomPanel() {
     const panel = ensureInventoryDomPanel();
     if (!showInventory || !player) return;
-    const slotLabels = {
-      weapon: { icon: '⚔️', name: '武器' },
-      armor: { icon: '🛡️', name: '防具' },
-      accessory: { icon: '💍', name: '饰品' },
-    };
-    const equipList = panel.querySelector('.equip-list');
     const bagList = panel.querySelector('.bag-list');
+    const materialList = panel.querySelector('.material-list');
     const detailWrap = panel.querySelector('.inv-detail-wrap');
     const bulkSelect = panel.querySelector('.bulk-rarity');
     const bulkSummary = panel.querySelector('.bulk-summary');
-    panel.querySelector('.bag-title').textContent = `背包 ${player.inventory.length}/24`;
+    panel.querySelector('.bag-title').textContent = `装备 ${player.inventory.length}/24`;
     const availableRarities = ITEM_RARITIES_DOM.filter(rarity => player.inventory.some(item => item?.rarity === rarity));
     if (!availableRarities.includes(inventoryBulkRarity)) inventoryBulkRarity = availableRarities[0] || '普通';
     if (bulkSelect) {
@@ -381,60 +670,32 @@
     const selectedEntries = inventoryItemsByRarityDom(inventoryBulkRarity);
     const selectedSellValue = selectedEntries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
     if (bulkSummary) bulkSummary.textContent = selectedEntries.length ? `${inventoryBulkRarity}：${selectedEntries.length}件 · 售卖约${selectedSellValue}灵石` : `${inventoryBulkRarity}：暂无可处理装备`;
-    equipList.innerHTML = Object.keys(slotLabels).map(slot => {
-      const item = player.equipment[slot];
-      const active = item && inventoryDetailTarget?.type === 'equipped' && inventoryDetailTarget.slot === slot;
-      return drawInventorySlotCardDom(slot, item, active);
-    }).join('');
     if (!player.inventory.length) {
       bagList.innerHTML = '<div class="empty-note">暂无装备，击败怪物可掉落</div>';
     } else {
       bagList.innerHTML = player.inventory.map((item, index) => {
-        const active = inventoryDetailTarget?.type === 'bag' && Number(inventoryDetailTarget.index) === index;
+        const targetIndex = Number(inventoryDetailTarget?.index);
+        const active = (inventoryDetailTarget?.type === 'bag' || inventoryDetailTarget?.type === 'compare') && targetIndex === index;
         return drawBagItemCardDom(item, index, active);
       }).join('');
     }
+    if (materialList) materialList.innerHTML = materialCardsHtmlDom();
     const detail = inventoryDetailItemDom();
     detailWrap.innerHTML = itemDetailHtmlDom(detail);
-    detailWrap.querySelectorAll('[data-detail-close]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); inventoryDetailTarget = null; renderInventoryDomPanel(); });
-      btn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); inventoryDetailTarget = null; renderInventoryDomPanel(); }, { passive: false });
-    });
-    equipList.querySelectorAll('[data-detail-slot]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); inventoryDetailTarget = { type: 'equipped', slot: btn.dataset.detailSlot }; renderInventoryDomPanel(); });
-      btn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); inventoryDetailTarget = { type: 'equipped', slot: btn.dataset.detailSlot }; renderInventoryDomPanel(); }, { passive: false });
-    });
-    bagList.querySelectorAll('[data-detail-index]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); inventoryDetailTarget = { type: 'bag', index: Number(btn.dataset.detailIndex) }; renderInventoryDomPanel(); });
-      btn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); inventoryDetailTarget = { type: 'bag', index: Number(btn.dataset.detailIndex) }; renderInventoryDomPanel(); }, { passive: false });
-    });
-    equipList.querySelectorAll('[data-unequip-slot]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); unequipItem(player, btn.dataset.unequipSlot); inventoryDetailTarget = null; renderInventoryDomPanel(); });
-      btn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); unequipItem(player, btn.dataset.unequipSlot); inventoryDetailTarget = null; renderInventoryDomPanel(); }, { passive: false });
-    });
-    bagList.querySelectorAll('[data-equip-action-index]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); equipItem(player, Number(btn.dataset.equipActionIndex)); inventoryDetailTarget = null; renderInventoryDomPanel(); });
-      btn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); equipItem(player, Number(btn.dataset.equipActionIndex)); inventoryDetailTarget = null; renderInventoryDomPanel(); }, { passive: false });
-    });
-    bagList.querySelectorAll('[data-sell-index]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); if (shouldIgnoreInventorySyntheticClickDom()) return; inventoryDetailTarget = null; sellInventoryItemDom(Number(btn.dataset.sellIndex)); });
-      btn.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
-    });
-    bagList.querySelectorAll('[data-decompose-index]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); if (shouldIgnoreInventorySyntheticClickDom()) return; inventoryDetailTarget = null; decomposeInventoryItemDom(Number(btn.dataset.decomposeIndex)); });
-      btn.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
+    bindInventoryDetailActionsDom(panel, detailWrap);
+    // 背包小图标：只响应真正点击；滑动超过阈值时不弹出详情，避免滚动时误触。
+    bagList.querySelectorAll('.bag-item-card[data-index]').forEach(card => {
+      bindInventoryTapDom(card, () => { inventoryDetailTarget = { type: 'bag', index: Number(card.dataset.index) }; renderInventoryDomPanel(); });
     });
     if (bulkSelect) {
       bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; renderInventoryDomPanel(); });
       bulkSelect.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     }
     panel.querySelectorAll('[data-bulk-sell]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); if (shouldIgnoreInventorySyntheticClickDom()) return; bulkSellInventoryByRarityDom(inventoryBulkRarity); });
-      btn.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
+      bindPanelActionDom(btn, () => bulkSellInventoryByRarityDom(inventoryBulkRarity));
     });
     panel.querySelectorAll('[data-bulk-decompose]').forEach(btn => {
-      btn.addEventListener('click', e => { e.stopPropagation(); if (shouldIgnoreInventorySyntheticClickDom()) return; bulkDecomposeInventoryByRarityDom(inventoryBulkRarity); });
-      btn.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
+      bindPanelActionDom(btn, () => bulkDecomposeInventoryByRarityDom(inventoryBulkRarity));
     });
   }
   function closeAllPanels() {
@@ -442,8 +703,12 @@
     showCharacterPanel = false;
     characterPanelLastHtml = '';
     characterPanelTouchState = null;
+    characterEquipmentDetailSlot = null;
     inventoryDetailTarget = null;
     showSkillTreeUI = false;
+    skillDetailModalOpen = false;
+    const skillLayer = document.getElementById('skill-detail-layer');
+    if (skillLayer) skillLayer.innerHTML = '';
     showAlchemyUI = false;
     showBreakthroughUI = false;
     clearTouchMovementState();
@@ -557,10 +822,10 @@
       equipTitleY: frame.contentY,
       invTitleY: frame.contentY,
       equipGap: compact ? 8 : 10,
-      slotH: compact ? 48 : 52,
+      slotH: compact ? 40 : 48,
       cardPadX: compact ? 9 : 12,
-      cardPadY: compact ? 7 : 8,
-      itemH: compact ? 48 : 52,
+      cardPadY: compact ? 6 : 8,
+      itemH: compact ? 46 : 52,
       itemGap: compact ? 7 : 8,
       rowH: compact ? 24 : 28,
     };
@@ -732,7 +997,7 @@
     }
     function handleInventoryTap(pos, compact, margin, contentY) {
       const layout = getInventoryLayout(compact, false);
-      const slotKeys = ['weapon', 'armor', 'accessory'];
+      const slotKeys = typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {});
       let equipY = layout.equipTitleY + (compact ? 13 : 16);
       for (let s = 0; s < slotKeys.length; s++) {
         if (pos.x >= layout.leftX && pos.x <= layout.leftX + layout.leftW &&
@@ -765,7 +1030,7 @@
       const rowSkillH = compact ? 40 : 48;
       const available = getAvailableSkills(player.realmIndex);
       // Check each tree's skills
-      const treeNames = ['fire', 'water', 'thunder', 'sword'];
+      const treeNames = Object.keys(SKILL_TREES);
       let skillIdx = 0;
       treeNames.forEach((tree, idxTree) => {
         const treeData = SKILL_TREES[tree];
@@ -1171,6 +1436,28 @@ function generateNewFloor() {
     document.body.appendChild(p);
     return p;
   }
+  function bindCharacterPanelActionsDom(p) {
+    if (!p) return;
+    p.querySelectorAll('.char-equip-card[data-char-equip-slot]').forEach(card => {
+      bindInventoryTapDom(card, () => {
+        characterEquipmentDetailSlot = card.dataset.charEquipSlot;
+        characterPanelLastHtml = '';
+        renderCharacterDomPanel();
+      });
+    });
+    const detailWrap = p.querySelector('.char-detail-wrap');
+    bindInventoryDetailActionsDom(
+      p,
+      detailWrap,
+      () => {
+        const slot = characterEquipmentDetailSlot;
+        const item = slot ? player.equipment?.[slot] : null;
+        return item ? { type: 'detail', item, slot, label: SLOT_NAMES?.[slot]?.name || slot } : null;
+      },
+      () => { characterPanelLastHtml = ''; renderCharacterDomPanel(); },
+      () => { characterEquipmentDetailSlot = null; }
+    );
+  }
   function formatCharStatValue(v, suffix = '') {
     const n = Number(v || 0);
     const sign = n > 0 ? '+' : '';
@@ -1205,34 +1492,43 @@ function generateNewFloor() {
     const p = ensureCharacterDomPanel();
     if (!showCharacterPanel) return;
     const realm = player.realm?.name || '炼气期';
-    const nextXp = (typeof getRealmThreshold === 'function') ? getRealmThreshold((player.realmIndex || 0) + 1) : 0;
-    const xpPct = nextXp ? Math.min(100, Math.max(0, player.xp / nextXp * 100)) : 100;
-    const slots = [
-      ['武器', player.equipment?.weapon],
-      ['护甲', player.equipment?.armor],
-      ['饰品', player.equipment?.accessory],
-    ].map(([slot, item]) => {
-      const stats = item ? itemPrimaryStatsHtmlDom(item, 3) : '<span class="stat-chip empty">空槽位</span>';
+    const isMaxRealm = player.realmIndex >= REALMS.length - 1;
+    const nextXp = isMaxRealm ? 0 : (typeof getRealmThreshold === 'function') ? getRealmThreshold((player.realmIndex || 0) + 1) : 0;
+    const xpPct = nextXp ? Math.min(100, Math.max(0, player.xp / nextXp * 100)) : (isMaxRealm ? 100 : 0);
+    const slotKeys = typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {});
+    if (characterEquipmentDetailSlot && !slotKeys.includes(characterEquipmentDetailSlot)) characterEquipmentDetailSlot = null;
+    const slots = slotKeys.map(slot => {
+      const item = player.equipment?.[slot];
+      const slotInfo = SLOT_NAMES?.[slot] || { name: slot, icon: itemIconDom(null, slot) };
+      const stats = item ? itemPrimaryStatsHtmlDom(item, 2) : '<span class="stat-chip empty">空槽位</span>';
       const color = item ? (item.rarityColor || '#d4a0ff') : '#5a4b68';
-      return `<div class="char-equip-card${item ? '' : ' empty'}" style="--rarity-color:${escapeHtml(color)}">
-        <div class="eq-icon"><span>${escapeHtml(item ? itemIconDom(item) : '＋')}</span>${item ? `<i>${escapeHtml(rarityShortDom(item.rarity))}</i>` : ''}</div>
-        <div class="eq-info"><div class="eq-name-row"><b>${slot}</b><span>${item ? escapeHtml(item.name) : '未装备'}</span></div><div class="eq-stats">${stats}</div></div>
-      </div>`;
+      const level = item ? equipmentEnhanceLevelDom(item) : 0;
+      const active = characterEquipmentDetailSlot === slot;
+      const displayName = item ? `${item.name}${level > 0 ? ` +${level}` : ''}` : '未装备';
+      return `<button class="char-equip-card${item ? '' : ' empty'}${active ? ' active' : ''}" type="button" data-char-equip-slot="${escapeHtml(slot)}" style="--rarity-color:${escapeHtml(color)}" aria-label="查看${escapeHtml(slotInfo.name)}详情">
+        <div class="eq-icon"><span>${escapeHtml(item ? itemIconDom(item, slot) : (slotInfo.icon || itemIconDom(null, slot)))}</span>${item ? `<i>${escapeHtml(rarityShortDom(item.rarity))}</i>` : '<i>空</i>'}</div>
+        <div class="eq-info"><div class="eq-name-row"><b>${escapeHtml(slotInfo.name)}</b><span>${escapeHtml(displayName)}</span></div><div class="eq-stats">${stats}</div></div>
+      </button>`;
     }).join('');
+    const detailSlot = characterEquipmentDetailSlot;
+    const detailItem = detailSlot ? player.equipment?.[detailSlot] : null;
+    const detailLabel = detailSlot ? (SLOT_NAMES?.[detailSlot]?.name || detailSlot) : '';
+    const detailHtml = itemDetailHtmlDom(detailItem ? { type: 'detail', item: detailItem, label: detailLabel, slot: detailSlot } : null, '点上方装备槽查看详情，可强化或卸下');
     const html = `
       <div class="char-head"><div><div class="char-title">👤 角色属性</div><div class="char-sub">${realm} · 第 ${dungeonLevel} 层 · (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><button class="char-close">×</button></div>
       <div class="char-body">
-        <div class="char-section char-realm"><div class="realm-name">${realm}</div><div class="stones">灵石 ${player.spiritStones || 0}</div><div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">经验 ${player.xp || 0} / ${nextXp || 'MAX'}</div></div>
+        <div class="char-section char-realm"><div class="realm-name">${realm}</div><div class="stones">灵石 ${player.spiritStones || 0}</div><div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div></div>
         <div class="char-stats-grid">
           <div><b>${player.hp}</b><span>/ ${player.maxHp}</span><em>生命</em></div>
           <div><b>${player.mp}</b><span>/ ${player.maxMp}</span><em>灵力</em></div>
           <div><b>${player.atk}</b><span></span><em>攻击</em></div>
           <div><b>${player.def}</b><span></span><em>防御</em></div>
-          <div><b>${player.skillPoints || 0}</b><span></span><em>技能点</em></div>
-          <div><b>${(player.inventory || []).length}</b><span></span><em>物品</em></div>
+          <div><b>${availableSkillPoints || 0}</b><span></span><em>技能点</em></div>
+          <div><b>${(player.inventory || []).length}</b><span></span><em>背包装备</em></div>
         </div>
         <div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div>
-        <div class="char-section"><h3>当前装备</h3><div class="char-equip-grid">${slots}</div></div>
+        <div class="char-section char-equipment-section"><h3>当前装备 <small>点击槽位看详情</small></h3><div class="char-equip-grid">${slots}</div></div>
+        <div class="char-section char-equip-detail-section"><h3>装备详情</h3><div class="char-detail-wrap">${detailHtml}</div></div>
       </div>`;
     if (html !== characterPanelLastHtml) {
       const body = p.querySelector('.char-body');
@@ -1241,6 +1537,7 @@ function generateNewFloor() {
       const nextBody = p.querySelector('.char-body');
       if (nextBody) nextBody.scrollTop = previousScrollTop;
       characterPanelLastHtml = html;
+      bindCharacterPanelActionsDom(p);
     }
   }
   function drawCharacterPanel() {
@@ -1289,11 +1586,7 @@ function generateNewFloor() {
       ctx.fillText(text, x - bw / 2, y + bh / 2 + 0.5);
       ctx.restore();
     };
-    const slotLabels = {
-      weapon: { icon: '⚔️', name: '武器' },
-      armor: { icon: '🛡️', name: '防具' },
-      accessory: { icon: '💍', name: '饰品' }
-    };
+    const slotLabels = Object.fromEntries((typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {})).map(slot => [slot, SLOT_NAMES?.[slot] || { icon: itemIconDom(null, slot), name: slot }]));
     const drawItemIcon = (icon, x, y, size, color, badgeText) => {
       ctx.save();
       ctx.fillStyle = '#0d0715';
@@ -1375,7 +1668,7 @@ function generateNewFloor() {
       const cardY = invY + i * itemStep;
       drawCard(rightX, cardY, rightW, layout.itemH, item.rarityColor || '#d4a0ff', '#180c28');
       const typeName = SLOT_NAMES?.[item.slot]?.name || '';
-      const itemIcon = item.icon || { weapon: '⚔️', armor: '🛡️', accessory: '💍' }[item.slot] || '■';
+      const itemIcon = item.icon || { weapon: '⚔️', helmet: '⛑️', armor: '🛡️', gloves: '🧤', belt: '🪢', pants: '👖', boots: '🥾', accessory: '💍' }[item.slot] || '■';
       const iconSize = compact ? 28 : 32;
       const iconX = rightX + layout.cardPadX;
       const iconY = cardY + Math.floor((layout.itemH - iconSize) / 2);
@@ -1403,21 +1696,35 @@ function generateNewFloor() {
       if (e.target.closest('.pclose')) {
         showSkillTreeUI = false;
         selectedSkillTreeNode = null;
-        syncBodyPanelState();
-      }
-      if (e.target.classList.contains('skill-modal-backdrop') || e.target.closest('.skill-modal-close')) {
         skillDetailModalOpen = false;
-        renderSkillsDomPanel();
+        const layer = document.getElementById('skill-detail-layer');
+        if (layer) layer.innerHTML = '';
+        syncBodyPanelState();
       }
     });
     p.addEventListener('touchstart', e => {
-      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .skill-modal-close, .attr-btn, .pclose, .skill-modal-backdrop')) {
-        skillsLastTouchActionAt = Date.now();
+      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn, .pclose')) {
         e.stopPropagation();
       }
     }, { passive: true });
     document.body.appendChild(p);
     return p;
+  }
+  function ensureSkillDetailLayer() {
+    let layer = document.getElementById('skill-detail-layer');
+    if (layer) return layer;
+    layer = document.createElement('div');
+    layer.id = 'skill-detail-layer';
+    layer.addEventListener('touchstart', e => {
+      if (e.target.closest('.skill-detail-modal, .skill-modal-close, .skill-learn-btn, .skill-forget-btn')) {
+        skillsLastTouchActionAt = Date.now();
+        e.stopPropagation();
+      }
+    }, { passive: true });
+    layer.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    layer.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    document.body.appendChild(layer);
+    return layer;
   }
   function skillTreeShortName(treeName) {
     return String(treeName || '').replace(/[🔥💧⚡⚔️\s]/g, '').replace('功法', '').replace('之道', '') || '技能';
@@ -1438,7 +1745,7 @@ function generateNewFloor() {
   }
   function renderSkillsDomPanel() {
     const p = ensureSkillsDomPanel();
-    const treeNames = ['fire', 'water', 'thunder', 'sword'];
+    const treeNames = Object.keys(SKILL_TREES);
     if (!selectedSkillTreeNode) {
       const firstLearnable = treeNames.flatMap(t => SKILL_TREES[t].skills.map((_, i) => ({ tree: t, index: i })))
         .find(n => {
@@ -1460,6 +1767,22 @@ function generateNewFloor() {
     const selectedEffectText = selectedSkill.effectText || selectedSummary;
     const learnedCount = learnedSkills.length;
     const totalCount = treeNames.reduce((n, t) => n + SKILL_TREES[t].skills.length, 0);
+    const detailHtml = `<div class="detail-kicker">${selectedData.name} · 第 ${selectedIndex + 1} 阶 · ${selectedKindLabel}</div>
+        <div class="detail-title">${selectedSkill.icon || '✦'} ${selectedSkill.name}</div>
+        <div class="detail-status ${selectedState.learned ? 'ok' : selectedState.canLearn ? 'ready' : 'no'}">${selectedStatus}</div>
+        <p class="detail-desc">${selectedSkill.desc}</p>
+        <p class="detail-effect">${selectedEffectText}</p>
+        <div class="detail-tags">${selectedSummary.split(' · ').map(t => `<span>${t}</span>`).join('')}</div>
+        <div class="detail-stats compact-stats">
+          <span>类型 <b>${selectedKindLabel}</b></span>
+          <span>灵力 <b>${selectedSkill.mpCost || 0}</b></span>
+          <span>伤害 <b>${selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—'}</b></span>
+          <span>境界 <b>${skillRealmName(selectedSkill.unlockRealm)}</b></span>
+        </div>
+        <div class="skill-action-row">
+          <button class="skill-learn-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
+          <button class="skill-forget-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
+        </div>`;
     let html = `<div class="panel-head skill-panel-head">
       <span class="ptitle" style="color:#d4a0ff">📜 星盘技能树</span>
       <span class="psub">技能点 ${availableSkillPoints} · 已悟 ${learnedCount}/${totalCount}</span>
@@ -1496,42 +1819,8 @@ function generateNewFloor() {
     });
     html += `</div>
       <aside class="skill-detail-card" style="--branch-color:${selectedData.color}">
-        <div class="detail-kicker">${selectedData.name} · 第 ${selectedIndex + 1} 阶 · ${selectedKindLabel}</div>
-        <div class="detail-title">${selectedSkill.icon || '✦'} ${selectedSkill.name}</div>
-        <div class="detail-status ${selectedState.learned ? 'ok' : selectedState.canLearn ? 'ready' : 'no'}">${selectedStatus}</div>
-        <p class="detail-desc">${selectedSkill.desc}</p>
-        <p class="detail-effect">${selectedEffectText}</p>
-        <div class="detail-tags">${selectedSummary.split(' · ').map(t => `<span>${t}</span>`).join('')}</div>
-        <div class="detail-stats compact-stats">
-          <span>类型 <b>${selectedKindLabel}</b></span>
-          <span>灵力 <b>${selectedSkill.mpCost || 0}</b></span>
-          <span>伤害 <b>${selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—'}</b></span>
-          <span>境界 <b>${skillRealmName(selectedSkill.unlockRealm)}</b></span>
-        </div>
-        <div class="skill-action-row">
-          <button class="skill-learn-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
-          <button class="skill-forget-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
-        </div>
+        ${detailHtml}
       </aside>
-      ${skillDetailModalOpen ? `<div class="skill-modal-backdrop"><aside class="skill-detail-card skill-detail-modal" style="--branch-color:${selectedData.color}">
-        <button class="skill-modal-close" aria-label="关闭技能详情">×</button>
-        <div class="detail-kicker">${selectedData.name} · 第 ${selectedIndex + 1} 阶 · ${selectedKindLabel}</div>
-        <div class="detail-title">${selectedSkill.icon || '✦'} ${selectedSkill.name}</div>
-        <div class="detail-status ${selectedState.learned ? 'ok' : selectedState.canLearn ? 'ready' : 'no'}">${selectedStatus}</div>
-        <p class="detail-desc">${selectedSkill.desc}</p>
-        <p class="detail-effect">${selectedEffectText}</p>
-        <div class="detail-tags">${selectedSummary.split(' · ').map(t => `<span>${t}</span>`).join('')}</div>
-        <div class="detail-stats compact-stats">
-          <span>类型 <b>${selectedKindLabel}</b></span>
-          <span>灵力 <b>${selectedSkill.mpCost || 0}</b></span>
-          <span>伤害 <b>${selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—'}</b></span>
-          <span>境界 <b>${skillRealmName(selectedSkill.unlockRealm)}</b></span>
-        </div>
-        <div class="skill-action-row">
-          <button class="skill-learn-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
-          <button class="skill-forget-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
-        </div>
-      </aside></div>` : ''}
       <div class="attr-bar skill-attr-bar">
         <span class="attr-title">属性加点</span>`;
     const attrBtns = [['atk','攻+3','#ff6644'],['def','防+2','#4488ff'],['hp','命+20','#55ff55'],['mp','灵+10','#aaddff']];
@@ -1541,54 +1830,57 @@ function generateNewFloor() {
     }
     html += `</div></div>`;
     p.innerHTML = html;
+    const detailLayer = ensureSkillDetailLayer();
+    detailLayer.innerHTML = skillDetailModalOpen ? `<div class="skill-modal-backdrop"><aside class="skill-detail-card skill-detail-modal" style="--branch-color:${selectedData.color}">
+        <button class="skill-modal-close" aria-label="关闭技能详情">×</button>
+        ${detailHtml}
+      </aside></div>` : '';
+    // Click backdrop or close button to dismiss modal
+    const backdropEl = detailLayer.querySelector('.skill-modal-backdrop');
+    if (backdropEl) {
+      backdropEl.addEventListener('click', e => {
+        if (e.target === backdropEl || e.target.closest('.skill-modal-close')) {
+          skillDetailModalOpen = false;
+          renderSkillsDomPanel();
+        }
+      }, { once: true });
+    }
     p.querySelectorAll('.skill-node').forEach(el => {
-      el.addEventListener('click', e => {
-        e.stopPropagation();
+      const openSkillDetail = () => {
         selectedSkillTreeNode = { tree: el.dataset.tree, index: parseInt(el.dataset.index, 10) || 0 };
-        skillDetailModalOpen = window.innerWidth <= 620;
+        // 只响应真正点击；滑动技能树时不弹详情，避免滚动误触。
+        skillDetailModalOpen = true;
         renderSkillsDomPanel();
-      });
+      };
+      bindInventoryTapDom(el, openSkillDetail);
     });
-    p.querySelectorAll('.skill-learn-btn:not([disabled])').forEach(el => {
+    document.querySelectorAll('#skills-dom-panel .skill-learn-btn:not([disabled]), #skill-detail-layer .skill-learn-btn:not([disabled])').forEach(el => {
       const fn = () => {
         const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
         if (learnSkill(t, idx)) {
           showMessage(`习得技能: 【${SKILL_TREES[t].skills[idx].name}】！`, '#ffdd44');
           selectedSkillTreeNode = { tree: t, index: idx };
+          skillDetailModalOpen = true;
           renderSkillsDomPanel();
         }
       };
-      el.addEventListener('click', e => {
-        e.stopPropagation();
-        if (Date.now() - skillsLastTouchActionAt < 450) return;
-        fn();
-      });
-      el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); fn(); }, { passive: false });
+      bindInventoryTapDom(el, fn);
     });
-    p.querySelectorAll('.skill-forget-btn:not([disabled])').forEach(el => {
+    document.querySelectorAll('#skills-dom-panel .skill-forget-btn:not([disabled]), #skill-detail-layer .skill-forget-btn:not([disabled])').forEach(el => {
       const fn = () => {
         const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
         if (typeof unlearnSkill === 'function' && unlearnSkill(t, idx)) {
           showMessage(`遗忘技能: 【${SKILL_TREES[t].skills[idx].name}】，返还 1 点技能点`, '#aaddff');
           selectedSkillTreeNode = { tree: t, index: idx };
+          skillDetailModalOpen = true;
           renderSkillsDomPanel();
         }
       };
-      el.addEventListener('click', e => {
-        e.stopPropagation();
-        if (Date.now() - skillsLastTouchActionAt < 450) return;
-        fn();
-      });
-      el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); fn(); }, { passive: false });
+      bindInventoryTapDom(el, fn);
     });
     p.querySelectorAll('.attr-btn:not(.disabled)').forEach(el => {
       const fn = () => { allocateAttr(el.dataset.attr); renderSkillsDomPanel(); };
-      el.addEventListener('click', e => {
-        e.stopPropagation();
-        if (Date.now() - skillsLastTouchActionAt < 450) return;
-        fn();
-      });
-      el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); fn(); }, { passive: false });
+      bindInventoryTapDom(el, fn);
     });
   }
 
@@ -1627,7 +1919,8 @@ function generateNewFloor() {
     p.innerHTML = html;
     p.querySelectorAll('.recipe-card:not(.cant-craft)').forEach(el => {
       const fn = () => { craftPill(parseInt(el.dataset.recipe)); renderAlchemyDomPanel(); };
-      el.addEventListener('click', fn); el.addEventListener('touchstart', e => { e.preventDefault(); fn(); }, { passive: false });
+      // 炼丹卡片也只响应真正点击；滑动丹方列表不触发炼制。
+      bindInventoryTapDom(el, fn);
     });
   }
 
@@ -1644,16 +1937,17 @@ function generateNewFloor() {
   function renderBreakthroughDomPanel() {
     const p = ensureBreakthroughDomPanel();
     const next = REALMS[player.realmIndex + 1];
+    const hasBreakthrough = breakthroughQueue && next;
     p.innerHTML = `<div class="panel-head">
       <span class="ptitle" style="color:#ffdd44">⚡ 渡劫突破 ⚡</span>
-      <span class="psub">经验已满，突破成功率 80%</span>
+      <span class="psub">${hasBreakthrough ? '经验已满，突破成功率 80%' : (next ? '经验不足，继续修炼' : '已达顶峰')}</span>
       <button class="pclose">×</button>
     </div><div class="panel-body">
       <div class="bt-info">
         <div class="bt-realm">当前境界: ${player.realm.name}</div>
         <div class="bt-next">下一境界: ${next?.name||'顶峰'}</div>
       </div>
-      <button class="bt-btn" id="bt-go-btn"${next?'':' disabled style="opacity:0.4"'}">「尝试突破」</button>
+      <button class="bt-btn" id="bt-go-btn"${hasBreakthrough?'':' disabled style="opacity:0.4"'}">${hasBreakthrough ? '「尝试突破」' : (next ? '经验不足，无法突破' : '已至顶峰')}</button>
     </div>`;
     const btn = document.getElementById('bt-go-btn');
     if (btn && !btn.disabled) {
@@ -1672,24 +1966,25 @@ function generateNewFloor() {
      // DOM HD panel handles rendering
      return;
    }
-   function drawDeathScreen() {
-     if (combatState !== COMBAT_STATE.DEFEAT) return;
-     // Full dark overlay with red tint
-     ctx.fillStyle = 'rgba(80,0,0,0.85)';
-     ctx.fillRect(0, 0, canvasW, canvasH);
-     ctx.fillStyle = '#ff3333';
-     ctx.font = '36px "KaiTi","SimSun",serif';
-     ctx.textAlign = 'center';
-     ctx.fillText('💀 你已陨落 💀', canvasW / 2, canvasH / 2 - 80);
-     ctx.fillStyle = '#ff8844';
-     ctx.font = '18px "KaiTi","SimSun",serif';
-     ctx.fillText(`境界【${player.realm.name}】护住了你的魂魄`, canvasW / 2, canvasH / 2 - 30);
-     ctx.fillStyle = '#d4c8b0';
-     ctx.font = '16px "KaiTi","SimSun",serif';
-     ctx.fillText('装备和灵石已遗失，但修为尚在...', canvasW / 2, canvasH / 2 + 10);
-     ctx.fillStyle = '#aaddff';
-     ctx.fillText('即将在深渊入口重生', canvasW / 2, canvasH / 2 + 50);
-     ctx.textAlign = 'start';
+  function drawDeathScreen() {
+    if (combatState !== COMBAT_STATE.DEFEAT) {
+      const ds = document.getElementById('death-dom-screen');
+      if (ds) ds.classList.remove('active');
+      return;
+    }
+    // Show DOM death screen for crisp text on mobile
+    const ds = document.getElementById('death-dom-screen');
+    if (ds && !ds.classList.contains('active')) {
+      ds.innerHTML = `<div class="death-title">💀 你已陨落 💀</div>
+        <div class="death-realm">境界【${player.realm.name}】护住了你的魂魄</div>
+        <div class="death-msg">装备和灵石已遗失，但修为尚在...</div>
+        <div class="death-respawn">正在深渊入口重生...</div>`;
+      ds.classList.add('active');
+    }
+    // Canvas dark overlay as fallback / visual reinforcement
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, canvasW, canvasH);
+    ctx.textAlign = 'start';
    }
    function drawBreakthroughUI() {
      if (!showBreakthroughUI) return;
@@ -1827,6 +2122,7 @@ function generateNewFloor() {
      showMessage('踏入无尽深渊，仙途由此开始...', '#d4a0ff');
    });
    // Expose for debugging
+   window.player = player;
    window.TILE = TILE;
    window.DUNGEON_WIDTH = DUNGEON_WIDTH;
    window.DUNGEON_HEIGHT = DUNGEON_HEIGHT;

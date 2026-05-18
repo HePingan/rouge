@@ -25,18 +25,84 @@ function combatLog(text, color = '#d4c8b0') {
   combatLogBuffer.push({ text, color });
   if (combatLogBuffer.length > 8) combatLogBuffer.shift();
 }
+function equipmentAbilityValue(key) {
+  return typeof getEquipmentAbility === 'function' ? Number(getEquipmentAbility(key) || 0) : 0;
+}
+function applyEquipmentOnHitEffects(damage, crit) {
+  if (!player || !currentEnemy || currentEnemy.hp <= 0) return;
+  const lifesteal = equipmentAbilityValue('lifesteal');
+  if (lifesteal > 0 && damage > 0) {
+    const heal = Math.max(1, Math.floor(damage * lifesteal / 100));
+    player.hp = Math.min(player.maxHp, player.hp + heal);
+    combatLog(`🩸 装备吸血回复 ${heal} 生命`, '#ff99aa');
+  }
+  const burnChance = equipmentAbilityValue('burnOnHit');
+  if (burnChance > 0 && Math.random() * 100 < burnChance && typeof addCombatStatus === 'function') {
+    addCombatStatus(currentEnemy, { type: 'burn', turns: 2, ratio: 0.18, sourceAtk: player.atk });
+    combatLog('🔥 套装触发灼烧', '#ff8844');
+  }
+  const freezeChance = equipmentAbilityValue('freezeOnHit');
+  if (freezeChance > 0 && Math.random() * 100 < freezeChance && typeof addCombatStatus === 'function') {
+    addCombatStatus(currentEnemy, { type: 'freeze', turns: 1 });
+    combatLog('❄️ 套装触发冻结', '#88ccff');
+  }
+  const weakenChance = equipmentAbilityValue('weakenOnHit');
+  const critWeaken = crit ? equipmentAbilityValue('critWeaken') : 0;
+  if ((weakenChance > 0 && Math.random() * 100 < weakenChance) || critWeaken > 0) {
+    if (typeof addCombatStatus === 'function') addCombatStatus(currentEnemy, { type: 'weaken', turns: 2, ratio: critWeaken || 0.15 });
+    combatLog('🌑 装备削弱敌人攻击', '#c0a0ff');
+  }
+}
+function applyEquipmentTurnRegen() {
+  if (!player) return;
+  const hpRegen = equipmentAbilityValue('hpRegen');
+  const mpRegen = equipmentAbilityValue('mpRegen');
+  let parts = [];
+  if (hpRegen > 0 && player.hp < player.maxHp) {
+    const heal = Math.min(Math.floor(hpRegen), player.maxHp - player.hp);
+    if (heal > 0) { player.hp += heal; parts.push(`生命+${heal}`); }
+  }
+  if (mpRegen > 0 && player.mp < player.maxMp) {
+    const mana = Math.min(Math.floor(mpRegen), player.maxMp - player.mp);
+    if (mana > 0) { player.mp += mana; parts.push(`灵力+${mana}`); }
+  }
+  if (parts.length) combatLog(`🌿 装备恢复：${parts.join('、')}`, '#90ee90');
+}
+function applyEquipmentOnVictory() {
+  if (!player) return;
+  const mp = equipmentAbilityValue('killMpRestore');
+  if (mp > 0) player.mp = Math.min(player.maxMp, player.mp + Math.floor(mp));
+  const pct = equipmentAbilityValue('victoryRecoverPct');
+  if (pct > 0) {
+    player.hp = Math.min(player.maxHp, player.hp + Math.floor(player.maxHp * pct));
+    player.mp = Math.min(player.maxMp, player.mp + Math.floor(player.maxMp * pct));
+  }
+}
 function playerAttack() {
   if (combatState !== COMBAT_STATE.PLAYER_TURN) return;
-  const pierce = typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce() : 0;
+  const pierce = (typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce() : 0) + equipmentAbilityValue('armorPen') / 100;
   const defMult = typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
   const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * defMult * (1 - Math.min(0.85, pierce))));
-  const baseDmg = Math.max(1, player.atk - effectiveDef);
-  const critBonus = typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0;
+  let baseDmg = Math.max(1, player.atk - effectiveDef);
+  if (currentEnemy.isBoss) baseDmg = Math.floor(baseDmg * (1 + equipmentAbilityValue('bossDmg') / 100));
+  const critBonus = (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0) + equipmentAbilityValue('crit') / 100;
   const crit = Math.random() < (0.12 + critBonus);
-  const dmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 4));
+  let dmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 4));
+  if (player._shadowCounterReady) { dmg = Math.floor(dmg * (1 + equipmentAbilityValue('shadowCounter'))); player._shadowCounterReady = false; }
   currentEnemy.hp -= dmg;
+  const flameBurst = equipmentAbilityValue('flameBurst');
+  if (flameBurst > 0) { const extra = Math.max(1, Math.floor(player.atk * flameBurst)); currentEnemy.hp -= extra; dmg += extra; combatLog(`🔥 焚天真火追加 ${extra} 火焰伤害`, '#ff8844'); }
   combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}`, '#ffaa44');
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
+  applyEquipmentOnHitEffects(dmg, crit);
+  const extraChance = equipmentAbilityValue('extraHitChance');
+  const thunderChain = equipmentAbilityValue('thunderChain');
+  if (currentEnemy.hp > 0 && ((extraChance > 0 && Math.random() * 100 < extraChance) || (thunderChain > 0 && Math.random() < thunderChain))) {
+    const ratio = thunderChain > 0 ? 0.5 : 0.35;
+    const extra = Math.max(1, Math.floor(baseDmg * ratio));
+    currentEnemy.hp -= extra;
+    combatLog(`⚡ 装备连击追加 ${extra} 点伤害`, '#d9c3ff');
+  }
   // Effects
   const wx = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
   const wy = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
@@ -45,6 +111,7 @@ function playerAttack() {
   if (currentEnemy.hp <= 0) {
     currentEnemy.hp = 0;
     if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
+    applyEquipmentOnVictory();
     combatLog(`✅ 你击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
@@ -80,6 +147,15 @@ function enemyAttack() {
   if (typeof tickEnemyStatusStartTurn === 'function' && tickEnemyStatusStartTurn()) return;
   const attackMult = typeof getEnemyAttackMultiplier === 'function' ? getEnemyAttackMultiplier() : 1;
   const guardMult = typeof getPlayerGuardMultiplier === 'function' ? getPlayerGuardMultiplier() : 1;
+  const dodgeChance = Math.min(0.55, equipmentAbilityValue('dodge') / 100);
+  if (dodgeChance > 0 && Math.random() < dodgeChance) {
+    combatLog(`${currentEnemy.name} 的攻击被你闪避！`, '#88ccff');
+    if (equipmentAbilityValue('shadowCounter') > 0) player._shadowCounterReady = true;
+    if (typeof applyPassiveOnPlayerTurnStart === 'function') applyPassiveOnPlayerTurnStart();
+    applyEquipmentTurnRegen();
+    combatState = COMBAT_STATE.PLAYER_TURN;
+    return;
+  }
   const baseDmg = Math.max(1, Math.floor(currentEnemy.atk * attackMult) - player.def);
   let dmg = Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 3));
   if (currentEnemy._defendDebuff) {
@@ -87,9 +163,19 @@ function enemyAttack() {
     currentEnemy._defendDebuff = false;
   }
   if (guardMult < 1) dmg = Math.max(1, Math.floor(dmg * guardMult));
+  const reduce = equipmentAbilityValue('dmgReduce') / 100;
+  if (reduce > 0) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.7, reduce))));
+  if (equipmentAbilityValue('lowHpGuard') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.5, equipmentAbilityValue('lowHpGuard') / 100))));
+  if (equipmentAbilityValue('frostBarrier') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - equipmentAbilityValue('frostBarrier'))));
   const crit = Math.random() < 0.08;
   if (crit) dmg = Math.floor(dmg * 1.8);
   player.hp -= dmg;
+  const thorns = equipmentAbilityValue('thorns');
+  if (thorns > 0 && currentEnemy) {
+    const reflected = Math.max(1, Math.floor(dmg * thorns / 100));
+    currentEnemy.hp -= reflected;
+    combatLog(`🛡️ 装备反震 ${reflected} 点伤害`, '#aaddff');
+  }
   if (typeof applyPassiveAfterEnemyHit === 'function') applyPassiveAfterEnemyHit(dmg);
   if (typeof tickPlayerStatusesAfterHit === 'function') tickPlayerStatusesAfterHit();
   combatLog(`${currentEnemy.name} 攻击你，造成 ${dmg} 点伤害${crit ? ' 💢重击！' : ''}${guardMult < 1 ? '（护体减免）' : ''}`, '#ff6666');
@@ -105,7 +191,17 @@ function enemyAttack() {
     onDefeat();
     return;
   }
+  if (currentEnemy && currentEnemy.hp <= 0) {
+    currentEnemy.hp = 0;
+    if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
+    applyEquipmentOnVictory();
+    combatLog(`✅ 你反震击败了 ${currentEnemy.name}！`, '#55ff55');
+    combatState = COMBAT_STATE.VICTORY;
+    onVictory();
+    return;
+  }
   if (typeof applyPassiveOnPlayerTurnStart === 'function') applyPassiveOnPlayerTurnStart();
+  applyEquipmentTurnRegen();
   combatState = COMBAT_STATE.PLAYER_TURN;
 }
 function onVictory() {
@@ -114,12 +210,17 @@ function onVictory() {
   player.gainXp(xpReward);
   player.addSpiritStones(stonesReward);
   // Loot drop (bosses drop extra)
-  const lootCount = currentEnemy.isBoss ? 2 : 1;
+  const lootCount = currentEnemy.isBoss ? 3 : (Math.random() < 0.35 ? 2 : 1);
   let msg = `获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
   if (currentEnemy.isBoss) msg += ' | 👑 Boss击杀！';
+  const MAX_INVENTORY = 24;
   for (let l = 0; l < lootCount; l++) {
-    const loot = generateLootDrop(dungeonLevel);
+    const loot = generateLootDrop(dungeonLevel, currentEnemy);
     if (loot) {
+      if (player.inventory.length >= MAX_INVENTORY) {
+        msg += ` | ⚠️ 背包已满，${loot.name} 无法拾取`;
+        break;
+      }
       player.inventory.push(loot);
       msg += ` | 🎁 掉落: ${loot.name}`;
     }
