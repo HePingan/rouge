@@ -3,6 +3,7 @@ const COMBAT_STATE = { IDLE: 0, PLAYER_TURN: 1, ENEMY_TURN: 2, VICTORY: 3, DEFEA
 let combatState = COMBAT_STATE.IDLE;
 let currentEnemy = null;
 let combatLogBuffer = [];
+let combatLogSeq = 0;
 function resetTemporaryCombatBuffs() {
   if (!player) return;
   if (!player.tempAtkBuff && !player.tempDefBuff && !player._statusEffects && !player._combatTriggers) return;
@@ -14,16 +15,31 @@ function resetTemporaryCombatBuffs() {
 }
 function startCombat(enemy) {
   currentEnemy = enemy;
+  if (!currentEnemy._statusEffects) currentEnemy._statusEffects = [];
+  if (!currentEnemy._skillCooldowns) currentEnemy._skillCooldowns = {};
+  if (!currentEnemy._buffs) currentEnemy._buffs = [];
   combatState = COMBAT_STATE.PLAYER_TURN;
   combatLogBuffer = [];
   if (typeof applyPassiveOnCombatStart === 'function') applyPassiveOnCombatStart();
-  combatLog(`⚔️ ${enemy.name} 出现了！`, '#ff6644');
-  showMessage(`${enemy.name} 挡住了去路！`, '#ff6644');
+  const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(enemy) : [];
+  const skillText = enemySkills.length ? ` · 技能：${enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、')}` : '';
+  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${skillText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
+  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${skillText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
   document.body.classList.add('combat-active');
 }
+function getCombatLogTone(text, color = '#d4c8b0') {
+  const s = String(text || '');
+  if (/击败|获得|掉落|成功|回复|恢复|回春|回元|返还/.test(s)) return 'good';
+  if (/造成\s*\d+|攻击|使用|施放|追加|暴击|重击|连击|追伤/.test(s)) return 'hit';
+  if (/被击败|失败|中毒|灼烧|诅咒|迟缓|束缚|灵力不足|遗失/.test(s)) return 'bad';
+  if (/防御|护体|减免|闪避|冻结|麻痹|削弱|破防|护甲/.test(s)) return 'status';
+  if (/出现|挡住|Boss|技能/.test(s)) return 'info';
+  return /^#(55|66|88|99|aa|bb|cc|dd|ee|ff)/i.test(String(color || '')) ? 'info' : 'neutral';
+}
 function combatLog(text, color = '#d4c8b0') {
-  combatLogBuffer.push({ text, color });
-  if (combatLogBuffer.length > 8) combatLogBuffer.shift();
+  const entry = { text, color, tone: getCombatLogTone(text, color), seq: ++combatLogSeq };
+  combatLogBuffer.push(entry);
+  if (combatLogBuffer.length > 12) combatLogBuffer.shift();
 }
 function equipmentAbilityValue(key) {
   return typeof getEquipmentAbility === 'function' ? Number(getEquipmentAbility(key) || 0) : 0;
@@ -82,7 +98,8 @@ function playerAttack() {
   if (combatState !== COMBAT_STATE.PLAYER_TURN) return;
   const pierce = (typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce() : 0) + equipmentAbilityValue('armorPen') / 100;
   const defMult = typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
-  const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * defMult * (1 - Math.min(0.85, pierce))));
+  const buffDefMult = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
+  const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * buffDefMult * defMult * (1 - Math.min(0.85, pierce))));
   let baseDmg = Math.max(1, player.atk - effectiveDef);
   if (currentEnemy.isBoss) baseDmg = Math.floor(baseDmg * (1 + equipmentAbilityValue('bossDmg') / 100));
   const critBonus = (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0) + equipmentAbilityValue('crit') / 100;
@@ -141,34 +158,74 @@ function playerFlee() {
     setTimeout(enemyAttack, 500);
   }
 }
-function enemyAttack() {
-  if (combatState !== COMBAT_STATE.ENEMY_TURN) return;
-  if (!currentEnemy || currentEnemy.hp <= 0) return;
-  if (typeof tickEnemyStatusStartTurn === 'function' && tickEnemyStatusStartTurn()) return;
+function getPlayerTakenDamageMultiplier() {
+  if (!player || !player._statusEffects) return 1;
+  let mult = 1;
+  for (const st of player._statusEffects) {
+    if (st.type === 'curse') mult *= 1 + (st.ratio || 0.15);
+    if (st.type === 'slow') mult *= 1 + (st.ratio || 0.10);
+    if (st.type === 'entangle') mult *= 1 + (st.ratio || 0.12);
+  }
+  return mult;
+}
+
+function addPlayerDebuff(status) {
+  if (!player || typeof addCombatStatus !== 'function') return;
+  addCombatStatus(player, status);
+}
+
+function tickPlayerStatusStartEnemyTurn() {
+  if (!player || !player._statusEffects) return false;
+  for (const st of player._statusEffects) {
+    if (st.type === 'poison' || st.type === 'burn') {
+      const dmg = Math.max(1, Math.floor((currentEnemy?.atk || 1) * (st.ratio || 0.08)));
+      player.hp -= dmg;
+      combatLog(`${st.type === 'poison' ? '☠️ 中毒' : '🔥 灼烧'}造成 ${dmg} 点伤害`, st.type === 'poison' ? '#99dd66' : '#ff8844');
+      if (player.hp <= 0) {
+        player.hp = 0;
+        combatLog('💀 你被持续伤害击败了...', '#ff3333');
+        combatState = COMBAT_STATE.DEFEAT;
+        onDefeat();
+        return true;
+      }
+    }
+    if (st.type === 'poison' || st.type === 'burn' || st.type === 'curse' || st.type === 'slow' || st.type === 'entangle') st.turns -= 1;
+  }
+  player._statusEffects = player._statusEffects.filter(st => st.turns > 0);
+  return false;
+}
+
+function tickEnemyBuffsStartTurn() {
+  if (!currentEnemy || !currentEnemy._buffs) return;
+  for (const buff of currentEnemy._buffs) buff.turns -= 1;
+  currentEnemy._buffs = currentEnemy._buffs.filter(buff => buff.turns > 0);
+}
+
+function getEnemyDefenseBuffMultiplier() {
+  if (!currentEnemy || !currentEnemy._buffs) return 1;
+  return currentEnemy._buffs.reduce((mult, buff) => mult * (1 + (buff.defRatio || 0)), 1);
+}
+
+function calculateEnemyDamage(mult = 1) {
   const attackMult = typeof getEnemyAttackMultiplier === 'function' ? getEnemyAttackMultiplier() : 1;
   const guardMult = typeof getPlayerGuardMultiplier === 'function' ? getPlayerGuardMultiplier() : 1;
-  const dodgeChance = Math.min(0.55, equipmentAbilityValue('dodge') / 100);
-  if (dodgeChance > 0 && Math.random() < dodgeChance) {
-    combatLog(`${currentEnemy.name} 的攻击被你闪避！`, '#88ccff');
-    if (equipmentAbilityValue('shadowCounter') > 0) player._shadowCounterReady = true;
-    if (typeof applyPassiveOnPlayerTurnStart === 'function') applyPassiveOnPlayerTurnStart();
-    applyEquipmentTurnRegen();
-    combatState = COMBAT_STATE.PLAYER_TURN;
-    return;
-  }
-  const baseDmg = Math.max(1, Math.floor(currentEnemy.atk * attackMult) - player.def);
+  const baseDmg = Math.max(1, Math.floor(currentEnemy.atk * attackMult * mult) - player.def);
   let dmg = Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 3));
   if (currentEnemy._defendDebuff) {
     dmg = Math.floor(dmg * 0.5);
     currentEnemy._defendDebuff = false;
   }
   if (guardMult < 1) dmg = Math.max(1, Math.floor(dmg * guardMult));
+  const takenMult = getPlayerTakenDamageMultiplier();
+  if (takenMult !== 1) dmg = Math.max(1, Math.floor(dmg * takenMult));
   const reduce = equipmentAbilityValue('dmgReduce') / 100;
   if (reduce > 0) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.7, reduce))));
   if (equipmentAbilityValue('lowHpGuard') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.5, equipmentAbilityValue('lowHpGuard') / 100))));
   if (equipmentAbilityValue('frostBarrier') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - equipmentAbilityValue('frostBarrier'))));
-  const crit = Math.random() < 0.08;
-  if (crit) dmg = Math.floor(dmg * 1.8);
+  return { dmg, guardMult, takenMult };
+}
+
+function finishEnemyDamage(dmg, label, color = '#ff6666', crit = false, guardMult = 1, takenMult = 1) {
   player.hp -= dmg;
   const thorns = equipmentAbilityValue('thorns');
   if (thorns > 0 && currentEnemy) {
@@ -178,12 +235,67 @@ function enemyAttack() {
   }
   if (typeof applyPassiveAfterEnemyHit === 'function') applyPassiveAfterEnemyHit(dmg);
   if (typeof tickPlayerStatusesAfterHit === 'function') tickPlayerStatusesAfterHit();
-  combatLog(`${currentEnemy.name} 攻击你，造成 ${dmg} 点伤害${crit ? ' 💢重击！' : ''}${guardMult < 1 ? '（护体减免）' : ''}`, '#ff6666');
-  // Effects
+  combatLog(`${label}，造成 ${dmg} 点伤害${crit ? ' 💢重击！' : ''}${guardMult < 1 ? '（护体减免）' : ''}${takenMult > 1 ? '（负面状态加深）' : ''}`, color);
   const px = player.x * CELL_SIZE + CELL_SIZE / 2;
   const py = player.y * CELL_SIZE + CELL_SIZE / 2;
   if (crit) { spawnHitEffect(px, py); sfxCrit(); }
   else { spawnHitEffect(px, py); sfxHit(); }
+}
+
+function chooseEnemySkill() {
+  const skills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
+  const usable = skills.filter(s => !currentEnemy._skillCooldowns?.[s.name]);
+  for (const skill of usable) {
+    const chance = currentEnemy.isBoss ? Math.min(0.68, (skill.chance || 0.25) + 0.12) : (skill.chance || 0.25);
+    if (Math.random() < chance) return skill;
+  }
+  return null;
+}
+
+function useEnemySkill(skill) {
+  if (!skill || !currentEnemy) return false;
+  if (!currentEnemy._skillCooldowns) currentEnemy._skillCooldowns = {};
+  currentEnemy._skillCooldowns[skill.name] = currentEnemy.isBoss ? 1 : 2;
+  const label = `${skill.icon || '✦'} ${currentEnemy.title || currentEnemy.name}施放【${skill.name}】${skill.log ? `，${skill.log}` : ''}`;
+  if (skill.type === 'selfBuff') {
+    if (!currentEnemy._buffs) currentEnemy._buffs = [];
+    currentEnemy._buffs.push({ ...(skill.buff || { defRatio: 0.15, turns: 2 }) });
+    combatLog(`${label}，防御提升`, skill.color || '#aaddff');
+    return true;
+  }
+  if (skill.type === 'multiHit') {
+    const hits = skill.hits || 2;
+    let total = 0;
+    let guardMult = 1;
+    let takenMult = 1;
+    for (let i = 0; i < hits; i++) {
+      const result = calculateEnemyDamage(skill.mult || 0.6);
+      total += result.dmg;
+      guardMult = result.guardMult;
+      takenMult = result.takenMult;
+    }
+    finishEnemyDamage(total, `${label}（${hits}段）`, skill.color || '#ff6666', false, guardMult, takenMult);
+    return true;
+  }
+  const result = calculateEnemyDamage(skill.mult || 1);
+  finishEnemyDamage(result.dmg, label, skill.color || '#ff6666', false, result.guardMult, result.takenMult);
+  if (skill.type === 'drain' && currentEnemy.hp > 0) {
+    const heal = Math.max(1, Math.floor(result.dmg * (skill.healRatio || 0.45)));
+    currentEnemy.hp = Math.min(currentEnemy.maxHp, currentEnemy.hp + heal);
+    combatLog(`👻 ${currentEnemy.name} 回复 ${heal} 生命`, skill.color || '#88a0ff');
+  }
+  if ((skill.type === 'damageStatus' || skill.type === 'damageDebuff') && skill.status) {
+    addPlayerDebuff({ ...skill.status, sourceAtk: currentEnemy.atk });
+    combatLog(`${skill.status.type === 'poison' ? '☠️ 毒素' : '🔥 灼烧'}缠身 ${skill.status.turns || 2} 回合`, skill.color || '#ff8844');
+  }
+  if ((skill.type === 'damageStatus' || skill.type === 'damageDebuff') && skill.debuff) {
+    addPlayerDebuff({ ...skill.debuff });
+    combatLog(`⚠️ ${skill.debuff.type === 'curse' ? '诅咒' : skill.debuff.type === 'slow' ? '迟缓' : '束缚'} ${skill.debuff.turns || 1} 回合`, skill.color || '#d4a0ff');
+  }
+  return true;
+}
+
+function finishEnemyTurn() {
   if (player.hp <= 0) {
     player.hp = 0;
     combatLog('💀 你被击败了...', '#ff3333');
@@ -204,13 +316,44 @@ function enemyAttack() {
   applyEquipmentTurnRegen();
   combatState = COMBAT_STATE.PLAYER_TURN;
 }
+
+function enemyAttack() {
+  if (combatState !== COMBAT_STATE.ENEMY_TURN) return;
+  if (!currentEnemy || currentEnemy.hp <= 0) return;
+  if (typeof tickEnemyStatusStartTurn === 'function' && tickEnemyStatusStartTurn()) return;
+  if (tickPlayerStatusStartEnemyTurn()) return;
+  tickEnemyBuffsStartTurn();
+  if (currentEnemy._skillCooldowns) {
+    for (const key of Object.keys(currentEnemy._skillCooldowns)) {
+      currentEnemy._skillCooldowns[key] -= 1;
+      if (currentEnemy._skillCooldowns[key] <= 0) delete currentEnemy._skillCooldowns[key];
+    }
+  }
+  const dodgeChance = Math.min(0.55, equipmentAbilityValue('dodge') / 100);
+  if (dodgeChance > 0 && Math.random() < dodgeChance) {
+    combatLog(`${currentEnemy.name} 的攻击被你闪避！`, '#88ccff');
+    if (equipmentAbilityValue('shadowCounter') > 0) player._shadowCounterReady = true;
+    finishEnemyTurn();
+    return;
+  }
+  const skill = chooseEnemySkill();
+  if (skill && useEnemySkill(skill)) {
+    finishEnemyTurn();
+    return;
+  }
+  const result = calculateEnemyDamage(1);
+  const crit = Math.random() < (currentEnemy.isBoss ? 0.12 : 0.08);
+  const dmg = crit ? Math.floor(result.dmg * 1.8) : result.dmg;
+  finishEnemyDamage(dmg, `${currentEnemy.name} 攻击你`, '#ff6666', crit, result.guardMult, result.takenMult);
+  finishEnemyTurn();
+}
 function onVictory() {
-  const xpReward = currentEnemy.xp || 20;
-  const stonesReward = currentEnemy.stones || 5;
+  const xpReward = Math.ceil((currentEnemy.xp || 20) * 1.35);
+  const stonesReward = Math.ceil((currentEnemy.stones || 5) * 1.45);
   player.gainXp(xpReward);
   player.addSpiritStones(stonesReward);
-  // Loot drop (bosses drop extra)
-  const lootCount = currentEnemy.isBoss ? 3 : (Math.random() < 0.35 ? 2 : 1);
+  // 休闲节奏：地图更短，单场战斗奖励更爽，减少重复刷怪压力
+  const lootCount = currentEnemy.isBoss ? 4 : (Math.random() < 0.65 ? 2 : 1);
   let msg = `获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
   if (currentEnemy.isBoss) msg += ' | 👑 Boss击杀！';
   const MAX_INVENTORY = 24;
@@ -235,13 +378,22 @@ function onVictory() {
       msg += ` | 🔹 ${drop.name}`;
     }
   }
-  showMessage(msg, '#55ff55');
-  // Clear enemy tile (replace with floor) and remove from monsters map
-  if (dungeon) {
+  // Clear enemy tile and remove from monsters map.
+  // Boss guards spawn on the same cell as STAIRS_DOWN, so preserve/reveal the exit.
+  if (dungeon && currentEnemy) {
     const key = `${currentEnemy.x},${currentEnemy.y}`;
-    dungeon.grid[currentEnemy.y][currentEnemy.x] = TILE.FLOOR;
+    const wasBossGuard = !!currentEnemy.isBoss;
+    dungeon.grid[currentEnemy.y][currentEnemy.x] = wasBossGuard ? TILE.STAIRS_DOWN : TILE.FLOOR;
     if (dungeon._monsters) dungeon._monsters.delete(key);
+    if (wasBossGuard) {
+      if (typeof discoveredMap !== 'undefined') discoveredMap.add(key);
+      if (typeof visibleMap !== 'undefined') visibleMap.add(key);
+      if (typeof resetDomMapCache === 'function') resetDomMapCache();
+      combatLog('▽ 守卫倒下，通往下一层的入口显现！', '#ffdd55');
+      msg += ' | ▽ 下一层入口已开启';
+    }
   }
+  showMessage(msg, '#55ff55');
   // Effects
   sfxDrop();
   if (currentEnemy.isBoss) {

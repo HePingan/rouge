@@ -205,10 +205,13 @@ function equipmentSlotKeys() {
 }
 
 const MAX_EQUIPMENT_ENHANCE_LEVEL = 15;
+function getCurrentEquipmentEnhanceCap() {
+  return typeof getRealmEnhanceCap === 'function' ? getRealmEnhanceCap(player?.realmIndex || 0) : MAX_EQUIPMENT_ENHANCE_LEVEL;
+}
 const EQUIPMENT_ENHANCE_PERCENT_STATS = new Set(['crit', 'dodge', 'lifesteal', 'armorPen', 'goldFind', 'xpBonus', 'bossDmg', 'extraHitChance', 'dmgReduce', 'allRes']);
 
 function getEquipmentEnhanceLevel(item) {
-  return Math.max(0, Math.min(MAX_EQUIPMENT_ENHANCE_LEVEL, Number(item?.enhanceLevel) || 0));
+  return Math.max(0, Math.min(getCurrentEquipmentEnhanceCap(), Number(item?.enhanceLevel) || 0));
 }
 
 function getEquipmentEnhanceStat(item) {
@@ -233,7 +236,7 @@ function equipmentEnhanceBonusValue(item, level = getEquipmentEnhanceLevel(item)
   const stat = getEquipmentEnhanceStat(item);
   const baseStats = ensureEquipmentBaseStats(item);
   const base = Math.max(1, Number(item?.baseValue) || Number(baseStats?.[stat]) || Number(item?.stats?.[stat]) || 1);
-  const lv = Math.max(0, Math.min(MAX_EQUIPMENT_ENHANCE_LEVEL, Number(level) || 0));
+  const lv = Math.max(0, Math.min(getCurrentEquipmentEnhanceCap(), Number(level) || 0));
   if (lv <= 0) return 0;
   if (EQUIPMENT_ENHANCE_PERCENT_STATS.has(stat) || stat === 'speed') {
     return Math.max(1, Math.floor(lv * 0.55 + base * lv * 0.08));
@@ -257,7 +260,7 @@ function rebuildEquipmentStats(item) {
 }
 
 function getEquipmentEnhanceCost(item, nextLevel = getEquipmentEnhanceLevel(item) + 1) {
-  const lv = Math.max(1, Math.min(MAX_EQUIPMENT_ENHANCE_LEVEL, Number(nextLevel) || 1));
+  const lv = Math.max(1, Math.min(getCurrentEquipmentEnhanceCap(), Number(nextLevel) || 1));
   const rank = rarityRank(item?.rarity || '普通');
   const floor = Math.max(1, Number(item?.floorLevel) || 1);
   const cost = {
@@ -301,7 +304,8 @@ function enhanceEquipment(item, materials, playerObj, rng = Math.random) {
   if (!item) return { ok: false, reason: 'no_item' };
   rebuildEquipmentStats(item);
   const beforeLevel = getEquipmentEnhanceLevel(item);
-  if (beforeLevel >= MAX_EQUIPMENT_ENHANCE_LEVEL) return { ok: false, reason: 'max_level', beforeLevel, afterLevel: beforeLevel };
+  const maxCap = getCurrentEquipmentEnhanceCap();
+  if (beforeLevel >= maxCap) return { ok: false, reason: 'max_level', beforeLevel, afterLevel: beforeLevel, maxCap };
   const nextLevel = beforeLevel + 1;
   const cost = getEquipmentEnhanceCost(item, nextLevel);
   if (!canPayEquipmentEnhanceCost(cost, materials, playerObj)) return { ok: false, reason: 'not_enough', beforeLevel, afterLevel: beforeLevel, cost };
@@ -312,7 +316,8 @@ function enhanceEquipment(item, materials, playerObj, rng = Math.random) {
   if (success) {
     afterLevel = nextLevel;
   } else if (nextLevel >= 11) {
-    afterLevel = Math.max(10, beforeLevel - 1);
+    const protectedFail = playerObj?.daoFoundation === 'body' && Math.random() < 0.35;
+    afterLevel = protectedFail ? beforeLevel : Math.max(10, beforeLevel - 1);
   }
   item.enhanceLevel = afterLevel;
   rebuildEquipmentStats(item);
@@ -375,7 +380,7 @@ function generateEquipment(floorLevel = 1) {
 
   // Special affixes: ability-like entries, mostly on high rarity equipment
   const specialAffixes = [];
-  const specialSlots = Math.max(0, rarityRank(rarity.name) - 2);
+  const specialSlots = (player?.realmIndex || 0) >= 1 ? Math.max(0, rarityRank(rarity.name) - 2) : 0;
   const availableSpecials = SPECIAL_AFFIXES.filter(a => rarityRank(rarity.name) >= rarityRank(a.minRarity) && !usedStats.has(a.stat));
   for (let i = 0; i < specialSlots && availableSpecials.length > 0; i++) {
     if (Math.random() > 0.72) continue;
@@ -388,7 +393,7 @@ function generateEquipment(floorLevel = 1) {
   affixes.push(...specialAffixes);
 
   // Optional set identity; matching pieces unlock 2/4/6/8-piece abilities
-  const set = rollEquipmentSet(rarity.name, floorLevel);
+  const set = (player?.realmIndex || 0) >= 2 ? rollEquipmentSet(rarity.name, floorLevel) : null;
 
   // Pick sub-type & icon for more visual variety
   const types = slotInfo.subTypes || [{ name: slotInfo.name, icon: slotInfo.icon || '■' }];
@@ -435,8 +440,8 @@ function generateEquipment(floorLevel = 1) {
 // Generate drop from a monster kill
 function generateLootDrop(floorLevel = 1, enemy = null) {
   const roll = Math.random();
-  const dropChance = enemy?.isBoss ? 0.9 : 0.58;
-  if (roll > dropChance) return null; // normal 58%, boss 90% per roll
+  const dropChance = enemy?.isBoss ? 1.0 : 0.72;
+  if (roll > dropChance) return null; // normal 72%, boss guaranteed per roll
   return generateEquipment(floorLevel);
 }
 
@@ -486,24 +491,15 @@ function removeEquipmentStats(player, equipment) {
 function equipItem(player, invIndex) {
   if (invIndex < 0 || invIndex >= player.inventory.length) return false;
   const item = player.inventory[invIndex];
-  if (!item) return false;
+  if (!item || !item.slot) return false;
 
-  // Unequip current item in same slot
-  const current = player.equipment[item.slot];
-  if (current) {
-    removeEquipmentStats(player, current);
-    if (player.inventory.length >= 24) {
-      // Inventory full — drop old item on the ground (lost)
-      showMessage(`⚠️ 背包已满，${current.name} 被丢弃`, '#ff8844');
-    } else {
-      player.inventory.push(current);
-    }
-  }
-
-  // Equip new item
+  const current = player.equipment[item.slot] || null;
+  // Replace in-place first: when the bag is full, the old equipment occupies the new item's old slot.
+  // This avoids silently deleting equipped gear during a full-bag replacement.
+  player.inventory.splice(invIndex, 1, current);
+  if (!current) player.inventory.splice(invIndex, 1);
   player.equipment[item.slot] = item;
-  player.inventory.splice(invIndex, 1);
-  applyEquipmentStats(player, item);
+  if (typeof player.recalcStats === 'function') player.recalcStats();
   autoSave();
   return true;
 }
@@ -512,15 +508,13 @@ function equipItem(player, invIndex) {
 function unequipItem(player, slot) {
   const item = player.equipment[slot];
   if (!item) return false;
-  removeEquipmentStats(player, item);
-  player.equipment[slot] = null;
   if (player.inventory.length >= 24) {
     showMessage(`⚠️ 背包已满，无法取下 ${item.name}`, '#ff4444');
-    player.equipment[slot] = item;
-    applyEquipmentStats(player, item);
     return false;
   }
+  player.equipment[slot] = null;
   player.inventory.push(item);
+  if (typeof player.recalcStats === 'function') player.recalcStats();
   autoSave();
   return true;
 }

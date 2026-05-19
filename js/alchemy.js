@@ -42,6 +42,14 @@ const RECIPES = [
     materials: { soulJade: 2, starDust: 1 }, difficulty: 5,
   },
   {
+    name: '破境丹', desc: '下次突破成功率 +12%', effect: 'breakthroughChance', value: 0.12, color: '#ffdd66',
+    materials: { ginseng: 2, soulJade: 1, starDust: 1 }, difficulty: 5,
+  },
+  {
+    name: '固元丹', desc: '下次突破失败少损失经验', effect: 'breakthroughProtect', value: 1, color: '#88ffcc',
+    materials: { stoneMarrow: 4, dragonScale: 1, soulJade: 1 }, difficulty: 4,
+  },
+  {
     name: '涅槃丹', desc: '满血满灵复活', effect: 'fullRestore', value: 1, color: '#ff3366',
     materials: { phoenixFeather: 3, soulJade: 2, starDust: 1 }, difficulty: 6,
   },
@@ -51,7 +59,8 @@ let playerMaterials = {};  // { materialId: count }
 let showAlchemyUI = false;
 // ─── Scatter materials on dungeon floor ───
 function scatterMaterials(dungeonObj, floorLevel) {
-  const count = 8 + Math.floor(floorLevel * 2);
+  const roomCount = Math.max(1, (dungeonObj.rooms || []).length);
+  const count = Math.min(18, Math.max(8, Math.floor(roomCount * 1.6) + Math.floor(floorLevel * 0.8)));
   const rooms = dungeonObj.rooms;
   dungeonObj._materials = dungeonObj._materials || [];
   for (let i = 0; i < count; i++) {
@@ -155,6 +164,15 @@ function craftPill(recipeIndex) {
       case 'gainXp':
         player.gainXp(recipe.value);
         showMessage(`服用【${recipe.name}】！获得 ${recipe.value} 经验`, '#aa44ff');
+        if (typeof checkBreakthrough === 'function') checkBreakthrough();
+        break;
+      case 'breakthroughChance':
+        player.breakthroughChanceBonus = Math.min(0.24, Number(player.breakthroughChanceBonus || 0) + recipe.value);
+        showMessage(`服用【${recipe.name}】！下次突破成功率提升`, '#ffdd66');
+        break;
+      case 'breakthroughProtect':
+        player.breakthroughProtect = Math.max(Number(player.breakthroughProtect || 0), Number(recipe.value || 1));
+        showMessage(`服用【${recipe.name}】！下次突破失败将护住根基`, '#88ffcc');
         break;
       case 'fullRestore':
         player.hp = player.maxHp;

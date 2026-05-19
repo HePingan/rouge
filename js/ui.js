@@ -56,8 +56,12 @@ function showMessage(text, color = '#d4c8b0') {
 function renderMessageLog() {
   const container = document.getElementById('message-log');
   if (!container) return;
+  const escape = typeof escapeHtml === 'function'
+    ? escapeHtml
+    : value => String(value ?? '').replace(/[&<>\"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[ch]));
+  const safeColor = color => /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#d4c8b0';
   container.innerHTML = messageQueue.map(m =>
-    `<div class="msg" style="color:${m.color}">${m.text}</div>`
+    `<div class="msg" style="color:${safeColor(m.color)}">${escape(m.text)}</div>`
   ).join('');
 }
 

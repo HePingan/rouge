@@ -7,6 +7,15 @@
      let dungeonLevel = 1;
      let keys = {};
      let gameTicks = 0;
+     let discoveredMap = new Set();
+     let visibleMap = new Set();
+     let mapRenderCache = {
+       floorKey: '', boundsKey: '', visibilityKey: '', entityKey: '', hintKey: '', miniKey: '',
+       lastPx: NaN, lastPy: NaN, tilesEl: null, entitiesEl: null, hintsEl: null, miniEl: null, playerEl: null,
+       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: ''
+     };
+     const MAP_VISION_RADIUS = 8;
+     const MAP_MEMORY_RADIUS = 11;
      // Character panel state. Must be declared before gameLoop/openPanel reads it;
      // otherwise ReferenceError stops rendering and makes the map/buttons look dead.
      let showCharacterPanel = false;
@@ -14,9 +23,15 @@
      let characterPanelLastHtml = '';
      let characterEquipmentDetailSlot = null;
     let inventoryBulkRarity = '普通';
+    let inventoryBulkMode = 'sell';
+    let inventoryTab = 'equipment';
+    let inventoryBulkConfirm = null;
+    let inventoryDetailScrollKey = '';
     let selectedSkillTreeNode = null;
     let skillDetailModalOpen = false;
+    let combatSkillDrawerOpen = false;
     let skillsLastTouchActionAt = 0;
+    let selectedDaoFoundation = 'sword';
     let inventoryLastTouchActionAt = 0;
     const INVENTORY_TAP_MOVE_THRESHOLD = 12;
      function markInventoryTouchActionDom() {
@@ -141,6 +156,9 @@
     document.getElementById('touch-controls').classList.add('show');
     setupTouchControls();
     setupCanvasClicks();
+     window.player = player;
+     window.dungeon = dungeon;
+     window.gameReady = true;
      setInterval(gameLoop, 1000 / 30);  // 30 FPS
    }
    function resizeCanvas() {
@@ -148,18 +166,39 @@
      canvasH = window.innerHeight;
      canvas.width = canvasW;
      canvas.height = canvasH;
+     if (typeof resetDomMapCache === 'function') resetDomMapCache();
    }
   function isAnyPanelOpen() {
     return showInventory || showCharacterPanel || showSkillTreeUI || showAlchemyUI || showBreakthroughUI;
   }
+  function syncMainNavState() {
+    if (typeof document === 'undefined') return;
+    const map = {
+      'btn-bag': !!showInventory,
+      'btn-character': !!showCharacterPanel,
+      'btn-skills': !!showSkillTreeUI,
+      'btn-more': !!document.getElementById('more-menu')?.classList.contains('open'),
+    };
+    Object.entries(map).forEach(([id, active]) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('active', active);
+    });
+  }
   function syncBodyPanelState() {
-    if (!document.body) return;
-    document.body.classList.toggle('panel-open', isAnyPanelOpen());
+    if (typeof document === 'undefined') return;
+    const open = isAnyPanelOpen();
+    document.body.classList.toggle('panel-open', open);
     document.body.classList.toggle('inventory-open', !!showInventory);
     document.body.classList.toggle('character-open', !!showCharacterPanel);
     document.body.classList.toggle('skills-open', !!showSkillTreeUI);
     document.body.classList.toggle('alchemy-open', !!showAlchemyUI);
     document.body.classList.toggle('breakthrough-open', !!showBreakthroughUI);
+    const moreMenu = document.getElementById('more-menu');
+    if (moreMenu && open) {
+      moreMenu.classList.remove('open');
+      moreMenu.setAttribute('aria-hidden', 'true');
+    }
+    syncMainNavState();
     if (showInventory && typeof renderInventoryDomPanel === 'function') renderInventoryDomPanel();
     if (showCharacterPanel && typeof renderCharacterDomPanel === 'function') renderCharacterDomPanel();
     if (showSkillTreeUI && typeof renderSkillsDomPanel === 'function') renderSkillsDomPanel();
@@ -193,6 +232,14 @@
 }
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  }
+  function safeCssColor(value, fallback = '#d4a0ff') {
+    const s = String(value || '').trim();
+    return /^#[0-9a-f]{3,8}$/i.test(s) || /^rgba?\([0-9\s,.%]+\)$/i.test(s) ? s : fallback;
+  }
+  function cssClassToken(value, fallback = 'x') {
+    const s = String(value || '').trim();
+    return /^[a-z0-9_-]+$/i.test(s) ? s : fallback;
   }
   const ITEM_RARITIES_DOM = ['普通', '魔法', '稀有', '传说', '神话'];
   function rarityShortDom(rarity) {
@@ -291,7 +338,7 @@ function escapeHtml(value) {
     if (!item || typeof getEquipmentEnhanceCost !== 'function') return '';
     if (typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
     const level = equipmentEnhanceLevelDom(item);
-    const maxLevel = typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15;
+    const maxLevel = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
     const stat = equipmentEnhanceStatDom(item);
     const curBonus = item?.enhanceBonus?.[stat] || 0;
     const nextBonus = typeof equipmentEnhanceBonusValue === 'function' ? equipmentEnhanceBonusValue(item, Math.min(maxLevel, level + 1)) : curBonus;
@@ -365,39 +412,98 @@ function escapeHtml(value) {
     if (!player?.inventory) return [];
     return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item?.rarity === rarity);
   }
-  function bulkSellInventoryByRarityDom(rarity) {
+  function bulkBreakdownTotalDom(entries) {
+    const totalGains = {};
+    for (const { item } of entries || []) {
+      const gains = itemBreakdownDom(item);
+      for (const [id, count] of Object.entries(gains)) totalGains[id] = (totalGains[id] || 0) + Number(count || 0);
+    }
+    return totalGains;
+  }
+  function bulkPreviewDom(rarity = inventoryBulkRarity) {
     const entries = inventoryItemsByRarityDom(rarity);
-    if (!entries.length) { showMessage(`没有${rarity}品质装备可售卖`, '#aaa'); return false; }
-    const total = entries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
-    if (!confirmDom(`确认一键售卖 ${entries.length} 件${rarity}装备？\n预计获得：${total} 灵石`)) return false;
-    const indices = new Set(entries.map(entry => entry.index));
-    player.inventory = player.inventory.filter((_, index) => !indices.has(index));
-    player.addSpiritStones(total);
+    const sellValue = entries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
+    const gains = bulkBreakdownTotalDom(entries);
+    const power = entries.reduce((sum, entry) => sum + itemPowerDom(entry.item), 0);
+    const names = entries.slice(0, 4).map(entry => entry.item?.name || '装备');
+    return { rarity, entries, count: entries.length, sellValue, gains, power, names };
+  }
+  function bulkPreviewHtmlDom(preview, mode = inventoryBulkMode) {
+    const count = Number(preview?.count || 0);
+    const reward = mode === 'sell' ? `${preview?.sellValue || 0} 灵石` : materialTextDom(preview?.gains || {});
+    const action = mode === 'sell' ? '售卖' : '分解';
+    const sample = preview?.names?.length ? preview.names.map(escapeHtml).join('、') + (count > preview.names.length ? ` 等${count}件` : '') : '暂无装备';
+    return `<div class="bulk-preview ${count ? '' : 'empty'}">
+      <div class="bulk-preview-main"><b>${escapeHtml(preview?.rarity || '普通')}</b><span>${count ? `${count} 件 · ${action}预览` : '当前品质暂无装备'}</span></div>
+      <div class="bulk-preview-reward ${mode}">${escapeHtml(reward)}</div>
+      <div class="bulk-preview-sample">${sample}</div>
+    </div>`;
+  }
+  function openBulkConfirmDom(mode, rarity) {
+    const preview = bulkPreviewDom(rarity);
+    if (!preview.count) {
+      showMessage(`没有${rarity}品质装备可${mode === 'sell' ? '售卖' : '分解'}`, '#aaa');
+      return false;
+    }
+    inventoryBulkMode = mode;
+    inventoryBulkConfirm = { mode, rarity, stamp: Date.now() };
     inventoryDetailTarget = null;
+    renderInventoryDomPanel();
+    return true;
+  }
+  function closeBulkConfirmDom() {
+    inventoryBulkConfirm = null;
+    renderInventoryDomPanel();
+  }
+  function bulkConfirmLayerHtmlDom() {
+    if (!inventoryBulkConfirm) return '';
+    const { mode, rarity } = inventoryBulkConfirm;
+    const preview = bulkPreviewDom(rarity);
+    if (!preview.count) return '';
+    const isSell = mode === 'sell';
+    const title = isSell ? '确认一键售卖' : '确认一键分解';
+    const reward = isSell ? `${preview.sellValue} 灵石` : materialTextDom(preview.gains);
+    const rewardHtml = isSell ? `<span class="bulk-reward-stone">${preview.sellValue} 灵石</span>` : materialTextDom(preview.gains, { asHtml: true });
+    const sample = preview.names.map(escapeHtml).join('、') + (preview.count > preview.names.length ? ` 等${preview.count}件` : '');
+    return `<div class="bulk-confirm-layer show" data-bulk-layer="1">
+      <div class="bulk-confirm-card ${isSell ? 'sell' : 'decompose'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+        <button class="bulk-close" type="button" data-bulk-cancel="1" aria-label="取消">×</button>
+        <div class="bulk-confirm-title">${escapeHtml(title)}</div>
+        <div class="bulk-confirm-sub">${escapeHtml(rarity)}品质 · ${preview.count} 件装备</div>
+        <div class="bulk-confirm-reward"><span>预计获得</span><b>${rewardHtml}</b></div>
+        <div class="bulk-confirm-list">${sample}</div>
+        <div class="bulk-warning">操作后装备会从背包移除，请确认这些品质装备都不需要保留。</div>
+        <div class="bulk-confirm-actions">
+          <button type="button" class="bulk-cancel" data-bulk-cancel="1">取消</button>
+          <button type="button" class="bulk-confirm-btn ${isSell ? 'sell' : 'decompose'}" data-bulk-confirm="${escapeHtml(mode)}">确认${isSell ? '售卖' : '分解'} · ${escapeHtml(reward)}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function executeBulkInventoryActionDom(mode, rarity) {
+    const preview = bulkPreviewDom(rarity);
+    if (!preview.count) { inventoryBulkConfirm = null; renderInventoryDomPanel(); return false; }
+    const indices = new Set(preview.entries.map(entry => entry.index));
+    player.inventory = player.inventory.filter((_, index) => !indices.has(index));
+    if (mode === 'sell') {
+      player.addSpiritStones(preview.sellValue);
+      showMessage(`已售卖 ${preview.count} 件${rarity}装备，获得 ${preview.sellValue} 灵石`, '#ffcc44');
+    } else {
+      for (const [id, count] of Object.entries(preview.gains)) playerMaterials[id] = (playerMaterials[id] || 0) + count;
+      showMessage(`已分解 ${preview.count} 件${rarity}装备，获得 ${materialTextDom(preview.gains)}`, '#aaddff');
+    }
+    inventoryDetailTarget = null;
+    inventoryBulkConfirm = null;
     autoSave();
     if (typeof updateUI === 'function') updateUI();
-    showMessage(`已售卖 ${entries.length} 件${rarity}装备，获得 ${total} 灵石`, '#ffcc44');
     refreshEquipmentPanelsDom();
     return true;
   }
+  function bulkSellInventoryByRarityDom(rarity) {
+    return openBulkConfirmDom('sell', rarity);
+  }
   function bulkDecomposeInventoryByRarityDom(rarity) {
-    const entries = inventoryItemsByRarityDom(rarity);
-    if (!entries.length) { showMessage(`没有${rarity}品质装备可分解`, '#aaa'); return false; }
-    const totalGains = {};
-    for (const { item } of entries) {
-      const gains = itemBreakdownDom(item);
-      for (const [id, count] of Object.entries(gains)) totalGains[id] = (totalGains[id] || 0) + count;
-    }
-    if (!confirmDom(`确认一键分解 ${entries.length} 件${rarity}装备？\n预计获得：${materialTextDom(totalGains)}`)) return false;
-    const indices = new Set(entries.map(entry => entry.index));
-    player.inventory = player.inventory.filter((_, index) => !indices.has(index));
-    for (const [id, count] of Object.entries(totalGains)) playerMaterials[id] = (playerMaterials[id] || 0) + count;
-    inventoryDetailTarget = null;
-    autoSave();
-    if (typeof updateUI === 'function') updateUI();
-    showMessage(`已分解 ${entries.length} 件${rarity}装备，获得 ${materialTextDom(totalGains)}`, '#aaddff');
-    refreshEquipmentPanelsDom();
-    return true;
+    return openBulkConfirmDom('decompose', rarity);
   }
   function itemPrimaryStatsHtmlDom(item, limit = 2) {
     if (!item?.stats) return '<span class="stat-chip empty">无词条</span>';
@@ -554,7 +660,7 @@ function escapeHtml(value) {
     const typeText = detail.label || SLOT_NAMES?.[item.slot]?.name || item.slot || '装备';
     const level = equipmentEnhanceLevelDom(item);
     const enhancedName = `${item.name}${level > 0 ? ` +${level}` : ''}`;
-    const maxLevel = typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15;
+    const maxLevel = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
     const enhanceButton = level >= maxLevel ? `<button class="item-action enhance disabled" type="button" disabled>已满级</button>` : `<button class="item-action enhance" type="button" data-enhance-target="1">强化</button>`;
     const bagActions = Number.isInteger(detail.index) ? `<div class="detail-actions enhance-actions">
         ${enhanceButton}
@@ -607,8 +713,16 @@ function escapeHtml(value) {
     });
     detailWrap.querySelectorAll('[data-confirm-equip-index]').forEach(btn => {
       bindPanelActionDom(btn, () => {
-        equipItem(player, Number(btn.dataset.confirmEquipIndex));
+        const equipped = equipItem(player, Number(btn.dataset.confirmEquipIndex));
         clearDetail();
+        if (equipped) {
+          showInventory = false;
+          showCharacterPanel = true;
+          characterPanelLastHtml = '';
+          characterEquipmentDetailSlot = null;
+          showMessage('已装备，切换到角色页查看整体效果', '#d4a0ff');
+          syncBodyPanelState();
+        }
         refreshEquipmentPanelsDom();
       });
     });
@@ -638,19 +752,59 @@ function escapeHtml(value) {
       <div class="inv-head">
         <button class="inv-close" type="button" aria-label="关闭背包">×</button>
         <div class="inv-title">🎒 背包</div>
-        <div class="inv-sub">装备和材料集中在这里；装备详情在下方固定区域直接显示</div>
+        <div class="inv-sub">物品容器：装备库存、材料库存、售卖/分解处理</div>
+        <div class="inv-tabs" role="tablist"><button class="inv-tab" type="button" data-inv-tab="equipment">装备</button><button class="inv-tab" type="button" data-inv-tab="materials">材料</button><button class="inv-tab" type="button" data-inv-tab="process">处理</button></div>
       </div>
       <div class="inv-body">
-        <section class="inv-section bag-section"><div class="section-title bag-title">装备 0/24</div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div><div class="bag-list"></div></section>
-        <section class="inv-section material-section"><div class="section-title">材料</div><div class="material-list"></div></section>
+        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="section-title bag-title">装备库存 0/24</div><div class="bag-list"></div></section>
+        <section class="inv-section material-section" data-tab-panel="materials"><div class="section-title">材料库存</div><div class="material-list"></div></section>
+        <section class="inv-section process-section" data-tab-panel="process"><div class="section-title">售卖 / 分解</div><div class="bulk-panel"><div class="bulk-tabs"><button class="bulk-tab sell" type="button" data-bulk-mode="sell">售卖</button><button class="bulk-tab decompose" type="button" data-bulk-mode="decompose">分解</button></div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div></div><div class="process-note">只处理背包库存，不影响角色页当前装备。高品质请先点装备卡片查看详情。</div></section>
       </div>
-      <div class="inv-detail-wrap"></div>
-      <div class="inv-hint">点装备小图标看详情；材料只展示数量；装备栏已移到「属性」页</div>`;
+      <div class="inv-detail-layer"><div class="inv-detail-card"><div class="inv-detail-wrap"></div></div></div><div class="bulk-confirm-root"></div>
+      <div class="inv-hint">背包只管理库存；穿上装备后到「角色」页查看属性、套装与战力</div>`;
     const container = document.getElementById('game-container') || document.body;
     container.appendChild(panel);
     const close = () => closeAllPanels();
     panel.querySelector('.inv-close').addEventListener('click', e => { if (shouldIgnoreInventorySyntheticClickDom()) return; close(); });
     panel.querySelector('.inv-close').addEventListener('touchstart', e => { markInventoryTouchActionDom(); e.preventDefault(); e.stopPropagation(); close(); }, { passive: false });
+    panel.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    panel.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    panel.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    const detailLayer = panel.querySelector('.inv-detail-layer');
+    const detailCard = panel.querySelector('.inv-detail-card');
+    if (detailLayer) {
+      const closeDetail = e => {
+        if (e.target !== detailLayer && !e.target.closest('[data-detail-close]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        inventoryDetailTarget = null;
+        renderInventoryDomPanel();
+      };
+      detailLayer.addEventListener('click', closeDetail);
+      detailLayer.addEventListener('touchstart', closeDetail, { passive: false });
+      detailLayer.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    }
+    if (detailCard) {
+      detailCard.addEventListener('click', e => e.stopPropagation());
+      detailCard.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+      detailCard.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+      detailCard.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
+    }
+    panel.addEventListener('click', e => {
+      if (e.target.closest('[data-bulk-cancel]') || e.target.classList?.contains('bulk-confirm-layer')) {
+        e.preventDefault(); e.stopPropagation(); closeBulkConfirmDom(); return;
+      }
+      const confirmBtn = e.target.closest('[data-bulk-confirm]');
+      if (confirmBtn) {
+        e.preventDefault(); e.stopPropagation();
+        const mode = confirmBtn.dataset.bulkConfirm;
+        const rarity = inventoryBulkConfirm?.rarity || inventoryBulkRarity;
+        executeBulkInventoryActionDom(mode, rarity);
+      }
+    });
+    panel.addEventListener('touchstart', e => {
+      if (e.target.closest('.bulk-confirm-card')) e.stopPropagation();
+    }, { passive: true });
     return panel;
   }
   function renderInventoryDomPanel() {
@@ -659,17 +813,27 @@ function escapeHtml(value) {
     const bagList = panel.querySelector('.bag-list');
     const materialList = panel.querySelector('.material-list');
     const detailWrap = panel.querySelector('.inv-detail-wrap');
+    const detailLayer = panel.querySelector('.inv-detail-layer');
     const bulkSelect = panel.querySelector('.bulk-rarity');
     const bulkSummary = panel.querySelector('.bulk-summary');
-    panel.querySelector('.bag-title').textContent = `装备 ${player.inventory.length}/24`;
+    panel.querySelector('.bag-title').textContent = `装备库存 ${player.inventory.length}/24`;
+    panel.querySelectorAll('.inv-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.invTab === inventoryTab));
+    panel.querySelectorAll('[data-tab-panel]').forEach(section => section.classList.toggle('active', section.dataset.tabPanel === inventoryTab));
     const availableRarities = ITEM_RARITIES_DOM.filter(rarity => player.inventory.some(item => item?.rarity === rarity));
     if (!availableRarities.includes(inventoryBulkRarity)) inventoryBulkRarity = availableRarities[0] || '普通';
     if (bulkSelect) {
       bulkSelect.innerHTML = ITEM_RARITIES_DOM.map(rarity => `<option value="${escapeHtml(rarity)}"${rarity === inventoryBulkRarity ? ' selected' : ''}>${escapeHtml(rarity)}</option>`).join('');
     }
     const selectedEntries = inventoryItemsByRarityDom(inventoryBulkRarity);
-    const selectedSellValue = selectedEntries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
-    if (bulkSummary) bulkSummary.textContent = selectedEntries.length ? `${inventoryBulkRarity}：${selectedEntries.length}件 · 售卖约${selectedSellValue}灵石` : `${inventoryBulkRarity}：暂无可处理装备`;
+    const selectedPreview = bulkPreviewDom(inventoryBulkRarity);
+    if (bulkSummary) bulkSummary.innerHTML = bulkPreviewHtmlDom(selectedPreview, inventoryBulkMode);
+    panel.querySelectorAll('[data-bulk-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.bulkMode === inventoryBulkMode);
+    });
+    panel.querySelectorAll('.bulk-action').forEach(btn => {
+      btn.classList.toggle('active', (btn.classList.contains('sell') && inventoryBulkMode === 'sell') || (btn.classList.contains('decompose') && inventoryBulkMode === 'decompose'));
+      btn.disabled = !selectedPreview.count;
+    });
     if (!player.inventory.length) {
       bagList.innerHTML = '<div class="empty-note">暂无装备，击败怪物可掉落</div>';
     } else {
@@ -682,15 +846,28 @@ function escapeHtml(value) {
     if (materialList) materialList.innerHTML = materialCardsHtmlDom();
     const detail = inventoryDetailItemDom();
     detailWrap.innerHTML = itemDetailHtmlDom(detail);
+    if (detailLayer) detailLayer.classList.toggle('show', !!detail?.item);
+    const bulkRoot = panel.querySelector('.bulk-confirm-root');
+    if (bulkRoot) bulkRoot.innerHTML = bulkConfirmLayerHtmlDom();
+    const detailCard = panel.querySelector('.inv-detail-card');
+    const detailKey = detail?.item ? `${inventoryDetailTarget?.type || ''}:${inventoryDetailTarget?.index ?? ''}:${detail.item.name || ''}:${detail.item.enhanceLevel || 0}` : '';
+    if (detailCard && detailKey !== inventoryDetailScrollKey) detailCard.scrollTop = 0;
+    inventoryDetailScrollKey = detailKey;
     bindInventoryDetailActionsDom(panel, detailWrap);
     // 背包小图标：只响应真正点击；滑动超过阈值时不弹出详情，避免滚动时误触。
     bagList.querySelectorAll('.bag-item-card[data-index]').forEach(card => {
       bindInventoryTapDom(card, () => { inventoryDetailTarget = { type: 'bag', index: Number(card.dataset.index) }; renderInventoryDomPanel(); });
     });
+    panel.querySelectorAll('[data-inv-tab]').forEach(btn => {
+      bindPanelActionDom(btn, () => { inventoryTab = btn.dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
+    });
     if (bulkSelect) {
-      bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; renderInventoryDomPanel(); });
+      bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
       bulkSelect.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     }
+    panel.querySelectorAll('[data-bulk-mode]').forEach(btn => {
+      bindPanelActionDom(btn, () => { inventoryBulkMode = btn.dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
+    });
     panel.querySelectorAll('[data-bulk-sell]').forEach(btn => {
       bindPanelActionDom(btn, () => bulkSellInventoryByRarityDom(inventoryBulkRarity));
     });
@@ -705,6 +882,8 @@ function escapeHtml(value) {
     characterPanelTouchState = null;
     characterEquipmentDetailSlot = null;
     inventoryDetailTarget = null;
+    inventoryBulkConfirm = null;
+    inventoryDetailScrollKey = '';
     showSkillTreeUI = false;
     skillDetailModalOpen = false;
     const skillLayer = document.getElementById('skill-detail-layer');
@@ -790,7 +969,7 @@ function escapeHtml(value) {
    }
   function getInventoryLayout(compact, drawFrame = true) {
     const frame = drawFrame
-      ? drawPanelFrame('🎒 背包与装备', compact ? '点击装备·点击卸下·×关闭' : '点击物品装备·点击槽位卸下·点击×关闭', '#d4a0ff')
+      ? drawPanelFrame('🎒 背包', compact ? '装备库存 · 材料 · 分解售卖' : '物品容器 · 装备库存 · 材料库存 · 分解售卖', '#d4a0ff')
       : (() => {
           const margin = canvasW < 520 ? 10 : 28;
           const top = canvasH < 520 ? 42 : 54;
@@ -833,28 +1012,71 @@ function escapeHtml(value) {
    
    // Joystick state
    let joystick = { active: false, dx: 0, dy: 0, distance: 0 };
-   let playerSpeed = 5.0;
+   let playerSpeed = 6.6;
    function setupTouchControls() {
-     // ─── Virtual Joystick ───
+     // ─── Full-screen floating joystick ───
+     const touchControls = document.getElementById('touch-controls');
      const joystickZone = document.getElementById('joystick-zone');
      const joystickBase = document.getElementById('joystick-base');
      const joystickThumb = document.getElementById('joystick-thumb');
-     if (!joystickZone || !joystickBase || !joystickThumb) return;
+     if (!touchControls || !joystickZone || !joystickBase || !joystickThumb) return;
      let jsTouchId = null;
+     let joystickOrigin = null;
+     const resetJoystickVisual = () => {
+       joystick.active = false;
+       joystick.dx = 0;
+       joystick.dy = 0;
+       joystick.distance = 0;
+       joystickOrigin = null;
+       joystickZone.classList.remove('active');
+       joystickZone.style.left = '';
+       joystickZone.style.top = '';
+       joystickZone.style.bottom = '';
+       joystickZone.style.right = '';
+       joystickThumb.style.transform = 'translate(-50%, -50%)';
+     };
+     function canStartMovement(e) {
+       if (isInCombat() || isAnyPanelOpen()) return false;
+       if (e.target.closest('#menu-bar, #more-menu, #action-buttons, button, .menu-btn, .more-menu-btn, .act-btn, input, select, textarea, a')) return false;
+       return true;
+     }
+     function pointFromEvent(e, wantedId = jsTouchId) {
+       const list = e.changedTouches || e.touches;
+       if (list && list.length) {
+         for (let i = 0; i < list.length; i++) {
+           const t = list[i];
+           if (wantedId === null || t.identifier === wantedId) return t;
+         }
+         return null;
+       }
+       return e;
+     }
+     function placeJoystickAt(touch) {
+       const zoneW = joystickZone.offsetWidth || 96;
+       const zoneH = joystickZone.offsetHeight || 96;
+       const margin = 8;
+       const x = Math.max(margin + zoneW / 2, Math.min(window.innerWidth - margin - zoneW / 2, touch.clientX));
+       const y = Math.max(margin + zoneH / 2, Math.min(window.innerHeight - margin - zoneH / 2, touch.clientY));
+       joystickOrigin = { x, y };
+       joystickZone.style.left = `${x - zoneW / 2}px`;
+       joystickZone.style.top = `${y - zoneH / 2}px`;
+       joystickZone.style.bottom = 'auto';
+       joystickZone.style.right = 'auto';
+       joystickZone.classList.add('active');
+     }
      function updateJoystickPos(touch) {
+       if (!joystickOrigin) placeJoystickAt(touch);
        const rect = joystickBase.getBoundingClientRect();
-       const cx = rect.left + rect.width / 2;
-       const cy = rect.top + rect.height / 2;
-       const maxR = rect.width / 2 - 22;
-       let dx = touch.clientX - cx;
-       let dy = touch.clientY - cy;
+       const maxR = Math.max(18, Math.min(rect.width, rect.height) / 2 - 12);
+       let dx = touch.clientX - joystickOrigin.x;
+       let dy = touch.clientY - joystickOrigin.y;
        let dist = Math.sqrt(dx * dx + dy * dy);
        if (dist > maxR) {
          dx = (dx / dist) * maxR;
          dy = (dy / dist) * maxR;
          dist = maxR;
        }
-       const deadZone = 8;
+       const deadZone = 6;
        if (dist < deadZone) {
          joystick.dx = 0; joystick.dy = 0; joystick.distance = 0;
          joystickThumb.style.transform = 'translate(-50%, -50%)';
@@ -865,34 +1087,57 @@ function escapeHtml(value) {
          joystickThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
        }
      }
-     joystickZone.addEventListener('touchstart', e => {
-       e.preventDefault();
-       if (jsTouchId !== null) return;
+     touchControls.addEventListener('touchstart', e => {
+       if (jsTouchId !== null || !canStartMovement(e)) return;
        const t = e.changedTouches[0];
        jsTouchId = t.identifier;
        joystick.active = true;
+       placeJoystickAt(t);
        updateJoystickPos(t);
-     });
-     joystickZone.addEventListener('touchmove', e => {
        e.preventDefault();
-       for (let t of e.changedTouches) {
-         if (t.identifier === jsTouchId) { updateJoystickPos(t); break; }
+     }, { passive: false });
+     touchControls.addEventListener('touchmove', e => {
+       if (jsTouchId === null) return;
+       const t = pointFromEvent(e);
+       if (t) updateJoystickPos(t);
+       e.preventDefault();
+     }, { passive: false });
+     touchControls.addEventListener('touchend', e => {
+       const t = pointFromEvent(e);
+       if (!t) return;
+       if (t.identifier === jsTouchId) {
+         jsTouchId = null;
+         resetJoystickVisual();
+       }
+     }, { passive: true });
+     touchControls.addEventListener('touchcancel', () => {
+       jsTouchId = null;
+       resetJoystickVisual();
+     }, { passive: true });
+     touchControls.addEventListener('pointerdown', e => {
+       if (e.pointerType === 'mouse' || jsTouchId !== null || !canStartMovement(e)) return;
+       jsTouchId = 'pointer';
+       joystick.active = true;
+       placeJoystickAt(e);
+       updateJoystickPos(e);
+       e.preventDefault();
+     });
+     touchControls.addEventListener('pointermove', e => {
+       if (jsTouchId !== 'pointer') return;
+       updateJoystickPos(e);
+       e.preventDefault();
+     });
+     touchControls.addEventListener('pointerup', () => {
+       if (jsTouchId === 'pointer') {
+         jsTouchId = null;
+         resetJoystickVisual();
        }
      });
-     joystickZone.addEventListener('touchend', e => {
-       for (let t of e.changedTouches) {
-         if (t.identifier === jsTouchId) {
-           jsTouchId = null; joystick.active = false;
-           joystick.dx = 0; joystick.dy = 0; joystick.distance = 0;
-           joystickThumb.style.transform = 'translate(-50%, -50%)';
-           break;
-         }
+     touchControls.addEventListener('pointercancel', () => {
+       if (jsTouchId === 'pointer') {
+         jsTouchId = null;
+         resetJoystickVisual();
        }
-     });
-     joystickZone.addEventListener('touchcancel', () => {
-       jsTouchId = null; joystick.active = false;
-       joystick.dx = 0; joystick.dy = 0; joystick.distance = 0;
-       joystickThumb.style.transform = 'translate(-50%, -50%)';
      });
      // Action buttons
      document.getElementById('btn-attack').addEventListener('touchstart', e => {
@@ -910,43 +1155,61 @@ function escapeHtml(value) {
    }
    function setupMenuButtons() {
      // Menu buttons — always active (touch + mouse click)
-    function onBag() { openPanel('inventory'); }
-    function onCharacter() { openPanel('character'); }
-    function onSkills() { openPanel('skills'); }
-    function onAlchemy() { openPanel('alchemy'); }
-    function onBreakthrough() { openPanel('breakthrough'); }
-    const btnBag = document.getElementById('btn-bag');
-    const btnCharacter = document.getElementById('btn-character');
-    const btnSkills = document.getElementById('btn-skills');
-     const btnAlchemy = document.getElementById('btn-alchemy');
-     const btnBreak = document.getElementById('btn-break');
-    if (btnBag) {
-      btnBag.addEventListener('click', e => { e.preventDefault(); onBag(); });
-      btnBag.addEventListener('touchstart', e => { e.preventDefault(); onBag(); });
+    const moreMenu = document.getElementById('more-menu');
+    function closeMoreMenu() {
+      if (!moreMenu) return;
+      moreMenu.classList.remove('open');
+      moreMenu.setAttribute('aria-hidden', 'true');
+      syncMainNavState();
     }
-    if (btnCharacter) {
-      btnCharacter.addEventListener('click', e => { e.preventDefault(); onCharacter(); });
-      btnCharacter.addEventListener('touchstart', e => { e.preventDefault(); onCharacter(); });
+    function toggleMoreMenu(e) {
+      if (e) e.preventDefault();
+      if (isInCombat() || isAnyPanelOpen() || !moreMenu) return;
+      const open = !moreMenu.classList.contains('open');
+      moreMenu.classList.toggle('open', open);
+      moreMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+      syncMainNavState();
     }
-    if (btnSkills) {
-       btnSkills.addEventListener('click', e => { e.preventDefault(); onSkills(); });
-       btnSkills.addEventListener('touchstart', e => { e.preventDefault(); onSkills(); });
-     }
-     if (btnAlchemy) {
-       btnAlchemy.addEventListener('click', e => { e.preventDefault(); onAlchemy(); });
-       btnAlchemy.addEventListener('touchstart', e => { e.preventDefault(); onAlchemy(); });
-     }
-    if (btnBreak) {
-      btnBreak.addEventListener('click', e => { e.preventDefault(); onBreakthrough(); });
-      btnBreak.addEventListener('touchstart', e => { e.preventDefault(); onBreakthrough(); });
+    let menuLastTouchActionAt = 0;
+    function bindTap(el, fn) {
+      if (!el) return;
+      el.addEventListener('touchstart', e => {
+        menuLastTouchActionAt = Date.now();
+        e.preventDefault();
+        e.stopPropagation();
+        fn(e);
+      }, { passive: false });
+      el.addEventListener('click', e => {
+        // Mobile Safari/Chrome fires a synthetic click after touchstart.
+        // For the More button that means: touch opens the sheet, click immediately closes it.
+        if (Date.now() - menuLastTouchActionAt < 700) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        fn(e);
+      });
     }
-    // Save button
-    const btnSave = document.getElementById('btn-save');
-    function onSave() { saveGame(); showMessage('💾 存档已保存！', '#88cc88'); }
-    if (btnSave) {
-      btnSave.addEventListener('click', e => { e.preventDefault(); onSave(); });
-      btnSave.addEventListener('touchstart', e => { e.preventDefault(); onSave(); });
-    }
+    function onBag() { closeMoreMenu(); openPanel('inventory'); }
+    function onCharacter() { closeMoreMenu(); openPanel('character'); }
+    function onSkills() { closeMoreMenu(); openPanel('skills'); }
+    function onAlchemy() { closeMoreMenu(); openPanel('alchemy'); }
+    function onBreakthrough() { closeMoreMenu(); openPanel('breakthrough'); }
+    function onSave() { closeMoreMenu(); saveGame(); showMessage('💾 存档已保存！', '#88cc88'); }
+    bindTap(document.getElementById('btn-bag'), onBag);
+    bindTap(document.getElementById('btn-character'), onCharacter);
+    bindTap(document.getElementById('btn-skills'), onSkills);
+    bindTap(document.getElementById('btn-more'), toggleMoreMenu);
+    bindTap(document.getElementById('btn-alchemy'), onAlchemy);
+    bindTap(document.getElementById('btn-break'), onBreakthrough);
+    bindTap(document.getElementById('btn-save'), onSave);
+    document.addEventListener('click', e => {
+      if (!moreMenu?.classList.contains('open')) return;
+      if (e.target.closest('#more-menu') || e.target.closest('#btn-more')) return;
+      closeMoreMenu();
+    });
   }
   function setupCanvasClicks() {
     function getCanvasPos(e) {
@@ -1105,12 +1368,15 @@ function generateNewFloor() {
      dungeon = generateDungeon(DUNGEON_WIDTH, DUNGEON_HEIGHT, MAX_DEPTH, dungeonLevel);
      dungeon._monsters = new Map();
      dungeon._materials = [];
+     discoveredMap = new Set();
+     visibleMap = new Set();
+     resetDomMapCache();
      window.dungeon = dungeon;
      spawnMonsters(dungeon, dungeonLevel);
      scatterMaterials(dungeon, dungeonLevel);
      // Boss floor notification
      if (isBossFloor(dungeonLevel)) {
-       const boss = BOSSES.find(b => b.floor === dungeonLevel);
+       const boss = typeof getBossForLevel === 'function' ? getBossForLevel(dungeonLevel) : BOSSES.find(b => b.floor === dungeonLevel);
        if (boss) {
          showMessage(`⚠️ Boss层！${boss.name} 在此镇守！`, '#ff2200');
        }
@@ -1197,19 +1463,309 @@ function generateNewFloor() {
      if (canvasH > mapH) camera.y = (mapH - canvasH) / 2;
    }
 
+   function roomTypeAt(x, y) {
+     return dungeon?.roomTypeByCell?.get?.(`${x},${y}`) || ROOM_TYPE?.NORMAL || 'normal';
+   }
+
+   function roomTint(type) {
+     switch (type) {
+       case 'start': return 'rgba(130,210,255,0.13)';
+       case 'treasure': return 'rgba(255,210,80,0.16)';
+       case 'elite': return 'rgba(255,110,80,0.13)';
+       case 'boss': return 'rgba(210,80,255,0.16)';
+       default: return '';
+     }
+   }
+
+   function updateMapVisibility() {
+     if (!dungeon || !player) return;
+     visibleMap.clear();
+     const px = Math.floor(player.x);
+     const py = Math.floor(player.y);
+     const r = MAP_MEMORY_RADIUS;
+     for (let y = Math.max(0, py - r); y <= Math.min(dungeon.height - 1, py + r); y++) {
+       for (let x = Math.max(0, px - r); x <= Math.min(dungeon.width - 1, px + r); x++) {
+         const dist = Math.hypot(x - px, y - py);
+         if (dist <= MAP_VISION_RADIUS || (dist <= MAP_MEMORY_RADIUS && dungeon.grid[y][x] !== TILE.WALL)) {
+           const key = `${x},${y}`;
+           visibleMap.add(key);
+           discoveredMap.add(key);
+         }
+       }
+     }
+     for (const room of dungeon.rooms || []) {
+       if (Math.hypot(room.cx - px, room.cy - py) <= MAP_VISION_RADIUS + 2) {
+         for (let y = room.y; y < room.y + room.h; y++) {
+           for (let x = room.x; x < room.x + room.w; x++) {
+             const key = `${x},${y}`;
+             visibleMap.add(key);
+             discoveredMap.add(key);
+           }
+         }
+       }
+     }
+   }
+
+
+   function resetDomMapCache() {
+     mapRenderCache = {
+       floorKey: '', boundsKey: '', visibilityKey: '', entityKey: '', hintKey: '', miniKey: '',
+       lastPx: NaN, lastPy: NaN, tilesEl: null, entitiesEl: null, hintsEl: null, miniEl: null, playerEl: null,
+       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: ''
+     };
+     const layer = document.getElementById('map-layer');
+     if (layer) layer.innerHTML = '';
+   }
+
+   function domRoomClass(type) {
+     return type === 'start' ? 'room-start' : type === 'treasure' ? 'room-treasure' : type === 'elite' ? 'room-elite' : type === 'boss' ? 'room-boss' : 'room-normal';
+   }
+
+   function domRoomEdgeClasses(x, y) {
+     if (!dungeon?.roomTypeByCell?.has?.(`${x},${y}`)) return '';
+     const c = [];
+     if (!dungeon.roomTypeByCell.has(`${x},${y - 1}`)) c.push('edge-n');
+     if (!dungeon.roomTypeByCell.has(`${x},${y + 1}`)) c.push('edge-s');
+     if (!dungeon.roomTypeByCell.has(`${x - 1},${y}`)) c.push('edge-w');
+     if (!dungeon.roomTypeByCell.has(`${x + 1},${y}`)) c.push('edge-e');
+     return c.join(' ');
+   }
+
+   function ensureDomMapLayers(layer) {
+     if (!mapRenderCache.entitiesEl || !mapRenderCache.entitiesEl.isConnected) {
+       layer.innerHTML = '<div id="map-entities"></div><div id="map-hints"></div><div id="dom-minimap"></div>';
+       mapRenderCache.tilesEl = null;
+       mapRenderCache.entitiesEl = layer.querySelector('#map-entities');
+       mapRenderCache.hintsEl = layer.querySelector('#map-hints');
+       mapRenderCache.miniEl = layer.querySelector('#dom-minimap');
+       mapRenderCache.playerEl = null;
+       mapRenderCache.boundsKey = '';
+       mapRenderCache.visibilityKey = '';
+       mapRenderCache.entityKey = '';
+       mapRenderCache.hintKey = '';
+       mapRenderCache.miniKey = '';
+     }
+   }
+
+   function mapTileHtml(x, y, tile, biome, key) {
+     const alt = ((x * 13 + y * 17) % 7) < 3;
+     const visible = visibleMap.has(key);
+     const discovered = discoveredMap.has(key);
+     const type = roomTypeAt(x, y);
+     const fog = !discovered ? 'fog-undiscovered' : (!visible ? 'fog-memory' : '');
+     const left = x * CELL_SIZE;
+     const top = y * CELL_SIZE;
+     if (tile === TILE.WALL) {
+       const wv = ((x * 11 + y * 7) % 5) < 2 ? 'tile-wall-a' : 'tile-wall-b';
+       return `<div class="map-tile ${wv} ${fog}" style="transform:translate3d(${left}px,${top}px,0)"></div>`;
+     }
+     const floorCls = `${alt ? 'tile-floor-a' : 'tile-floor-b'} ${domRoomClass(type)} ${domRoomEdgeClasses(x, y)}`;
+     let inner = '';
+     if ((x + y * 3) % 11 === 0) inner += '<i class="tile-speck"></i>';
+     if (tile === TILE.STAIRS_DOWN) inner += '<b class="tile-stairs-icon">▽</b>';
+     else if (type === 'treasure' && (x + y) % 9 === 0) inner += '<b class="tile-deco deco-treasure">✦</b>';
+     else if (type === 'boss' && (x * 3 + y) % 10 === 0) inner += '<b class="tile-deco deco-boss">◆</b>';
+     else if (biome?.id === 'jungle' && (x * 5 + y) % 13 === 0) inner += '<b class="tile-deco deco-jungle">⌁</b>';
+     else if (biome?.id === 'snow' && (x * 7 + y) % 10 === 0) inner += '<b class="tile-deco deco-snow">✧</b>';
+     else if (biome?.id === 'lava' && (x + y * 2) % 9 === 0) inner += '<i class="tile-lava-crack"></i>';
+     return `<div class="map-tile ${floorCls} ${fog}" style="transform:translate3d(${left}px,${top}px,0)">${inner}</div>`;
+   }
+
+   function renderDomMapOverlay() {
+     if (!dungeon || !player || !camera) return;
+     const layer = document.getElementById('map-layer');
+     if (!layer) return;
+     const px = Math.floor(player.x);
+     const py = Math.floor(player.y);
+     const cellChanged = px !== mapRenderCache.lastPx || py !== mapRenderCache.lastPy;
+     if (cellChanged || !mapRenderCache.visibilityKey) {
+       updateMapVisibility();
+       mapRenderCache.lastPx = px;
+       mapRenderCache.lastPy = py;
+     }
+     const biome = dungeon.biome || getBiomeForLevel?.(dungeonLevel) || {};
+     const floorKey = `${dungeonLevel}:${biome.id || ''}:${dungeon.width}x${dungeon.height}:${CELL_SIZE}`;
+     if (floorKey !== mapRenderCache.floorKey) {
+       resetDomMapCache();
+       mapRenderCache.floorKey = floorKey;
+     }
+     ensureDomMapLayers(layer);
+     layer.style.setProperty('--cs', `${CELL_SIZE}px`);
+     layer.style.width = `${dungeon.width * CELL_SIZE}px`;
+     layer.style.height = `${dungeon.height * CELL_SIZE}px`;
+     layer.style.transform = `translate3d(${-Math.round(camera.x)}px,${-Math.round(camera.y)}px,0)`;
+     const grid = dungeon.grid;
+     const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 3);
+     const endCol = Math.min(grid[0].length, startCol + Math.ceil(canvasW / CELL_SIZE) + 6);
+     const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 3);
+     const endRow = Math.min(grid.length, startRow + Math.ceil(canvasH / CELL_SIZE) + 6);
+     const boundsKey = `${startCol},${endCol},${startRow},${endRow}`;
+     const visibilityKey = `${boundsKey}:${discoveredMap.size}:${visibleMap.size}:${px},${py}`;
+     mapRenderCache.boundsKey = boundsKey;
+     mapRenderCache.visibilityKey = visibilityKey;
+     renderDomMapEntities(startCol, endCol, startRow, endRow);
+     renderDomMapHints(startCol, endCol, startRow, endRow);
+     renderDomMiniMap(px, py);
+   }
+
+   function renderDomMap() {
+     renderDomMapOverlay();
+   }
+
+
+   function renderDomMapEntities(startCol, endCol, startRow, endRow) {
+     const parts = [];
+     if (dungeon._materials) {
+       for (const mat of dungeon._materials) {
+         const key = `${mat.x},${mat.y}`;
+         if (!visibleMap.has(key) || mat.x < startCol || mat.x >= endCol || mat.y < startRow || mat.y >= endRow) continue;
+         parts.push(`<div class="map-material" style="--mat-color:${escapeHtml(mat.color || '#aaddff')};color:${escapeHtml(mat.color || '#aaddff')};transform:translate3d(${mat.x * CELL_SIZE}px,${mat.y * CELL_SIZE}px,0)">✦</div>`);
+       }
+     }
+     if (dungeon._monsters && !isInCombat()) {
+       for (const [key, mon] of dungeon._monsters.entries()) {
+         if (!visibleMap.has(key)) continue;
+         const [mx, my] = key.split(',').map(Number);
+         if (mx < startCol || mx >= endCol || my < startRow || my >= endRow) continue;
+         const bossCls = mon.isBoss ? ' boss' : '';
+         parts.push(`<div class="map-monster${bossCls}" style="--mob-color:${escapeHtml(mon.color || '#c05060')};transform:translate3d(${mx * CELL_SIZE}px,${my * CELL_SIZE}px,0)"><span>${escapeHtml(mon.symbol || '妖')}</span></div>`);
+       }
+     }
+     parts.push(`<div id="map-player"><i class="map-player-glow"></i><i class="map-player-body"></i><i class="map-player-head"></i><i class="map-player-eyes"><b></b><b></b></i></div>`);
+     const entityKey = `${parts.length}:${dungeon._materials?.length || 0}:${dungeon._monsters?.size || 0}:${isInCombat() ? 1 : 0}:${mapRenderCache.visibilityKey}`;
+     if (entityKey !== mapRenderCache.entityKey || !mapRenderCache.playerEl?.isConnected) {
+       mapRenderCache.entitiesEl.innerHTML = parts.join('');
+       mapRenderCache.playerEl = mapRenderCache.entitiesEl.querySelector('#map-player');
+       mapRenderCache.entityKey = entityKey;
+     }
+     if (mapRenderCache.playerEl) {
+       mapRenderCache.playerEl.style.transform = `translate3d(${player.x * CELL_SIZE}px,${player.y * CELL_SIZE}px,0)`;
+     }
+   }
+
+   function renderDomMapHints(startCol, endCol, startRow, endRow) {
+     const px = Math.floor(player?.x ?? 0);
+     const py = Math.floor(player?.y ?? 0);
+     const hints = [];
+     for (let y = 0; y < dungeon.height; y++) {
+       for (let x = 0; x < dungeon.width; x++) {
+         if (dungeon.grid[y][x] === TILE.STAIRS_DOWN && discoveredMap.has(`${x},${y}`)) hints.push({ x, y, label: '出口', cls: 'exit' });
+       }
+     }
+     if (dungeon._monsters) {
+       let nearest = null;
+       for (const [key, mon] of dungeon._monsters.entries()) {
+         if (!visibleMap.has(key)) continue;
+         const [x, y] = key.split(',').map(Number);
+         const dist = Math.hypot(x - px, y - py);
+         if (!nearest || dist < nearest.dist) nearest = { x, y, dist, label: mon.isBoss ? 'Boss' : '妖物', cls: mon.isBoss ? 'boss' : 'mob' };
+       }
+       if (nearest) hints.push(nearest);
+     }
+     const html = hints.filter(h => h.x >= startCol && h.x < endCol && h.y >= startRow && h.y < endRow)
+       .map(h => `<div class="map-hint ${h.cls}" style="transform:translate3d(${h.x * CELL_SIZE + CELL_SIZE / 2}px,${h.y * CELL_SIZE - 14}px,0)">${h.label}</div>`).join('');
+     const hintKey = `${html.length}:${px},${py}:${mapRenderCache.visibilityKey}`;
+     if (hintKey !== mapRenderCache.hintKey) {
+       mapRenderCache.hintsEl.innerHTML = html;
+       mapRenderCache.hintKey = hintKey;
+     }
+   }
+
+   function renderDomMiniMap(px, py) {
+     if (!mapRenderCache.miniEl) return;
+     if (!dungeon || canvasW < 320) { mapRenderCache.miniEl.innerHTML = ''; return; }
+     const scale = Math.max(2, Math.min(4, Math.floor(canvasW / 140)));
+     const w = dungeon.width * scale;
+     const h = dungeon.height * scale;
+     if (w + 18 > canvasW || h > canvasH * 0.36) { mapRenderCache.miniEl.innerHTML = ''; return; }
+     const miniKey = `${discoveredMap.size}:${visibleMap.size}:${dungeon._monsters?.size || 0}:${px},${py}:${scale}:${canvasW}x${canvasH}`;
+     if (miniKey === mapRenderCache.miniKey) return;
+     const cells = [];
+     for (let y = 0; y < dungeon.height; y++) {
+       for (let x = 0; x < dungeon.width; x++) {
+         const key = `${x},${y}`;
+         if (!discoveredMap.has(key)) continue;
+         const tile = dungeon.grid[y][x];
+         const type = roomTypeAt(x, y);
+         const cls = tile === TILE.WALL ? 'mm-wall' : tile === TILE.STAIRS_DOWN ? 'mm-stairs' : `mm-${type || 'normal'}`;
+         const dim = visibleMap.has(key) ? '' : ' mm-memory';
+         cells.push(`<i class="${cls}${dim}" style="left:${x * scale}px;top:${y * scale}px;width:${scale}px;height:${scale}px"></i>`);
+       }
+     }
+     if (dungeon._monsters) {
+       for (const [key, mon] of dungeon._monsters.entries()) {
+         if (!visibleMap.has(key)) continue;
+         const [mx, my] = key.split(',').map(Number);
+         cells.push(`<b class="${mon.isBoss ? 'mm-bossmark' : 'mm-mobmark'}" style="left:${mx * scale - 1}px;top:${my * scale - 1}px;width:${scale + 2}px;height:${scale + 2}px"></b>`);
+       }
+     }
+     cells.push(`<em class="mm-player" style="left:${px * scale - 2}px;top:${py * scale - 2}px;width:${scale + 4}px;height:${scale + 4}px"></em>`);
+     mapRenderCache.miniEl.style.width = `${w}px`;
+     mapRenderCache.miniEl.style.height = `${h}px`;
+     mapRenderCache.miniEl.innerHTML = cells.join('');
+     mapRenderCache.miniKey = miniKey;
+   }
+
+
+   function applyTileFog(sx, sy, x, y) {
+     const key = `${x},${y}`;
+     if (!discoveredMap.has(key)) {
+       ctx.fillStyle = 'rgba(3,6,14,0.88)';
+       ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+       return false;
+     }
+     if (!visibleMap.has(key)) {
+       ctx.fillStyle = 'rgba(5,10,22,0.42)';
+       ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+     }
+     return visibleMap.has(key);
+   }
+
+   function drawRoomEdge(sx, sy, x, y, type) {
+     if (!dungeon?.roomTypeByCell?.has?.(`${x},${y}`)) return;
+     const edgeColor = type === 'boss' ? 'rgba(230,120,255,0.38)' : type === 'treasure' ? 'rgba(255,220,90,0.34)' : type === 'elite' ? 'rgba(255,120,90,0.30)' : 'rgba(255,255,255,0.10)';
+     ctx.strokeStyle = edgeColor;
+     ctx.lineWidth = 1;
+     ctx.beginPath();
+     if (!dungeon.roomTypeByCell.has(`${x},${y - 1}`)) { ctx.moveTo(sx + 1, sy + 1); ctx.lineTo(sx + CELL_SIZE - 1, sy + 1); }
+     if (!dungeon.roomTypeByCell.has(`${x},${y + 1}`)) { ctx.moveTo(sx + 1, sy + CELL_SIZE - 1); ctx.lineTo(sx + CELL_SIZE - 1, sy + CELL_SIZE - 1); }
+     if (!dungeon.roomTypeByCell.has(`${x - 1},${y}`)) { ctx.moveTo(sx + 1, sy + 1); ctx.lineTo(sx + 1, sy + CELL_SIZE - 1); }
+     if (!dungeon.roomTypeByCell.has(`${x + 1},${y}`)) { ctx.moveTo(sx + CELL_SIZE - 1, sy + 1); ctx.lineTo(sx + CELL_SIZE - 1, sy + CELL_SIZE - 1); }
+     ctx.stroke();
+   }
+
    function drawBiomeFloor(ctx, sx, sy, x, y, biome = {}) {
      const alt = ((x * 13 + y * 17) % 7) < 3;
-     ctx.fillStyle = alt ? (biome.floor2 || '#2a2130') : (biome.floor || '#34233d');
+     const type = roomTypeAt(x, y);
+     const floorA = biome.floor || '#3b2846';
+     const floorB = biome.floor2 || '#30243d';
+     ctx.fillStyle = alt ? floorB : floorA;
      ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
-     ctx.fillStyle = 'rgba(255,255,255,0.045)';
+     const grad = ctx.createLinearGradient(sx, sy, sx, sy + CELL_SIZE);
+     grad.addColorStop(0, 'rgba(255,255,255,0.075)');
+     grad.addColorStop(0.58, 'rgba(255,255,255,0)');
+     grad.addColorStop(1, 'rgba(0,0,0,0.16)');
+     ctx.fillStyle = grad;
+     ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+     const tint = roomTint(type);
+     if (tint) { ctx.fillStyle = tint; ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE); }
+     ctx.fillStyle = 'rgba(255,255,255,0.07)';
      ctx.fillRect(sx + 1, sy + 1, CELL_SIZE - 2, 1);
-     ctx.fillStyle = 'rgba(0,0,0,0.055)';
+     ctx.fillStyle = 'rgba(0,0,0,0.12)';
      ctx.fillRect(sx + 1, sy + CELL_SIZE - 3, CELL_SIZE - 2, 2);
-     ctx.strokeStyle = biome.border || 'rgba(255,255,255,0.08)';
+     ctx.strokeStyle = biome.border || 'rgba(245,225,255,0.12)';
      ctx.strokeRect(sx + 0.5, sy + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
+     drawRoomEdge(sx, sy, x, y, type);
      if ((x + y * 3) % 11 === 0) {
        ctx.fillStyle = biome.speck || 'rgba(255,255,255,0.25)';
        ctx.fillRect(sx + 3, sy + 3, 2, 2);
+     }
+     if (type === 'treasure' && (x + y) % 9 === 0) {
+       ctx.fillStyle = 'rgba(255,225,100,0.45)';
+       ctx.fillText('✦', sx + CELL_SIZE - 9, sy + 9);
+     } else if (type === 'boss' && (x * 3 + y) % 10 === 0) {
+       ctx.fillStyle = 'rgba(220,90,255,0.42)';
+       ctx.fillText('◆', sx + 4, sy + CELL_SIZE - 5);
      }
      if (biome.id === 'jungle' && (x * 5 + y) % 13 === 0) {
        ctx.fillStyle = 'rgba(40,120,35,0.55)';
@@ -1224,63 +1780,157 @@ function generateNewFloor() {
    }
 
    function drawDungeon() {
+     if (!dungeon || !player || !camera) return;
+     updateMapVisibility();
+     const biome = dungeon.biome || getBiomeForLevel?.(dungeonLevel) || {};
      const grid = dungeon.grid;
-     const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 1);
-     const endCol = Math.min(grid[0].length, startCol + Math.ceil(canvasW / CELL_SIZE) + 2);
-     const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 1);
-     const endRow = Math.min(grid.length, startRow + Math.ceil(canvasH / CELL_SIZE) + 2);
+     const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 2);
+     const endCol = Math.min(grid[0].length, startCol + Math.ceil(canvasW / CELL_SIZE) + 4);
+     const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 2);
+     const endRow = Math.min(grid.length, startRow + Math.ceil(canvasH / CELL_SIZE) + 4);
+     const px = Math.floor(player.x);
+     const py = Math.floor(player.y);
+     const floorKey = `${dungeonLevel}:${biome.id || ''}:${dungeon.width}x${dungeon.height}:${CELL_SIZE}`;
+     const boundsKey = `${startCol},${endCol},${startRow},${endRow}:${Math.round(camera.x)},${Math.round(camera.y)}`;
+     const visibilityKey = `${discoveredMap.size}:${visibleMap.size}:${px},${py}`;
+     // Canvas 主地图每帧重画可见区域，DOM 只叠加动态单位/提示，降低移动时 DOM 重排成本。
+     mapRenderCache.canvasFloorKey = floorKey;
+     mapRenderCache.canvasBoundsKey = boundsKey;
+     mapRenderCache.canvasVisibilityKey = visibilityKey;
+     ctx.save();
+     ctx.font = `bold ${Math.max(10, CELL_SIZE - 8)}px "KaiTi","SimSun",serif`;
+     ctx.textAlign = 'center';
+     ctx.textBaseline = 'middle';
      for (let y = startRow; y < endRow; y++) {
        for (let x = startCol; x < endCol; x++) {
-         const sx = x * CELL_SIZE - camera.x;
-         const sy = y * CELL_SIZE - camera.y;
+         const sx = Math.round(x * CELL_SIZE - camera.x);
+         const sy = Math.round(y * CELL_SIZE - camera.y);
          const tile = grid[y][x];
-         const biome = dungeon.biome || getBiomeForLevel?.(dungeonLevel) || {};
          if (tile === TILE.WALL) {
            const alt = ((x * 11 + y * 7) % 5) < 2;
-           ctx.fillStyle = alt ? (biome.wall2 || '#2c2338') : (biome.wall || '#463052');
+           ctx.fillStyle = alt ? (biome.wall || '#514065') : (biome.wall2 || '#342a45');
            ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
-          ctx.fillStyle = 'rgba(255,255,255,0.045)';
-          ctx.fillRect(sx + 2, sy + 2, CELL_SIZE - 4, 1);
-          ctx.fillStyle = 'rgba(0,0,0,0.16)';
-          ctx.fillRect(sx + 1, sy + CELL_SIZE - 4, CELL_SIZE - 2, 3);
-           ctx.strokeStyle = biome.border || 'rgba(160,120,220,0.28)';
+           ctx.fillStyle = 'rgba(255,255,255,0.07)';
+           ctx.fillRect(sx + 1, sy + 1, CELL_SIZE - 2, 2);
+           ctx.fillStyle = 'rgba(0,0,0,0.18)';
+           ctx.fillRect(sx + 1, sy + CELL_SIZE - 4, CELL_SIZE - 2, 3);
+           ctx.strokeStyle = biome.border || 'rgba(210,170,255,0.30)';
            ctx.strokeRect(sx + 0.5, sy + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
-         } else if (tile === TILE.FLOOR) {
-           // Check if monster is on this tile
-           const key = `${x},${y}`;
-           if (dungeon._monsters && dungeon._monsters.has(key) && !isInCombat()) {
-             const mon = dungeon._monsters.get(key);
-             drawBiomeFloor(ctx, sx, sy, x, y, dungeon.biome);
-             drawMonsterOnMap(mon, sx, sy, x, y);
-             continue; // Skip floor rendering
+         } else {
+           drawBiomeFloor(ctx, sx, sy, x, y, biome);
+           if (tile === TILE.STAIRS_DOWN) {
+             const cx = sx + CELL_SIZE / 2;
+             const cy = sy + CELL_SIZE / 2;
+             ctx.save();
+             ctx.shadowColor = 'rgba(255,190,70,0.9)';
+             ctx.shadowBlur = 10;
+             ctx.fillStyle = 'rgba(255,172,54,0.20)';
+             ctx.beginPath();
+             ctx.arc(cx, cy, CELL_SIZE * 0.48, 0, Math.PI * 2);
+             ctx.fill();
+             ctx.fillStyle = biome.stairs || '#ffcf5a';
+             ctx.font = `bold ${Math.max(14, CELL_SIZE - 2)}px "KaiTi","SimSun",serif`;
+             ctx.fillText('▽', cx, cy + 1);
+             ctx.restore();
            }
-           drawBiomeFloor(ctx, sx, sy, x, y, dungeon.biome);
-           // Check for material on this tile
-           const matIdx = dungeon._materials ? dungeon._materials.findIndex(m => m.x === x && m.y === y) : -1;
-           if (matIdx >= 0) {
-             const mat = dungeon._materials[matIdx];
-             // Draw material sprite
-             ctx.fillStyle = mat.color;
-             ctx.fillRect(sx + 5, sy + 5, 8, 8);
-             ctx.fillStyle = 'rgba(255,255,255,0.5)';
-             ctx.font = '8px serif';
-             ctx.fillText('✦', sx + 5, sy + 11);
-           } else {
-             // Floor texture dots
-             if ((x + y * 3) % 17 === 0) {
-               ctx.fillStyle = 'rgba(30,18,40,0.5)';
-               ctx.fillRect(sx + 2, sy + 2, 2, 2);
-             }
-           }
-         } else if (tile === TILE.STAIRS_DOWN) {
-           drawBiomeFloor(ctx, sx, sy, x, y, dungeon.biome);
-           // Draw stairs icon (descending steps)
-           ctx.fillStyle = dungeon.biome?.stairs || '#ff9944';
-           ctx.font = `${CELL_SIZE - 2}px serif`;
-           ctx.fillText('▽', sx + 1, sy + CELL_SIZE - 3);
          }
+         applyTileFog(sx, sy, x, y);
        }
      }
+     ctx.restore();
+     renderDomMapOverlay();
+   }
+
+   function drawMapHints() {
+     const px = Math.floor(player?.x ?? 0);
+     const py = Math.floor(player?.y ?? 0);
+     const hints = [];
+     let stairs = null;
+     for (let y = 0; y < dungeon.height; y++) {
+       for (let x = 0; x < dungeon.width; x++) {
+         if (dungeon.grid[y][x] === TILE.STAIRS_DOWN && discoveredMap.has(`${x},${y}`)) stairs = { x, y, label: '出口' };
+       }
+     }
+     if (stairs) hints.push(stairs);
+     if (dungeon._monsters) {
+       let nearest = null;
+       for (const [key, mon] of dungeon._monsters.entries()) {
+         const [x, y] = key.split(',').map(Number);
+         if (!visibleMap.has(key)) continue;
+         const dist = Math.hypot(x - px, y - py);
+         if (!nearest || dist < nearest.dist) nearest = { x, y, dist, label: mon.isBoss ? 'Boss' : '妖物', boss: !!mon.isBoss };
+       }
+       if (nearest) hints.push(nearest);
+     }
+     ctx.save();
+     ctx.textAlign = 'center';
+     ctx.textBaseline = 'middle';
+     ctx.font = 'bold 11px "KaiTi","SimSun",serif';
+     for (const hint of hints) {
+       const sx = hint.x * CELL_SIZE - camera.x + CELL_SIZE / 2;
+       const sy = hint.y * CELL_SIZE - camera.y - 10;
+       if (sx < 8 || sx > canvasW - 8 || sy < 20 || sy > canvasH - 140) continue;
+       ctx.fillStyle = hint.boss ? 'rgba(120,30,150,0.86)' : 'rgba(20,28,42,0.78)';
+       ctx.strokeStyle = hint.boss ? 'rgba(245,160,255,0.85)' : 'rgba(255,220,120,0.65)';
+       ctx.lineWidth = 1;
+       const w = hint.label.length * 12 + 14;
+       ctx.beginPath();
+       ctx.roundRect(sx - w / 2, sy - 9, w, 18, 8);
+       ctx.fill();
+       ctx.stroke();
+       ctx.fillStyle = hint.boss ? '#ffd6ff' : '#ffeaa0';
+       ctx.fillText(hint.label, sx, sy);
+     }
+     ctx.restore();
+   }
+
+   function drawMiniMap() {
+     if (!dungeon || canvasW < 320) return;
+     const scale = Math.max(2, Math.min(4, Math.floor(canvasW / 140)));
+     const w = dungeon.width * scale;
+     const h = dungeon.height * scale;
+     const x0 = canvasW - w - 10;
+     const y0 = 48;
+     if (x0 < 8 || h > canvasH * 0.36) return;
+     ctx.save();
+     ctx.fillStyle = 'rgba(8,12,22,0.68)';
+     ctx.strokeStyle = 'rgba(220,190,255,0.28)';
+     ctx.lineWidth = 1;
+     ctx.beginPath();
+     ctx.roundRect(x0 - 5, y0 - 5, w + 10, h + 10, 8);
+     ctx.fill();
+     ctx.stroke();
+     for (let y = 0; y < dungeon.height; y++) {
+       for (let x = 0; x < dungeon.width; x++) {
+         const key = `${x},${y}`;
+         if (!discoveredMap.has(key)) continue;
+         const tile = dungeon.grid[y][x];
+         if (tile === TILE.WALL) ctx.fillStyle = 'rgba(80,70,95,0.42)';
+         else if (tile === TILE.STAIRS_DOWN) ctx.fillStyle = '#ffdd55';
+         else {
+           const type = roomTypeAt(x, y);
+           ctx.fillStyle = type === 'boss' ? '#b45cff' : type === 'treasure' ? '#f5c849' : type === 'elite' ? '#f06b56' : '#8fb0c8';
+         }
+         ctx.globalAlpha = visibleMap.has(key) ? 0.95 : 0.45;
+         ctx.fillRect(x0 + x * scale, y0 + y * scale, scale, scale);
+       }
+     }
+     ctx.globalAlpha = 1;
+     if (dungeon._monsters) {
+       for (const [key, mon] of dungeon._monsters.entries()) {
+         if (!visibleMap.has(key)) continue;
+         const [mx, my] = key.split(',').map(Number);
+         ctx.fillStyle = mon.isBoss ? '#ff80ff' : '#ff5a5a';
+         ctx.fillRect(x0 + mx * scale - 1, y0 + my * scale - 1, scale + 2, scale + 2);
+       }
+     }
+     ctx.fillStyle = '#7dffb2';
+     ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+     const px = x0 + Math.floor(player.x) * scale;
+     const py = y0 + Math.floor(player.y) * scale;
+     ctx.fillRect(px - 2, py - 2, scale + 4, scale + 4);
+     ctx.strokeRect(px - 2.5, py - 2.5, scale + 5, scale + 5);
+     ctx.restore();
    }
 
    function drawMonsterOnMap(mon, sx, sy, mapX, mapY) {
@@ -1329,22 +1979,9 @@ function generateNewFloor() {
      ctx.restore();
    }
    function drawPlayer() {
-     const sx = player.x * CELL_SIZE - camera.x;
-     const sy = player.y * CELL_SIZE - camera.y;
-     // Body
-     ctx.fillStyle = '#d4a0ff';
-     ctx.fillRect(sx + 4, sy + 3, CELL_SIZE - 8, CELL_SIZE - 6);
-     // Head
-     ctx.fillStyle = '#ffccaa';
-     ctx.fillRect(sx + 5, sy + 1, CELL_SIZE - 10, 4);
-     // Eyes
-     ctx.fillStyle = '#1a1025';
-     ctx.fillRect(sx + 6, sy + 2, 2, 2);
-     ctx.fillRect(sx + CELL_SIZE - 10, sy + 2, 2, 2);
-     // Glow aura
-     ctx.fillStyle = `rgba(180,130,220,${0.2 + Math.sin(gameTicks * 0.05) * 0.1})`;
-     ctx.fillRect(sx - 1, sy - 1, CELL_SIZE + 2, CELL_SIZE + 2);
-   }
+    // Player is rendered in the DOM HD map layer for crisper mobile display.
+  }
+
    // ─── Simple Sound Effects (Web Audio API) ───
    let audioCtx = null;
    function initAudio() {
@@ -1381,12 +2018,10 @@ function generateNewFloor() {
    function sfxLevelUp() { playBeep(330, 0.15, 'sine', 0.04); playBeep(440, 0.12, 'sine', 0.03); playBeep(550, 0.1, 'sine', 0.03); }
    function clearCanvas() {
      ctx.save();
+     ctx.clearRect(0, 0, canvasW, canvasH);
      if (screenShake.duration > 0) {
        ctx.translate(screenShake.x, screenShake.y);
      }
-     const biome = dungeon?.biome || {};
-     ctx.fillStyle = biome.bg || '#101018';
-     ctx.fillRect(-4, -4, canvasW + 8, canvasH + 8);
    }
   function drawInventory() {
     if (!showInventory) return;
@@ -1402,6 +2037,8 @@ function generateNewFloor() {
     p.addEventListener('click', e => {
       if (e.target.closest('.char-close')) {
         showCharacterPanel = false;
+        characterPanelLastHtml = '';
+        closeCharacterDetailPopupDom();
         syncBodyPanelState();
       }
     });
@@ -1410,6 +2047,7 @@ function generateNewFloor() {
         e.preventDefault();
         showCharacterPanel = false;
         characterPanelLastHtml = '';
+        closeCharacterDetailPopupDom();
         syncBodyPanelState();
         return;
       }
@@ -1436,27 +2074,69 @@ function generateNewFloor() {
     document.body.appendChild(p);
     return p;
   }
+  function characterDetailDom() {
+    const slot = characterEquipmentDetailSlot;
+    const item = slot ? player.equipment?.[slot] : null;
+    return item ? { type: 'detail', item, slot, label: SLOT_NAMES?.[slot]?.name || slot } : null;
+  }
+  function closeCharacterDetailPopupDom() {
+    characterEquipmentDetailSlot = null;
+    const popup = document.querySelector('#character-dom-panel .char-detail-popup-layer');
+    if (popup) popup.remove();
+    const p = document.getElementById('character-dom-panel');
+    if (p) p.querySelectorAll('.char-equip-card.active').forEach(card => card.classList.remove('active'));
+  }
+  function showCharacterDetailPopupDom() {
+    const p = document.getElementById('character-dom-panel');
+    if (!p) return;
+    const detail = characterDetailDom();
+    if (!detail) { closeCharacterDetailPopupDom(); return; }
+    let layer = p.querySelector('.char-detail-popup-layer');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'char-detail-popup-layer';
+      p.appendChild(layer);
+      layer.addEventListener('click', e => {
+        if (e.target === layer || e.target.closest('[data-popup-close]')) {
+          e.preventDefault();
+          closeCharacterDetailPopupDom();
+        }
+      });
+      layer.addEventListener('touchstart', e => {
+        if (e.target === layer || e.target.closest('[data-popup-close]')) {
+          e.preventDefault();
+          closeCharacterDetailPopupDom();
+        }
+        e.stopPropagation();
+      }, { passive: false });
+      layer.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+    }
+    const title = `${detail.label || '装备'}详情`;
+    layer.innerHTML = `<div class="char-detail-popup-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <button class="popup-close" type="button" data-popup-close="1" aria-label="关闭详情">×</button>
+      <div class="popup-title">${escapeHtml(title)}</div>
+      <div class="char-detail-wrap">${itemDetailHtmlDom(detail)}</div>
+    </div>`;
+    bindInventoryDetailActionsDom(
+      p,
+      layer.querySelector('.char-detail-wrap'),
+      () => characterDetailDom(),
+      () => { characterPanelLastHtml = ''; renderCharacterDomPanel(); showCharacterDetailPopupDom(); },
+      () => { closeCharacterDetailPopupDom(); }
+    );
+  }
   function bindCharacterPanelActionsDom(p) {
     if (!p) return;
     p.querySelectorAll('.char-equip-card[data-char-equip-slot]').forEach(card => {
       bindInventoryTapDom(card, () => {
-        characterEquipmentDetailSlot = card.dataset.charEquipSlot;
-        characterPanelLastHtml = '';
-        renderCharacterDomPanel();
+        const slot = card.dataset.charEquipSlot;
+        if (!player.equipment?.[slot]) return;
+        characterEquipmentDetailSlot = slot;
+        p.querySelectorAll('.char-equip-card.active').forEach(el => el.classList.remove('active'));
+        card.classList.add('active');
+        showCharacterDetailPopupDom();
       });
     });
-    const detailWrap = p.querySelector('.char-detail-wrap');
-    bindInventoryDetailActionsDom(
-      p,
-      detailWrap,
-      () => {
-        const slot = characterEquipmentDetailSlot;
-        const item = slot ? player.equipment?.[slot] : null;
-        return item ? { type: 'detail', item, slot, label: SLOT_NAMES?.[slot]?.name || slot } : null;
-      },
-      () => { characterPanelLastHtml = ''; renderCharacterDomPanel(); },
-      () => { characterEquipmentDetailSlot = null; }
-    );
   }
   function formatCharStatValue(v, suffix = '') {
     const n = Number(v || 0);
@@ -1488,6 +2168,27 @@ function generateNewFloor() {
       return `<span class="bonus-chip"><em>${escapeHtml(label)}</em><b>${formatCharStatValue(v, suffix)}</b></span>`;
     }).join('') || '<span class="muted">暂无装备加成</span>';
   }
+  function getEquipmentSetRowsDom() {
+    if (!player || typeof getActiveSetBonuses !== 'function') return '<div class="set-summary empty">暂无套装效果</div>';
+    const bonuses = getActiveSetBonuses(player.equipment || {});
+    if (!bonuses.length) return '<div class="set-summary empty">暂无套装效果</div>';
+    const grouped = {};
+    bonuses.forEach(bonus => {
+      const id = bonus.setId || bonus.setName || 'set';
+      if (!grouped[id]) grouped[id] = { name: bonus.setName || '套装', icon: bonus.setIcon || '◇', color: bonus.setColor || '#d4a0ff', rows: [] };
+      grouped[id].rows.push(bonus);
+    });
+    return Object.values(grouped).map(set => `<div class="set-summary" style="--set-color:${escapeHtml(set.color)}">
+      <div class="set-summary-title"><span>${escapeHtml(set.icon)} ${escapeHtml(set.name)}</span><small>${Math.max(...set.rows.map(r => Number(r.owned || 0)))}/8</small></div>
+      ${set.rows.map(row => `<div class="set-summary-row ${row.active ? 'active' : ''}"><b>${row.count}件</b><span>${escapeHtml(row.label || '')}</span></div>`).join('')}
+    </div>`).join('');
+  }
+  function scrollCharacterDetailIntoViewDom() {
+    const p = document.getElementById('character-dom-panel');
+    const section = p?.querySelector('.char-focus-detail');
+    if (!section) return;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   function renderCharacterDomPanel() {
     const p = ensureCharacterDomPanel();
     if (!showCharacterPanel) return;
@@ -1510,25 +2211,28 @@ function generateNewFloor() {
         <div class="eq-info"><div class="eq-name-row"><b>${escapeHtml(slotInfo.name)}</b><span>${escapeHtml(displayName)}</span></div><div class="eq-stats">${stats}</div></div>
       </button>`;
     }).join('');
-    const detailSlot = characterEquipmentDetailSlot;
-    const detailItem = detailSlot ? player.equipment?.[detailSlot] : null;
-    const detailLabel = detailSlot ? (SLOT_NAMES?.[detailSlot]?.name || detailSlot) : '';
-    const detailHtml = itemDetailHtmlDom(detailItem ? { type: 'detail', item: detailItem, label: detailLabel, slot: detailSlot } : null, '点上方装备槽查看详情，可强化或卸下');
+    const detailItem = characterDetailDom()?.item || null;
     const html = `
-      <div class="char-head"><div><div class="char-title">👤 角色属性</div><div class="char-sub">${realm} · 第 ${dungeonLevel} 层 · (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><button class="char-close">×</button></div>
+      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 套装 · 战力</div></div><button class="char-close">×</button></div>
       <div class="char-body">
-        <div class="char-section char-realm"><div class="realm-name">${realm}</div><div class="stones">灵石 ${player.spiritStones || 0}</div><div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div></div>
+        <div class="char-section char-equipment-section top-equipment"><h3>当前装备 <small>点击已装备槽位，直接弹出详情卡片</small></h3><div class="char-equip-grid">${slots}</div></div>
+        <div class="char-section char-realm">
+          <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">第 ${dungeonLevel} 层 · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
+          <div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div>
+        </div>
         <div class="char-stats-grid">
           <div><b>${player.hp}</b><span>/ ${player.maxHp}</span><em>生命</em></div>
           <div><b>${player.mp}</b><span>/ ${player.maxMp}</span><em>灵力</em></div>
           <div><b>${player.atk}</b><span></span><em>攻击</em></div>
           <div><b>${player.def}</b><span></span><em>防御</em></div>
+          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('crit') : (player.crit || 0))}</b><span>%</span><em>暴击</em></div>
+          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('dodge') : (player.dodge || 0))}</b><span>%</span><em>闪避</em></div>
+          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('speed') : (player.speed || 0))}</b><span></span><em>速度</em></div>
           <div><b>${availableSkillPoints || 0}</b><span></span><em>技能点</em></div>
           <div><b>${(player.inventory || []).length}</b><span></span><em>背包装备</em></div>
         </div>
         <div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div>
-        <div class="char-section char-equipment-section"><h3>当前装备 <small>点击槽位看详情</small></h3><div class="char-equip-grid">${slots}</div></div>
-        <div class="char-section char-equip-detail-section"><h3>装备详情</h3><div class="char-detail-wrap">${detailHtml}</div></div>
+        <div class="char-section"><h3>套装效果</h3><div class="char-set-list">${getEquipmentSetRowsDom()}</div></div>
       </div>`;
     if (html !== characterPanelLastHtml) {
       const body = p.querySelector('.char-body');
@@ -1538,6 +2242,7 @@ function generateNewFloor() {
       if (nextBody) nextBody.scrollTop = previousScrollTop;
       characterPanelLastHtml = html;
       bindCharacterPanelActionsDom(p);
+      if (detailItem) showCharacterDetailPopupDom();
     }
   }
   function drawCharacterPanel() {
@@ -1732,16 +2437,68 @@ function generateNewFloor() {
   function skillRealmName(idx) {
     return (REALMS && REALMS[idx] && REALMS[idx].name) ? REALMS[idx].name : `境界${idx + 1}`;
   }
+  function getActualSkillMpCostDom(skill) {
+    if (!skill) return 0;
+    const mult = typeof getDoctrineMpCostMultiplier === 'function' ? getDoctrineMpCostMultiplier(skill) : 1;
+    return Math.max(0, Math.floor((skill.mpCost || 0) * mult));
+  }
+  function getSkillEstimatedValuesDom(skill, enemy = null) {
+    if (!skill || !player) return { damage: '—', mpCost: 0, chips: [] };
+    const mpCost = getActualSkillMpCostDom(skill);
+    const hits = Math.max(1, Number(skill.hits || 1));
+    const doctrineBonus = typeof getDoctrineSkillDamageBonus === 'function' ? getDoctrineSkillDamageBonus(skill) : 0;
+    const pierce = Math.min(0.85, Number(skill.armorPierce || 0) + (typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce() : 0));
+    const defMult = enemy && typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
+    const enemyDef = enemy ? Math.max(0, Math.floor((enemy.def || 0) * defMult * (1 - pierce))) : 0;
+    const dmgMult = Number(skill.dmgMult || 0);
+    const basePerHit = dmgMult > 0 ? Math.max(1, Math.floor(player.atk * (dmgMult * (1 + doctrineBonus)) / hits - enemyDef)) : 0;
+    const low = dmgMult > 0 ? Math.max(1, (basePerHit - 3) * hits) : 0;
+    const high = dmgMult > 0 ? Math.max(low, (basePerHit + 3) * hits) : 0;
+    const critPct = Math.round((0.15 + Number(skill.critBonus || 0) + (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0)) * 100);
+    const chips = [];
+    if (dmgMult > 0) chips.push(['预计伤害', low === high ? `${low}` : `${low}-${high}`]);
+    if (hits > 1) chips.push(['段数', `${hits}段`]);
+    if (pierce > 0) chips.push(['破防', `${Math.round(pierce * 100)}%`]);
+    if (dmgMult > 0) chips.push(['暴击', `${critPct}%`]);
+    for (const eff of skill.effects || []) {
+      if (eff.type === 'burn' || eff.type === 'bleed') {
+        const amp = eff.type === 'burn' && typeof getPassiveBurnAmp === 'function' ? getPassiveBurnAmp() : 0;
+        const tick = Math.max(1, Math.floor(player.atk * Number(eff.ratio || 0.15) * (1 + amp)));
+        chips.push([eff.type === 'burn' ? '灼烧' : '流血', `${tick}/回合×${eff.turns || 2}`]);
+      } else if (eff.type === 'weaken') chips.push(['虚弱', `${Math.round((eff.ratio || 0.15) * 100)}%×${eff.turns || 2}回合`]);
+      else if (eff.type === 'defBreak') chips.push(['破甲', `${Math.round((eff.ratio || 0.15) * 100)}%×${eff.turns || 2}回合`]);
+      else if (eff.type === 'freeze') chips.push(['冻结', `${Math.round((eff.chance ?? 1) * 100)}%×${eff.turns || 1}回合`]);
+      else if (eff.type === 'stunChance') chips.push(['麻痹', `${Math.round((eff.chance ?? 0.25) * 100)}%×${eff.turns || 1}回合`]);
+      else if (eff.type === 'healSelf') chips.push(['治疗', `${Math.floor(player.maxHp * (eff.ratio || 0.15))}`]);
+      else if (eff.type === 'guard') chips.push(['护盾', `${Math.round((eff.ratio || 0.25) * 100)}%×${eff.turns || 2}回合`]);
+      else if (eff.type === 'splash') chips.push(['溅射', `${eff.count || 2}目标×${Math.round((eff.ratio || 0.35) * 100)}%`]);
+      else if (eff.type === 'execute') chips.push(['斩杀', `生命≤${Math.round((eff.ratio || 0.1) * 100)}%`]);
+      else if (eff.type === 'refundOnKill') chips.push(['击杀返灵', `${Math.round((eff.ratio || 0.4) * 100)}%`]);
+      else if (eff.type === 'passiveStat') chips.push(['被动属性', `${statLabelDom(eff.stat)} +${Math.round((eff.value || 0) * 100)}%`]);
+      else if (eff.type === 'burnAmp') chips.push(['灼烧强化', `+${Math.round((eff.value || 0) * 100)}%`]);
+      else if (eff.type === 'critBonusPassive') chips.push(['暴击精通', `+${Math.round((eff.value || 0) * 100)}%`]);
+      else if (eff.type === 'armorPiercePassive') chips.push(['破甲精通', `+${Math.round((eff.value || 0) * 100)}%`]);
+      else if (eff.type === 'turnMpRegen') chips.push(['回合回灵', `${Math.max(1, Math.floor(player.maxMp * (eff.ratio || 0.03)))}`]);
+      else if (eff.type === 'lowHpHeal') chips.push(['濒死触发', `血量≤${Math.round((eff.threshold || 0.3) * 100)}%`]);
+      else if (eff.type === 'victoryRecover') chips.push(['击杀回元', `命${Math.round((eff.hpRatio || 0) * 100)}% 灵${Math.round((eff.mpRatio || 0) * 100)}%`]);
+    }
+    return { damage: low ? (low === high ? `${low}` : `${low}-${high}`) : '—', mpCost, chips };
+  }
+  function skillValueChipsHtmlDom(skill, enemy = null) {
+    const values = getSkillEstimatedValuesDom(skill, enemy);
+    return values.chips.map(([k, v]) => `<span><em>${escapeHtml(k)}</em><b>${escapeHtml(v)}</b></span>`).join('');
+  }
   function skillNodeState(tree, row) {
     const skill = SKILL_TREES[tree].skills[row];
     const learned = learnedSkills.some(s => s.tree === tree && s.index === row);
     const locked = skill.unlockRealm > player.realmIndex;
-    const prevLearned = row === 0 || learnedSkills.some(s => s.tree === tree && s.index === row - 1);
-    const nextLearned = learnedSkills.some(s => s.tree === tree && s.index === row + 1);
-    const canLearn = !learned && !locked && prevLearned && availableSkillPoints > 0;
-    const canForget = learned && !nextLearned;
-    const blocked = !learned && !locked && !prevLearned;
-    return { skill, learned, locked, canLearn, canForget, blocked };
+    const prereqs = typeof getSkillPrereqs === 'function' ? getSkillPrereqs(tree, row) : (row === 0 ? [] : [row - 1]);
+    const prereqMet = typeof areSkillPrereqsMet === 'function' ? areSkillPrereqsMet(tree, row) : (row === 0 || learnedSkills.some(s => s.tree === tree && s.index === row - 1));
+    const requiredByLearned = typeof isSkillRequiredByLearned === 'function' ? isSkillRequiredByLearned(tree, row) : learnedSkills.some(s => s.tree === tree && s.index === row + 1);
+    const canLearn = !learned && !locked && prereqMet && availableSkillPoints > 0;
+    const canForget = learned && !requiredByLearned;
+    const blocked = !learned && !locked && !prereqMet;
+    return { skill, learned, locked, canLearn, canForget, blocked, prereqs };
   }
   function renderSkillsDomPanel() {
     const p = ensureSkillsDomPanel();
@@ -1760,28 +2517,34 @@ function generateNewFloor() {
     const selectedState = skillNodeState(selectedTree, selectedIndex);
     const selectedData = SKILL_TREES[selectedTree];
     const selectedSkill = selectedState.skill;
-    const selectedStatus = selectedState.learned ? '已习得' : selectedState.locked ? `需${skillRealmName(selectedSkill.unlockRealm)}` : selectedState.blocked ? '需先学前置' : selectedState.canLearn ? '可学习' : '技能点不足';
+    const selectedReqText = selectedState.prereqs?.length ? selectedState.prereqs.map(i => SKILL_TREES[selectedTree].skills[i]?.name).filter(Boolean).join(' / ') : '无';
+    const selectedStatus = selectedState.learned ? '已习得' : selectedState.locked ? `需${skillRealmName(selectedSkill.unlockRealm)}` : selectedState.blocked ? `前置：${selectedReqText}` : selectedState.canLearn ? '可学习' : '技能点不足';
     const selectedKind = selectedSkill.kind || 'active';
     const selectedKindLabel = SKILL_KIND_LABELS[selectedKind] || '技能';
     const selectedSummary = getSkillEffectSummary(selectedSkill);
     const selectedEffectText = selectedSkill.effectText || selectedSummary;
     const learnedCount = learnedSkills.length;
     const totalCount = treeNames.reduce((n, t) => n + SKILL_TREES[t].skills.length, 0);
-    const detailHtml = `<div class="detail-kicker">${selectedData.name} · 第 ${selectedIndex + 1} 阶 · ${selectedKindLabel}</div>
-        <div class="detail-title">${selectedSkill.icon || '✦'} ${selectedSkill.name}</div>
-        <div class="detail-status ${selectedState.learned ? 'ok' : selectedState.canLearn ? 'ready' : 'no'}">${selectedStatus}</div>
-        <p class="detail-desc">${selectedSkill.desc}</p>
-        <p class="detail-effect">${selectedEffectText}</p>
-        <div class="detail-tags">${selectedSummary.split(' · ').map(t => `<span>${t}</span>`).join('')}</div>
+    const selectedReqTextSafe = escapeHtml(selectedReqText);
+    const detailTagsHtml = selectedSummary.split(' · ').map(t => `<span>${escapeHtml(t)}</span>`).join('');
+    const skillDmgText = selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—';
+    const detailHtml = `<div class="detail-kicker">${escapeHtml(selectedData.name)} · 第 ${selectedIndex + 1} 阶 · ${escapeHtml(selectedKindLabel)}</div>
+        <div class="detail-title">${escapeHtml(selectedSkill.icon || '✦')} ${escapeHtml(selectedSkill.name)}</div>
+        <div class="detail-status ${selectedState.learned ? 'ok' : selectedState.canLearn ? 'ready' : 'no'}">${escapeHtml(selectedStatus)}</div>
+        <p class="detail-desc">${escapeHtml(selectedSkill.desc)}</p>
+        <p class="detail-effect">${escapeHtml(selectedEffectText)}</p>
+        <div class="detail-tags">${detailTagsHtml}</div>
         <div class="detail-stats compact-stats">
-          <span>类型 <b>${selectedKindLabel}</b></span>
-          <span>灵力 <b>${selectedSkill.mpCost || 0}</b></span>
-          <span>伤害 <b>${selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—'}</b></span>
-          <span>境界 <b>${skillRealmName(selectedSkill.unlockRealm)}</b></span>
+          <span>类型 <b>${escapeHtml(selectedKindLabel)}</b></span>
+          <span>灵力 <b>${escapeHtml(getActualSkillMpCostDom(selectedSkill))}</b></span>
+          <span>伤害 <b>${escapeHtml(skillDmgText)}</b></span>
+          <span>境界 <b>${escapeHtml(skillRealmName(selectedSkill.unlockRealm))}</b></span>
+          <span>前置 <b>${selectedReqTextSafe}</b></span>
         </div>
+        <div class="skill-value-grid">${skillValueChipsHtmlDom(selectedSkill, currentEnemy)}</div>
         <div class="skill-action-row">
-          <button class="skill-learn-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
-          <button class="skill-forget-btn" data-tree="${selectedTree}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
+          <button class="skill-learn-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
+          <button class="skill-forget-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
         </div>`;
     let html = `<div class="panel-head skill-panel-head">
       <span class="ptitle" style="color:#d4a0ff">📜 星盘技能树</span>
@@ -1792,33 +2555,36 @@ function generateNewFloor() {
       <div class="skill-orbit-board">`;
     treeNames.forEach(tree => {
       const td = SKILL_TREES[tree];
-      html += `<section class="skill-branch branch-${tree}" style="--branch-color:${td.color}">
-        <div class="skill-branch-title"><span>${td.name}</span><em>${skillTreeShortName(td.name)}</em></div>
-        <div class="skill-path">`;
+      html += `<section class="skill-branch branch-${cssClassToken(tree)}" style="--branch-color:${safeCssColor(td.color)}">
+        <div class="skill-branch-title"><span>${escapeHtml(td.name)}</span><em>${escapeHtml(skillTreeShortName(td.name))}</em></div>
+        <div class="skill-path branch-layout">`;
       td.skills.forEach((skill, row) => {
         const st = skillNodeState(tree, row);
-        const cls = ['skill-node'];
+        const slot = typeof getSkillBranchSlot === 'function' ? getSkillBranchSlot(skill, row) : `n${row}`;
+        const slotLabel = typeof getSkillBranchLabel === 'function' ? getSkillBranchLabel(slot) : '分支';
+        const cls = ['skill-node', `branch-slot-${slot}`];
         if (st.learned) cls.push('learned');
         if (st.locked) cls.push('locked');
         if (st.canLearn) cls.push('learnable');
         if (st.blocked) cls.push('blocked');
         if (selectedTree === tree && selectedIndex === row) cls.push('selected');
         const icon = st.learned ? '✦' : st.locked ? '🔒' : st.blocked ? '◇' : (skill.icon || '＋');
-        const hint = st.learned ? '已激活' : st.locked ? skillRealmName(skill.unlockRealm) : st.blocked ? '前置' : st.canLearn ? '可点亮' : '缺点数';
+        const reqNames = st.prereqs?.map(i => SKILL_TREES[tree].skills[i]?.name).filter(Boolean).join('/') || '';
+        const hint = st.learned ? '已激活' : st.locked ? skillRealmName(skill.unlockRealm) : st.blocked ? `需${reqNames}` : st.canLearn ? '可点亮' : '缺点数';
         const kind = skill.kind || 'active';
         const kindLabel = SKILL_KIND_LABELS[kind] || '技能';
-        html += `<button class="${cls.join(' ')} kind-${kind}" data-tree="${tree}" data-index="${row}" aria-label="${skill.name}">
-          <span class="node-ring"><b>${icon}</b></span>
+        html += `<button class="${cls.map(c => cssClassToken(c)).join(' ')} kind-${cssClassToken(kind)}" data-tree="${escapeHtml(tree)}" data-index="${row}" aria-label="${escapeHtml(skill.name)}">
+          <span class="node-ring"><b>${escapeHtml(icon)}</b></span>
           <span class="node-copy">
-            <span class="node-name">${skill.name}</span>
-            <span class="node-meta"><i>${kindLabel}</i><small>${hint}</small></span>
+            <span class="node-name">${escapeHtml(skill.name)}</span>
+            <span class="node-meta"><i>${escapeHtml(slotLabel)}</i><i>${escapeHtml(kindLabel)}</i><small>${escapeHtml(hint)}</small></span>
           </span>
         </button>`;
       });
       html += `</div></section>`;
     });
     html += `</div>
-      <aside class="skill-detail-card" style="--branch-color:${selectedData.color}">
+      <aside class="skill-detail-card" style="--branch-color:${safeCssColor(selectedData.color)}">
         ${detailHtml}
       </aside>
       <div class="attr-bar skill-attr-bar">
@@ -1826,12 +2592,12 @@ function generateNewFloor() {
     const attrBtns = [['atk','攻+3','#ff6644'],['def','防+2','#4488ff'],['hp','命+20','#55ff55'],['mp','灵+10','#aaddff']];
     for (const [k,label,clr] of attrBtns) {
       const dis = availableSkillPoints <= 0 ? ' disabled' : '';
-      html += `<button class="attr-btn${dis}" data-attr="${k}" style="--attr-color:${clr};border-color:${clr};color:${clr}">${label}</button>`;
+      html += `<button class="attr-btn${dis}" data-attr="${k}" style="--attr-color:${safeCssColor(clr)};border-color:${safeCssColor(clr)};color:${safeCssColor(clr)}">${escapeHtml(label)}</button>`;
     }
     html += `</div></div>`;
     p.innerHTML = html;
     const detailLayer = ensureSkillDetailLayer();
-    detailLayer.innerHTML = skillDetailModalOpen ? `<div class="skill-modal-backdrop"><aside class="skill-detail-card skill-detail-modal" style="--branch-color:${selectedData.color}">
+    detailLayer.innerHTML = skillDetailModalOpen ? `<div class="skill-modal-backdrop"><aside class="skill-detail-card skill-detail-modal" style="--branch-color:${safeCssColor(selectedData.color)}">
         <button class="skill-modal-close" aria-label="关闭技能详情">×</button>
         ${detailHtml}
       </aside></div>` : '';
@@ -1901,18 +2667,28 @@ function generateNewFloor() {
     </div><div class="panel-body"><div class="alch-layout">
       <div><div class="alch-section-title" style="color:#aaddff">材料背包</div><div class="mat-list">`;
     let shown = 0;
-    for (const mat of MATERIALS) { const c=playerMaterials[mat.id]||0; if(c>0){html+=`<div class="mat-row" style="color:${mat.color}">${mat.name} x${c}</div>`;shown++;} }
+    for (const mat of MATERIALS) {
+      const c = playerMaterials[mat.id] || 0;
+      if (c > 0) {
+        html += `<div class="mat-row" style="color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} x${escapeHtml(c)}</div>`;
+        shown++;
+      }
+    }
     if (!shown) html += '<div class="mat-row" style="color:#666">(空)</div>';
     html += '</div></div><div><div class="alch-section-title" style="color:#ff8844">丹方</div><div class="recipe-list">';
     for (let i = 0; i < RECIPES.length; i++) {
       const r = RECIPES[i];
       let canCraft = true;
-      for (const [mid,req] of Object.entries(r.materials)) { if((playerMaterials[mid]||0)<req){canCraft=false;break;} }
-      const matList = Object.entries(r.materials).map(([mid,cnt])=>{const m=MATERIALS.find(x=>x.id===mid);return `${m?.name||mid}x${cnt}`;}).join(' ');
-      html += `<div class="recipe-card${canCraft?'':' cant-craft'}" data-recipe="${i}" style="border-color:${r.color}">
-        <div class="rc-name" style="color:${r.color}">${r.name}</div>
-        <div class="rc-desc">${r.desc}</div>
-        <div class="rc-mats">材料: ${matList}</div>
+      for (const [mid, req] of Object.entries(r.materials)) { if ((playerMaterials[mid] || 0) < req) { canCraft = false; break; } }
+      const matList = Object.entries(r.materials).map(([mid, cnt]) => {
+        const m = MATERIALS.find(x => x.id === mid);
+        return `${m?.name || mid}x${cnt}`;
+      }).join(' ');
+      const color = safeCssColor(r.color, '#ff8844');
+      html += `<div class="recipe-card${canCraft ? '' : ' cant-craft'}" data-recipe="${i}" style="border-color:${color}">
+        <div class="rc-name" style="color:${color}">${escapeHtml(r.name)}</div>
+        <div class="rc-desc">${escapeHtml(r.desc)}</div>
+        <div class="rc-mats">材料: ${escapeHtml(matList)}</div>
       </div>`;
     }
     html += '</div></div></div></div>';
@@ -1934,25 +2710,70 @@ function generateNewFloor() {
     document.body.appendChild(p);
     return p;
   }
+  function percentTextDom(value) { return `${Math.round(Number(value || 0) * 100)}%`; }
+  function statDeltaListHtmlDom(delta) {
+    if (!delta) return '';
+    const items = [
+      ['生命', delta.hp], ['灵力', delta.mp], ['攻击', delta.atk], ['防御', delta.def], ['技能点', delta.skillPoints],
+    ].filter(([,v]) => Number(v || 0) !== 0);
+    return items.map(([k,v]) => `<span><em>${escapeHtml(k)}</em><b>+${escapeHtml(v)}</b></span>`).join('');
+  }
+  function doctrineStatHtmlDom(info) {
+    return Object.entries(info?.stats || {}).map(([k, v]) => `<span>${escapeHtml(statLabelDom(k))} ${escapeHtml(formatStatValueDom(k, /Pct$/.test(k) ? v : v))}</span>`).join('');
+  }
   function renderBreakthroughDomPanel() {
     const p = ensureBreakthroughDomPanel();
     const next = REALMS[player.realmIndex + 1];
     const hasBreakthrough = breakthroughQueue && next;
-    p.innerHTML = `<div class="panel-head">
-      <span class="ptitle" style="color:#ffdd44">⚡ 渡劫突破 ⚡</span>
-      <span class="psub">${hasBreakthrough ? '经验已满，突破成功率 80%' : (next ? '经验不足，继续修炼' : '已达顶峰')}</span>
-      <button class="pclose">×</button>
-    </div><div class="panel-body">
-      <div class="bt-info">
-        <div class="bt-realm">当前境界: ${player.realm.name}</div>
-        <div class="bt-next">下一境界: ${next?.name||'顶峰'}</div>
-      </div>
-      <button class="bt-btn" id="bt-go-btn"${hasBreakthrough?'':' disabled style="opacity:0.4"'}">${hasBreakthrough ? '「尝试突破」' : (next ? '经验不足，无法突破' : '已至顶峰')}</button>
+    const preview = typeof getBreakthroughPreview === 'function' ? getBreakthroughPreview() : null;
+    const chance = typeof getBreakthroughChanceBreakdown === 'function' ? getBreakthroughChanceBreakdown() : { total: 0.8, parts: [{ label: '基础', value: 0.8 }] };
+    const doctrine = typeof getDoctrineInfo === 'function' ? getDoctrineInfo() : null;
+    const needFoundation = !!(hasBreakthrough && player.realmIndex === 0 && !player.daoFoundation);
+    if (!selectedDaoFoundation || !(typeof DAO_FOUNDATIONS !== 'undefined' && DAO_FOUNDATIONS[selectedDaoFoundation])) selectedDaoFoundation = 'sword';
+    const progressPct = next ? Math.min(100, Math.floor((player.xp / Math.max(1, player.realm.xpNeeded)) * 100)) : 100;
+    const foundationHtml = needFoundation && typeof DAO_FOUNDATIONS !== 'undefined' ? `<section class="bt-section bt-foundation">
+      <div class="bt-section-title">选择道基 <small>首次突破必选，决定长期流派</small></div>
+      <div class="dao-grid">${Object.values(DAO_FOUNDATIONS).map(info => `<button type="button" class="dao-card ${selectedDaoFoundation === info.id ? 'active' : ''}" data-dao="${escapeHtml(info.id)}" style="--dao-color:${escapeHtml(info.color)}">
+        <i>${escapeHtml(info.icon)}</i><b>${escapeHtml(info.name)}</b><p>${escapeHtml(info.desc)}</p>
+        <div class="dao-stats">${doctrineStatHtmlDom(info)}</div>
+      </button>`).join('')}</div>
+    </section>` : `<section class="bt-section bt-foundation locked">
+      <div class="bt-section-title">当前道基</div>
+      <div class="dao-current" style="--dao-color:${escapeHtml((doctrine && doctrine.color) || '#9f8fb0')}"><i>${escapeHtml((doctrine && doctrine.icon) || '○')}</i><b>${escapeHtml((doctrine && doctrine.name) || '尚未奠基')}</b><span>${escapeHtml((doctrine && doctrine.desc) || '筑基时选择一道基方向')}</span></div>
+    </section>`;
+    p.innerHTML = `<div class="panel-head bt-head">
+      <span class="ptitle" style="color:#ffdd44">⚡ 渡劫突破</span>
+      <span class="psub">${hasBreakthrough ? `成功率 ${percentTextDom(chance.total)}` : (next ? '经验不足，继续修炼' : '已达顶峰')}</span>
+      <button class="pclose" type="button">×</button>
+    </div><div class="panel-body bt-body">
+      <section class="bt-hero">
+        <div><em>当前境界</em><strong>${escapeHtml(player.realm.name)}</strong></div>
+        <div class="bt-arrow">→</div>
+        <div><em>下一境界</em><strong>${escapeHtml(next?.name || '顶峰')}</strong></div>
+      </section>
+      <div class="bt-xp"><div class="bt-xp-top"><span>修为经验</span><b>${escapeHtml(player.xp)} / ${escapeHtml(player.realm.xpNeeded || '∞')}</b></div><div class="bt-xp-bar"><i style="width:${progressPct}%"></i></div></div>
+      ${foundationHtml}
+      <section class="bt-section">
+        <div class="bt-section-title">突破收益预览</div>
+        <div class="bt-reward-grid">${preview ? statDeltaListHtmlDom(preview) : '<span><em>状态</em><b>已达顶峰</b></span>'}</div>
+        <div class="bt-unlocks">${(preview?.unlocks || ['暂无新解锁']).map(x => `<span>✦ ${escapeHtml(x)}</span>`).join('')}</div>
+      </section>
+      <section class="bt-section bt-chance">
+        <div class="bt-section-title">成功率来源 <small>失败会累计补偿，不再纯惩罚</small></div>
+        <div class="chance-meter"><i style="width:${Math.round((chance.total || 0) * 100)}%"></i><b>${percentTextDom(chance.total)}</b></div>
+        <div class="chance-parts">${(chance.parts || []).map(part => `<span><em>${escapeHtml(part.label)}</em><b>+${percentTextDom(part.value)}</b></span>`).join('')}</div>
+        <div class="bt-fail-note">失败：保留 ${player.daoFoundation === 'body' || Number(player.breakthroughProtect || 0) > 0 ? '约 86%' : '约 72%'} 经验，并获得下次成功率补偿${Number(player.breakthroughProtect || 0) > 0 ? '（固元丹保护中）' : ''}</div>
+      </section>
+      <button class="bt-btn" id="bt-go-btn"${hasBreakthrough ? '' : ' disabled style="opacity:0.45"'}>${hasBreakthrough ? '确认突破' : (next ? '经验不足，无法突破' : '已至顶峰')}</button>
     </div>`;
+    p.querySelectorAll('[data-dao]').forEach(el => {
+      const fn = () => { selectedDaoFoundation = el.dataset.dao || 'sword'; renderBreakthroughDomPanel(); };
+      bindInventoryTapDom(el, fn);
+    });
     const btn = document.getElementById('bt-go-btn');
     if (btn && !btn.disabled) {
-      const fn = () => { doBreakthrough(); if (showBreakthroughUI) renderBreakthroughDomPanel(); };
-      btn.addEventListener('click', fn); btn.addEventListener('touchstart', e => { e.preventDefault(); fn(); }, { passive: false });
+      const fn = () => { doBreakthrough(selectedDaoFoundation); if (showBreakthroughUI) renderBreakthroughDomPanel(); };
+      bindInventoryTapDom(btn, fn);
     }
   }
 
@@ -2002,29 +2823,36 @@ function generateNewFloor() {
   }
   function renderCombatDomPanel() {
     const p = ensureCombatDomPanel();
-    if (!isInCombat() || !currentEnemy) { p.innerHTML=''; return; }
+    if (!isInCombat() || !currentEnemy) { p.innerHTML=''; combatSkillDrawerOpen = false; return; }
     const eHpPct = currentEnemy.maxHp ? Math.max(0, currentEnemy.hp / currentEnemy.maxHp) : 1;
-    const pEnemyName = `👺 ${currentEnemy.name}`;
-    const pEnemyStats = `ATK:${currentEnemy.atk}  DEF:${currentEnemy.def}`;
-    const pPlayerStats = `🧘 HP:${player.hp}/${player.maxHp}  MP:${player.mp}/${player.maxMp}  ATK:${player.atk}  DEF:${player.def}`;
-
-    // Weapon display
+    const enemyDisplayName = currentEnemy.title || currentEnemy.name;
+    const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
+    const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
+    const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
+    const shownEnemyDef = Math.floor(currentEnemy.def * enemyBuffDef);
+    const playerHpPct = player.maxHp ? Math.max(0, Math.min(100, player.hp / player.maxHp * 100)) : 100;
+    const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
+    const pEnemyName = `${currentEnemy.isBoss ? '👑' : '👺'} ${enemyDisplayName}`;
     const weaponItem = player.equipment?.weapon;
     const weaponIcon = weaponItem?.icon || '⚔️';
     const weaponRarity = weaponItem?.rarity || null;
     const weaponRarityColor = weaponItem?.rarityColor || '#6d5a78';
     const rarityShort = rarityShortDom(weaponRarity);
     const weaponName = weaponItem ? weaponItem.name : '未装备武器';
-    const weaponHtml = `<div class="cbt-weapon" ${weaponRarity ? `style="--weapon-color:${weaponRarityColor}"` : ''}>
-      <div class="cbt-weapon-icon-box">
-        <span class="cbt-weapon-icon">${weaponIcon}</span>
-        <span class="cbt-weapon-rarity">${weaponRarity ? rarityShort : '-'}</span>
-      </div>
-      <span class="cbt-weapon-name">${weaponName}</span>
-    </div>`;
-    const logsHtml = combatLogBuffer.map(l => `<span class="cbt-log-entry" style="color:${l.color}">${l.text}</span>`).join(' · ');
-    
-    // Skill buttons
+    const safeCombatColor = color => /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#d4c8b0';
+    const weaponHtml = `<div class="cbt-weapon" ${weaponRarity ? `style="--weapon-color:${safeCombatColor(weaponRarityColor)}"` : ''}><div class="cbt-weapon-icon-box"><span class="cbt-weapon-icon">${escapeHtml(weaponIcon)}</span><span class="cbt-weapon-rarity">${weaponRarity ? escapeHtml(rarityShort) : '-'}</span></div><span class="cbt-weapon-name">${escapeHtml(weaponName)}</span></div>`;
+    const statusLabelMap = {
+      burn: ['🔥', '灼烧'], bleed: ['🩸', '流血'], freeze: ['🧊', '冻结'], stun: ['⚡', '麻痹'],
+      weaken: ['🌑', '虚弱'], defBreak: ['🗡️', '破甲'], poison: ['☠️', '中毒'], curse: ['🌘', '诅咒'],
+      slow: ['🕸️', '迟缓'], entangle: ['🌿', '束缚'], guard: ['🛡️', '护体']
+    };
+    const statusChipsHtml = (list = []) => (list || []).slice(0, 5).map(st => {
+      const [icon, label] = statusLabelMap[st.type] || ['✦', st.type || '状态'];
+      return `<span class="cbt-status-chip status-${cssClassToken(st.type || 'x')}">${escapeHtml(icon)}${escapeHtml(label)}<em>${escapeHtml(st.turns || 1)}</em></span>`;
+    }).join('');
+    const enemyStatusHtml = statusChipsHtml(currentEnemy._statusEffects || []);
+    const playerStatusHtml = statusChipsHtml(player._statusEffects || []);
+    const logsHtml = combatLogBuffer.slice(-6).map(l => `<div class="cbt-log-entry tone-${cssClassToken(l.tone || 'neutral')}" style="--log-color:${safeCombatColor(l.color)}"><i>${escapeHtml(String(l.seq || ''))}</i><span>${escapeHtml(l.text)}</span></div>`).join('');
     const combatSkills = getCombatSkills();
     const isPlayerTurn = combatState === COMBAT_STATE.PLAYER_TURN;
     let skillsHtml = '';
@@ -2033,45 +2861,75 @@ function generateNewFloor() {
       skillsHtml = '<div class="cbt-skills-row">';
       for (let i = 0; i < maxShow; i++) {
         const s = combatSkills[i];
-        const color = s.treeColor || '#d4a0ff';
-        const disCls = isPlayerTurn ? '' : ' disabled';
-        const summary = typeof getSkillEffectSummary === 'function' ? getSkillEffectSummary(s) : '';
-        skillsHtml += `<div class="cbt-skill-btn${disCls}" data-skill="${i}" style="color:${color};border-color:${color}"><b>${s.icon || '✦'}${s.name}</b><small>${summary}</small></div>`;
+        const color = safeCssColor(s.treeColor, '#d4a0ff');
+        const mpCost = getActualSkillMpCostDom(s);
+        const reason = !isPlayerTurn ? '等待回合' : player.mp < mpCost ? '灵力不足' : '';
+        const values = getSkillEstimatedValuesDom(s, currentEnemy);
+        skillsHtml += `<div class="cbt-skill-btn${reason ? ' disabled' : ''}" data-skill="${i}" style="--skill-color:${color};color:${color};border-color:${color}"><b>${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}</b><small>${escapeHtml(reason || `灵${mpCost} · ${values.damage}伤`)}</small></div>`;
       }
+      if (combatSkills.length > 3) skillsHtml += `<div class="cbt-skill-more ${combatSkillDrawerOpen ? 'active' : ''}" id="cbt-skill-toggle">${combatSkillDrawerOpen ? '收起' : `技能 ${combatSkills.length}`}</div>`;
       skillsHtml += '</div>';
     }
-
-    p.innerHTML = `
-      <div class="cbt-enemy-name">${pEnemyName} <span class="cbt-enemy-stats">${pEnemyStats}</span></div>
-      <div class="cbt-hp-bar-wrap">
-        <div class="cbt-hp-bar-outer"><div class="cbt-hp-bar-inner" style="width:${eHpPct*100}%"></div></div>
-        <span class="cbt-hp-text">${currentEnemy.hp}/${currentEnemy.maxHp}</span>
+    const drawerHtml = combatSkillDrawerOpen && combatSkills.length > 0 ? `<div class="cbt-skill-drawer"><div class="cbt-drawer-title"><b>选择功法</b><span>${isPlayerTurn ? '点击释放，灵力不足会灰显' : '等待敌方行动结束'}</span></div><div class="cbt-drawer-grid">${combatSkills.map((s, i) => {
+      const color = safeCssColor(s.treeColor, '#d4a0ff');
+      const mpCost = getActualSkillMpCostDom(s);
+      const values = getSkillEstimatedValuesDom(s, currentEnemy);
+      const summary = typeof getSkillEffectSummary === 'function' ? getSkillEffectSummary(s) : '';
+      const reason = !isPlayerTurn ? '等待回合' : player.mp < mpCost ? '灵力不足' : '';
+      return `<button type="button" class="cbt-drawer-skill${reason ? ' disabled' : ''}" data-skill="${i}" style="--skill-color:${color};border-color:${color};color:${color}"><i>${escapeHtml(s.icon || '✦')}</i><b>${escapeHtml(s.name)}</b><em>灵力 ${escapeHtml(mpCost)}</em><small>${escapeHtml(reason || `预计 ${values.damage} 伤`)}</small><span>${escapeHtml(summary)}</span></button>`;
+    }).join('')}</div></div>` : '';
+    p.innerHTML = `<div class="cbt-topline">
+      <div class="cbt-enemy-block">
+        <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
+        <div class="cbt-enemy-tags"><span>攻 ${escapeHtml(Number(currentEnemy.atk || 0))}</span><span>防 ${escapeHtml(shownEnemyDef)}</span>${enemySkills.length ? `<span>技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
       </div>
-      <div class="cbt-player-stats">${pPlayerStats}</div>
-      ${weaponHtml}
-      <div class="cbt-log">${logsHtml}</div>
-      ${skillsHtml}
-      <div class="cbt-actions-row">
-        <div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-attack" style="color:#ff6633;border-color:#ff6633">⚔️攻击</div>
-        <div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-defend" style="color:#dd9944;border-color:#dd9944">🛡️防御</div>
-        <div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-flee" style="color:#66bbcc;border-color:#66bbcc">🏃逃跑</div>
-      </div>`;
-
-    // Re-bind action buttons
-    if (isPlayerTurn) {
-      p.querySelector('#cbt-attack').addEventListener('click', () => playerAttack());
-      p.querySelector('#cbt-attack').addEventListener('touchstart', e => { e.preventDefault(); playerAttack(); }, { passive: false });
-      p.querySelector('#cbt-defend').addEventListener('click', () => playerDefend());
-      p.querySelector('#cbt-defend').addEventListener('touchstart', e => { e.preventDefault(); playerDefend(); }, { passive: false });
-      p.querySelector('#cbt-flee').addEventListener('click', () => playerFlee());
-      p.querySelector('#cbt-flee').addEventListener('touchstart', e => { e.preventDefault(); playerFlee(); }, { passive: false });
-      // Skill buttons
-      p.querySelectorAll('.cbt-skill-btn:not(.disabled)').forEach(el => {
-        const idx = parseInt(el.dataset.skill);
-        el.addEventListener('click', () => playerUseSkill(idx));
-        el.addEventListener('touchstart', e => { e.preventDefault(); playerUseSkill(idx); }, { passive: false });
+      <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
+    </div>
+    <div class="cbt-hp-bar-wrap enemy"><b>妖血</b><div class="cbt-hp-bar-outer"><div class="cbt-hp-bar-inner" style="width:${Math.max(0, Math.min(100, eHpPct * 100))}%"></div></div><span class="cbt-hp-text">${escapeHtml(Number(currentEnemy.hp || 0))}/${escapeHtml(Number(currentEnemy.maxHp || 0))}</span></div>
+    <div class="cbt-status-row">${enemyStatusHtml || '<span class="cbt-status-empty">敌方无状态</span>'}</div>
+    <div class="cbt-player-card">
+      <div class="cbt-player-bars">
+        <div class="cbt-mini-bar hp"><span>生命</span><i><b style="width:${playerHpPct}%"></b></i><em>${escapeHtml(Number(player.hp || 0))}/${escapeHtml(Number(player.maxHp || 0))}</em></div>
+        <div class="cbt-mini-bar mp"><span>灵力</span><i><b style="width:${playerMpPct}%"></b></i><em>${escapeHtml(Number(player.mp || 0))}/${escapeHtml(Number(player.maxMp || 0))}</em></div>
+      </div>
+      <div class="cbt-player-side"><div class="cbt-player-stats"><span>攻 ${escapeHtml(Number(player.atk || 0))}</span><span>防 ${escapeHtml(Number(player.def || 0))}</span></div>${weaponHtml}</div>
+    </div>
+    <div class="cbt-status-row player-status">${playerStatusHtml || '<span class="cbt-status-empty">我方无状态</span>'}</div>
+    <div class="cbt-log">${logsHtml || '<div class="cbt-log-entry tone-info"><span>战斗记录将在这里显示</span></div>'}</div>${skillsHtml}${drawerHtml}<div class="cbt-actions-row"><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-attack" style="--act-color:#ff6633">⚔️<b>攻击</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-defend" style="--act-color:#dd9944">🛡️<b>防御</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-skill-toggle-action" style="--act-color:#d4a0ff">📜<b>技能</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-flee" style="--act-color:#66bbcc">🏃<b>逃跑</b></div></div>`;
+    const bindTap = (el, fn) => {
+      if (!el) return;
+      const run = e => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        fn();
+      };
+      el.addEventListener('touchstart', e => {
+        // This panel is rebuilt immediately after toggling the skill drawer. The later
+        // synthetic click may land on the freshly-rendered toggle button, so the guard
+        // must be global, not stored in the old DOM node's closure.
+        skillsLastTouchActionAt = Date.now();
+        run(e);
+      }, { passive: false });
+      el.addEventListener('click', e => {
+        if (Date.now() - skillsLastTouchActionAt < 700) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        run(e);
       });
+    };
+    if (isPlayerTurn) {
+      bindTap(p.querySelector('#cbt-attack'), () => { combatSkillDrawerOpen = false; playerAttack(); });
+      bindTap(p.querySelector('#cbt-defend'), () => { combatSkillDrawerOpen = false; playerDefend(); });
+      bindTap(p.querySelector('#cbt-flee'), () => { combatSkillDrawerOpen = false; playerFlee(); });
     }
+    const toggleDrawer = () => { combatSkillDrawerOpen = !combatSkillDrawerOpen; renderCombatDomPanel(); };
+    bindTap(p.querySelector('#cbt-skill-toggle'), toggleDrawer);
+    bindTap(p.querySelector('#cbt-skill-toggle-action'), toggleDrawer);
+    p.querySelectorAll('.cbt-skill-btn:not(.disabled), .cbt-drawer-skill:not(.disabled)').forEach(el => bindTap(el, () => { combatSkillDrawerOpen = false; playerUseSkill(parseInt(el.dataset.skill, 10) || 0); }));
   }
 
   function drawCombatUI() {
@@ -2101,6 +2959,7 @@ function generateNewFloor() {
      if (!isInCombat()) checkStairs();
      updateCamera();
      tickMessages();
+     if (typeof document !== 'undefined') document.body.classList.toggle('combat-active', isInCombat());
      clearCanvas();
      drawDungeon();
      drawPlayer();
@@ -2119,7 +2978,7 @@ function generateNewFloor() {
    // Start
    window.addEventListener('DOMContentLoaded', () => {
      init();
-     showMessage('踏入无尽深渊，仙途由此开始...', '#d4a0ff');
+     showMessage('休闲爽刷模式：地图更短、移动更快、奖励更足。', '#d4a0ff');
    });
    // Expose for debugging
    window.player = player;

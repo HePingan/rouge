@@ -236,6 +236,82 @@ const SKILL_EFFECT_LABELS = {
   critBonusPassive: '暴击精通', critWeakenChance: '暴击虚弱', armorPiercePassive: '破甲精通', victoryRecover: '击杀回元',
 };
 
+const DAO_FOUNDATIONS = {
+  sword: {
+    id: 'sword', name: '剑修道基', icon: '⚔️', color: '#d8d8ff',
+    desc: '偏向爆发与破甲，适合高攻速清怪与首领斩杀。',
+    stats: { atkPct: 0.08, crit: 5, armorPen: 5 },
+    skillFocus: ['剑修技能伤害 +8%', '破甲类效果更适配装备词条'],
+  },
+  spell: {
+    id: 'spell', name: '法修道基', icon: '🔮', color: '#b78cff',
+    desc: '偏向灵力与术法，适合频繁释放火、水、雷、木、土功法。',
+    stats: { maxMpPct: 0.16, fireDmg: 6, lightningDmg: 6, iceDmg: 6 },
+    skillFocus: ['主动技能灵力消耗 -8%', '元素伤害词条收益更高'],
+  },
+  body: {
+    id: 'body', name: '体修道基', icon: '🛡️', color: '#8ff0b2',
+    desc: '偏向生存与容错，适合稳扎稳打推进深层。',
+    stats: { maxHpPct: 0.14, defPct: 0.08, dmgReduce: 5 },
+    skillFocus: ['护盾/回复技能收益更稳定', '强化失败保护更有价值'],
+  },
+};
+
+const REALM_UNLOCKS = {
+  1: ['装备强化上限提升到 +8', '解锁装备副词条与道基方向', '获得 2 点技能点'],
+  2: ['装备强化上限提升到 +10', '解锁套装掉落', '技能树第二层全面开放'],
+  3: ['装备强化上限提升到 +12', '突破失败保留更多经验', '技能触发流派成型'],
+  4: ['装备强化上限提升到 +15', '高阶词条与领域玩法预留入口', '终阶功法开放'],
+};
+
+function getRealmEnhanceCap(realmIndex = player?.realmIndex || 0) {
+  return [5, 8, 10, 12, 15][Math.max(0, Math.min(4, Number(realmIndex) || 0))] || 5;
+}
+
+function getDoctrineInfo(id = player?.daoFoundation) {
+  return id && DAO_FOUNDATIONS[id] ? DAO_FOUNDATIONS[id] : null;
+}
+
+function getDoctrineStatBonuses() {
+  const info = getDoctrineInfo();
+  return info ? { ...(info.stats || {}) } : {};
+}
+
+function getBreakthroughPreview() {
+  const cur = player?.realm || REALMS[0];
+  const next = REALMS[(player?.realmIndex || 0) + 1];
+  if (!next) return null;
+  const hpNow = Math.floor((player?.baseHp || 100) * cur.hpMult);
+  const mpNow = Math.floor((player?.baseMp || 50) * cur.mpMult);
+  return {
+    hp: Math.floor((player?.baseHp || 100) * next.hpMult) - hpNow,
+    mp: Math.floor((player?.baseMp || 50) * next.mpMult) - mpNow,
+    atk: (next.atkBonus || 0) - (cur.atkBonus || 0),
+    def: (next.defBonus || 0) - (cur.defBonus || 0),
+    skillPoints: 2,
+    unlocks: REALM_UNLOCKS[(player?.realmIndex || 0) + 1] || ['更高境界属性成长'],
+  };
+}
+
+function getBreakthroughChanceBreakdown() {
+  const next = REALMS[(player?.realmIndex || 0) + 1];
+  if (!next) return { total: 0, parts: [] };
+  const needed = Math.max(1, player?.realm?.xpNeeded || 1);
+  const xp = Math.max(0, Number(player?.xp || 0));
+  const overflow = Math.min(0.08, Math.max(0, xp - needed) / needed * 0.08);
+  const failBonus = Math.min(0.12, Number(player?.breakthroughFails || 0) * 0.04);
+  const pillBonus = Math.min(0.16, Number(player?.breakthroughChanceBonus || 0));
+  const base = 0.68;
+  const parts = [
+    { label: '根基基础', value: base },
+    { label: '经验溢出', value: overflow },
+    { label: '失败补偿', value: failBonus },
+  ];
+  if (pillBonus > 0) parts.push({ label: '破境丹药力', value: pillBonus });
+  const total = Math.max(0.25, Math.min(0.95, parts.reduce((s, p) => s + p.value, 0)));
+  return { total, parts };
+}
+
 // Player cultivation state
 let availableSkillPoints = 0;
 let learnedSkills = [];  // [{ tree: 'fire', index: 0 }, ...]
@@ -245,6 +321,32 @@ let breakthroughQueue = false;  // true when player just leveled up and needs to
 
 function getSkillKind(skill) { return skill.kind || 'active'; }
 function isSkillLearned(tree, index) { return learnedSkills.some(s => s.tree === tree && s.index === index); }
+function getSkillPrereqs(tree, index) {
+  const skill = SKILL_TREES?.[tree]?.skills?.[index];
+  if (!skill) return [];
+  if (Array.isArray(skill.requires)) return skill.requires;
+  // Backward-compatible branch shape for the existing 5-node trees:
+  // 0 基础；1 输出进阶；3 核心被动；4 触发/生存；2 终式。
+  if (index === 0) return [];
+  if (index === 2) return [1, 3];
+  return [0];
+}
+function areSkillPrereqsMet(tree, index) {
+  return getSkillPrereqs(tree, index).every(req => isSkillLearned(tree, req));
+}
+function isSkillRequiredByLearned(tree, index) {
+  return learnedSkills.some(s => s.tree === tree && getSkillPrereqs(tree, s.index).includes(index));
+}
+function getSkillBranchSlot(skill, index) {
+  if (index === 0) return 'core';
+  if (index === 2) return 'ultimate';
+  if ((skill?.kind || 'active') === 'passive') return 'passive';
+  if ((skill?.kind || 'active') === 'trigger') return 'trigger';
+  return 'offense';
+}
+function getSkillBranchLabel(slot) {
+  return { core: '基础', offense: '输出', passive: '核心', trigger: '触发', ultimate: '终式' }[slot] || '分支';
+}
 
 // ─── Get available skills based on current realm ───
 function getAvailableSkills(realmIndex) {
@@ -267,6 +369,7 @@ function learnSkill(tree, index) {
   if (isSkillLearned(tree, index)) return false;
   const skill = SKILL_TREES[tree].skills[index];
   if (skill.unlockRealm > player.realmIndex) return false;
+  if (!areSkillPrereqsMet(tree, index)) return false;
   learnedSkills.push({ tree, index });
   availableSkillPoints--;
   if (player && typeof player.recalcStats === 'function') player.recalcStats();
@@ -277,7 +380,7 @@ function learnSkill(tree, index) {
 function unlearnSkill(tree, index) {
   const pos = learnedSkills.findIndex(s => s.tree === tree && s.index === index);
   if (pos < 0) return false;
-  if (learnedSkills.some(s => s.tree === tree && s.index === index + 1)) return false;
+  if (isSkillRequiredByLearned(tree, index)) return false;
   learnedSkills.splice(pos, 1);
   availableSkillPoints++;
   if (player && typeof player.recalcStats === 'function') player.recalcStats();
@@ -302,6 +405,7 @@ function getLearnedSkillDefinitions(kind = null) {
 
 function getSkillPassiveBonuses() {
   const bonuses = { atkPct: 0, defPct: 0, maxHpPct: 0, maxMpPct: 0 };
+  for (const [stat, value] of Object.entries(getDoctrineStatBonuses())) bonuses[stat] = (bonuses[stat] || 0) + value;
   for (const skill of getLearnedSkillDefinitions()) {
     for (const eff of skill.effects || []) {
       if (eff.type === 'passiveStat' && eff.stat) bonuses[eff.stat] = (bonuses[eff.stat] || 0) + (eff.value || 0);
@@ -426,9 +530,18 @@ function tickPlayerStatusesAfterHit() {
   player._statusEffects = player._statusEffects.filter(st => st.turns > 0);
 }
 
-function getPassiveCritBonus() { return sumLearnedEffect('critBonusPassive'); }
-function getPassiveArmorPierce() { return sumLearnedEffect('armorPiercePassive'); }
+function getPassiveCritBonus() { return sumLearnedEffect('critBonusPassive') + Number(getDoctrineStatBonuses().crit || 0) / 100; }
+function getPassiveArmorPierce() { return sumLearnedEffect('armorPiercePassive') + Number(getDoctrineStatBonuses().armorPen || 0) / 100; }
 function getPassiveBurnAmp() { return sumLearnedEffect('burnAmp'); }
+function getDoctrineSkillDamageBonus(skill) {
+  const doctrine = player?.daoFoundation;
+  if (doctrine === 'sword' && skill?.tree === 'sword') return 0.08;
+  if (doctrine === 'spell' && ['fire','water','thunder','wood','earth'].includes(skill?.tree)) return 0.08;
+  return 0;
+}
+function getDoctrineMpCostMultiplier(skill) {
+  return player?.daoFoundation === 'spell' && getSkillKind(skill) === 'active' ? 0.92 : 1;
+}
 
 function applySkillEffects(skill, totalDamage, killed) {
   for (const eff of skill.effects || []) {
@@ -585,12 +698,13 @@ function playerUseSkill(skillIndex) {
   const skills = getCombatSkills();
   if (skillIndex < 0 || skillIndex >= skills.length) return;
   const skill = skills[skillIndex];
-  if (player.mp < skill.mpCost) {
+  const actualMpCost = Math.max(0, Math.floor((skill.mpCost || 0) * getDoctrineMpCostMultiplier(skill)));
+  if (player.mp < actualMpCost) {
     combatLog('灵力不足！', '#ff4444');
     return;
   }
 
-  player.mp -= skill.mpCost;
+  player.mp -= actualMpCost;
   const hits = Math.max(1, skill.hits || 1);
   const pierce = Math.min(0.85, (skill.armorPierce || 0) + getPassiveArmorPierce());
   const defMult = typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
@@ -599,7 +713,7 @@ function playerUseSkill(skillIndex) {
   let anyCrit = false;
   const hitDamages = [];
   for (let i = 0; i < hits; i++) {
-    const perHitMult = skill.dmgMult / hits;
+    const perHitMult = (skill.dmgMult * (1 + getDoctrineSkillDamageBonus(skill))) / hits;
     const baseDmg = Math.max(1, Math.floor(player.atk * perHitMult - effectiveDef));
     const crit = Math.random() < (0.15 + (skill.critBonus || 0) + getPassiveCritBonus());
     anyCrit = anyCrit || crit;
@@ -612,7 +726,7 @@ function playerUseSkill(skillIndex) {
   skill._lastCrit = anyCrit;
 
   const detail = hits > 1 ? `（${hitDamages.join('+')}）` : '';
-  combatLog(`你使用【${skill.name}】，造成 ${totalDamage} 点伤害${detail}${anyCrit ? ' 💥暴击！' : ''} (-${skill.mpCost} 灵力)`, skill.treeColor);
+  combatLog(`你使用【${skill.name}】，造成 ${totalDamage} 点伤害${detail}${anyCrit ? ' 💥暴击！' : ''} (-${actualMpCost} 灵力)`, skill.treeColor);
 
   const wx = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
   const wy = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
@@ -628,7 +742,7 @@ function playerUseSkill(skillIndex) {
     currentEnemy.hp = 0;
     const refundEffect = (skill.effects || []).find(e => e.type === 'refundOnKill');
     if (refundEffect) {
-      const refund = Math.floor(skill.mpCost * (refundEffect.ratio || 0.4));
+      const refund = Math.floor(actualMpCost * (refundEffect.ratio || 0.4));
       player.mp = Math.min(player.maxMp, player.mp + refund);
       combatLog(`🌌 剑意回流，返还 ${refund} 灵力`, '#ddddff');
     }
@@ -654,15 +768,28 @@ function checkBreakthrough() {
 }
 
 // ─── Execute breakthrough ───
-function doBreakthrough() {
+function doBreakthrough(selectedFoundation = null) {
   if (!breakthroughQueue) return;
-  const success = Math.random() < 0.8;
+  const nextRealm = REALMS[player.realmIndex + 1];
+  if (!nextRealm) return;
+  const needsFoundation = player.realmIndex === 0 && !player.daoFoundation;
+  if (needsFoundation && !DAO_FOUNDATIONS[selectedFoundation]) {
+    showMessage('请选择一道基方向后再突破', '#ffdd88');
+    return;
+  }
+  const chanceInfo = getBreakthroughChanceBreakdown();
+  const success = Math.random() < chanceInfo.total;
   if (success) {
-    player.xp -= player.realm.xpNeeded;
+    player.xp = Math.max(0, player.xp - player.realm.xpNeeded);
     player.realmIndex++;
+    if (needsFoundation) player.daoFoundation = selectedFoundation;
+    player.breakthroughFails = 0;
+    player.breakthroughChanceBonus = 0;
+    player.breakthroughProtect = 0;
     player.recalcStats();
     availableSkillPoints += 2;
-    showMessage(`🌟 突破成功！你已踏入【${player.realm.name}】！获得 2 点技能点`, '#ffdd44');
+    const doctrineText = needsFoundation ? ` · 奠定【${DAO_FOUNDATIONS[selectedFoundation].name}】` : '';
+    showMessage(`🌟 突破成功！踏入【${player.realm.name}】${doctrineText}，获得 2 点技能点`, '#ffdd44');
     const bx = player.x * CELL_SIZE + CELL_SIZE / 2;
     const by = player.y * CELL_SIZE + CELL_SIZE / 2;
     spawnBreakthroughEffect(bx, by);
@@ -672,11 +799,15 @@ function doBreakthrough() {
     breakthroughQueue = false;
     autoSave();
   } else {
-    player.xp = Math.floor(player.realm.xpNeeded * 0.6);
-    showMessage('💢 渡劫失败，根基受损，继续修炼吧...', '#ff4444');
-    if (typeof closeBreakthroughPanel === 'function') closeBreakthroughPanel();
-    else showBreakthroughUI = false;
-    breakthroughQueue = false;
+    player.breakthroughFails = Number(player.breakthroughFails || 0) + 1;
+    const protectedFail = Number(player.breakthroughProtect || 0) > 0;
+    if (protectedFail) player.breakthroughProtect = Math.max(0, Number(player.breakthroughProtect || 0) - 1);
+    player.breakthroughChanceBonus = 0;
+    const keepRatio = protectedFail || player.daoFoundation === 'body' ? 0.86 : 0.72;
+    player.xp = Math.max(Math.floor(player.realm.xpNeeded * keepRatio), Math.floor(player.xp * keepRatio));
+    showMessage(protectedFail ? '🧿 突破失败，但固元丹护住根基，下次成功率提高' : '💢 渡劫失败，保留部分经验并获得下次成功率补偿', '#ff8844');
+    if (typeof renderBreakthroughDomPanel === 'function') renderBreakthroughDomPanel();
+    autoSave();
   }
 }
 

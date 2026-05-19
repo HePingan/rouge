@@ -17,6 +17,10 @@ class Player {
     this.realmIndex = 0;
     this.xp = 0;
     this.spiritStones = 0;
+    this.daoFoundation = null;
+    this.breakthroughFails = 0;
+    this.breakthroughChanceBonus = 0;
+    this.breakthroughProtect = 0;
 
     // Base stats
     this.baseHp = 100;
@@ -60,6 +64,16 @@ class Player {
     this.maxMp = Math.floor(this.baseMp * r.mpMult);
     this.atk = this.baseAtk + r.atkBonus;
     this.def = this.baseDef + r.defBonus;
+    // Reset every derived non-core stat before rebuilding equipment / set / skill bonuses.
+    // Otherwise repeated recalcStats() calls can keep stale bonuses or stack them forever.
+    const derivedStats = [
+      'crit', 'dodge', 'speed', 'lifesteal', 'armorPen', 'goldFind', 'xpBonus',
+      'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg', 'hpRegen', 'mpRegen', 'allRes',
+      'killMpRestore', 'thorns', 'bossDmg', 'extraHitChance', 'weakenOnHit', 'critWeaken',
+      'lowHpGuard', 'dmgReduce', 'burnOnHit', 'freezeOnHit', 'shadowCounter', 'flameBurst',
+      'thunderChain', 'frostBarrier', 'victoryRecoverPct'
+    ];
+    for (const stat of derivedStats) this[stat] = 0;
     this._equipmentSetEffects = {};
     this._equipmentSetActive = [];
     const applyStatBonus = (stat, value) => {
@@ -92,10 +106,7 @@ class Player {
     }
     if (typeof getSkillPassiveBonuses === 'function') {
       const skillBonuses = getSkillPassiveBonuses();
-      if (skillBonuses.maxHpPct) this.maxHp = Math.floor(this.maxHp * (1 + skillBonuses.maxHpPct));
-      if (skillBonuses.maxMpPct) this.maxMp = Math.floor(this.maxMp * (1 + skillBonuses.maxMpPct));
-      if (skillBonuses.atkPct) this.atk = Math.floor(this.atk * (1 + skillBonuses.atkPct));
-      if (skillBonuses.defPct) this.def = Math.floor(this.def * (1 + skillBonuses.defPct));
+      for (const [stat, value] of Object.entries(skillBonuses || {})) applyStatBonus(stat, value);
     }
     if (this.tempAtkBuff) this.atk = Math.floor(this.atk * (1 + this.tempAtkBuff));
     if (this.tempDefBuff) this.def = Math.floor(this.def * (1 + this.tempDefBuff));
@@ -115,54 +126,109 @@ class Player {
 }
 
 // ─── Monster & Boss Definitions ───
+const MONSTER_SKILLS = {
+  rockSmash: { name: '裂石重击', icon: '🪨', chance: 0.28, type: 'damage', mult: 1.45, color: '#c0b090', log: '抡起巨石猛砸' },
+  venomFang: { name: '毒牙', icon: '☠️', chance: 0.30, type: 'damageStatus', mult: 0.85, status: { type: 'poison', turns: 3, ratio: 0.08 }, color: '#aa66aa', log: '咬出腐毒' },
+  soulDrain: { name: '摄魂', icon: '👻', chance: 0.24, type: 'drain', mult: 1.05, healRatio: 0.55, color: '#88a0ff', log: '吞噬魂息' },
+  flameSpit: { name: '喷火', icon: '🔥', chance: 0.30, type: 'damageStatus', mult: 1.15, status: { type: 'burn', turns: 2, ratio: 0.10 }, color: '#ff7744', log: '吐出妖火' },
+  shadowBackstab: { name: '影袭', icon: '🌑', chance: 0.34, type: 'damage', mult: 1.65, color: '#b090ff', log: '遁入阴影突袭' },
+  frostBite: { name: '霜咬', icon: '❄️', chance: 0.28, type: 'damageDebuff', mult: 0.95, debuff: { type: 'slow', turns: 2, ratio: 0.12 }, color: '#88ccff', log: '寒气侵体' },
+  thornBind: { name: '藤缚', icon: '🌿', chance: 0.30, type: 'damageDebuff', mult: 0.9, debuff: { type: 'entangle', turns: 1, ratio: 0.18 }, color: '#77cc66', log: '藤蔓缠身' },
+  lavaBurst: { name: '熔爆', icon: '🌋', chance: 0.32, type: 'damageStatus', mult: 1.25, status: { type: 'burn', turns: 2, ratio: 0.12 }, color: '#ff5522', log: '引爆岩浆' },
+  ironShell: { name: '铁甲', icon: '🛡️', chance: 0.22, type: 'selfBuff', buff: { defRatio: 0.18, turns: 2 }, color: '#aaddff', log: '缩入坚甲' },
+  abyssCleave: { name: '深渊横扫', icon: '👑', chance: 0.40, type: 'damage', mult: 1.55, color: '#ff4444', log: '挥出深渊横扫' },
+  dragonBreath: { name: '魔龙吐息', icon: '🐉', chance: 0.45, type: 'damageStatus', mult: 1.35, status: { type: 'burn', turns: 3, ratio: 0.12 }, color: '#ff6622', log: '喷吐魔焰' },
+  ghostCurse: { name: '幽冥咒', icon: '🟣', chance: 0.44, type: 'damageDebuff', mult: 1.15, debuff: { type: 'curse', turns: 2, ratio: 0.16 }, color: '#aa66ff', log: '降下幽冥咒' },
+  shuraCombo: { name: '修罗连斩', icon: '🩸', chance: 0.46, type: 'multiHit', hits: 3, mult: 0.62, color: '#ff3366', log: '斩出修罗血光' },
+  frostDomain: { name: '冰狱领域', icon: '🧊', chance: 0.44, type: 'damageDebuff', mult: 1.10, debuff: { type: 'slow', turns: 3, ratio: 0.2 }, color: '#66ddff', log: '展开冰狱领域' },
+  poisonDomain: { name: '万毒妖域', icon: '🐍', chance: 0.44, type: 'damageStatus', mult: 1.05, status: { type: 'poison', turns: 4, ratio: 0.10 }, color: '#66cc66', log: '释放万毒妖域' },
+};
+
 const MONSTERS = [
-  { name: '石魔',    symbol: '石', hp: 30, atk: 7,  def: 2, xp: 15, stones: 3, color: '#8a8a8a', weight: 30 },
-  { name: '毒蝠',    symbol: '蝠', hp: 20, atk: 10, def: 1, xp: 12, stones: 2, color: '#aa66aa', weight: 25 },
-  { name: '魂妖',    symbol: '魂', hp: 25, atk: 8,  def: 2, xp: 18, stones: 4, color: '#6688ff', weight: 20 },
-  { name: '火蜥',    symbol: '蜥', hp: 35, atk: 12, def: 3, xp: 22, stones: 5, color: '#ff6644', weight: 15 },
-  { name: '暗影刺客', symbol: '影', hp: 22, atk: 15, def: 1, xp: 25, stones: 6, color: '#444444', weight: 10 },
+  { name: '石魔',    symbol: '石', hp: 34, atk: 7,  def: 3, xp: 16, stones: 3, color: '#8a8a8a', weight: 30, skillIds: ['rockSmash', 'ironShell'] },
+  { name: '毒蝠',    symbol: '蝠', hp: 24, atk: 10, def: 1, xp: 13, stones: 2, color: '#aa66aa', weight: 25, skillIds: ['venomFang'] },
+  { name: '魂妖',    symbol: '魂', hp: 28, atk: 8,  def: 2, xp: 19, stones: 4, color: '#6688ff', weight: 20, skillIds: ['soulDrain'] },
+  { name: '火蜥',    symbol: '蜥', hp: 38, atk: 12, def: 3, xp: 23, stones: 5, color: '#ff6644', weight: 15, skillIds: ['flameSpit'] },
+  { name: '暗影刺客', symbol: '影', hp: 26, atk: 15, def: 1, xp: 27, stones: 6, color: '#444444', weight: 10, skillIds: ['shadowBackstab'] },
 ];
 
 const BOSSES = [
-  { floor: 5,  name: '深渊守卫',   symbol: '守', hp: 80,  atk: 15, def: 6, xp: 80,  stones: 30, isBoss: true, color: '#ff4444' },
-  { floor: 10, name: '暗黑魔龙',   symbol: '龙', hp: 150, atk: 22, def: 10, xp: 150, stones: 60, isBoss: true, color: '#ff6622' },
-  { floor: 15, name: '幽冥鬼王',   symbol: '王', hp: 250, atk: 30, def: 15, xp: 250, stones: 100, isBoss: true, color: '#aa44ff' },
-  { floor: 20, name: '无间修罗',   symbol: '罗', hp: 400, atk: 40, def: 20, xp: 400, stones: 180, isBoss: true, color: '#ff0066' },
+  { floor: 5,  name: '深渊守卫',   symbol: '守', hp: 110, atk: 16, def: 7, xp: 95,  stones: 36, isBoss: true, color: '#ff4444', skillIds: ['abyssCleave', 'ironShell'] },
+  { floor: 10, name: '暗黑魔龙',   symbol: '龙', hp: 210, atk: 25, def: 11, xp: 180, stones: 72, isBoss: true, color: '#ff6622', skillIds: ['dragonBreath', 'rockSmash'] },
+  { floor: 15, name: '幽冥鬼王',   symbol: '王', hp: 340, atk: 34, def: 15, xp: 300, stones: 120, isBoss: true, color: '#aa44ff', skillIds: ['ghostCurse', 'soulDrain'] },
+  { floor: 20, name: '无间修罗',   symbol: '罗', hp: 520, atk: 45, def: 21, xp: 480, stones: 210, isBoss: true, color: '#ff0066', skillIds: ['shuraCombo', 'abyssCleave'] },
+  { floor: 25, name: '冰狱妖后',   symbol: '后', hp: 680, atk: 52, def: 24, xp: 650, stones: 280, isBoss: true, color: '#66ddff', skillIds: ['frostDomain', 'frostBite'] },
+  { floor: 30, name: '万毒魔君',   symbol: '毒', hp: 820, atk: 60, def: 26, xp: 820, stones: 360, isBoss: true, color: '#66cc66', skillIds: ['poisonDomain', 'venomFang'] },
 ];
 
+function getMonsterSkill(id) {
+  return MONSTER_SKILLS[id] ? { ...MONSTER_SKILLS[id] } : null;
+}
+
+function getEnemySkills(enemy) {
+  return (enemy?.skillIds || []).map(getMonsterSkill).filter(Boolean);
+}
+
 function isBossFloor(level) {
-  return BOSSES.some(b => b.floor === level);
+  return level > 0 && level % 5 === 0;
+}
+
+function getBossForLevel(level) {
+  const exact = BOSSES.find(b => b.floor === level);
+  if (exact) return exact;
+  if (!isBossFloor(level)) return null;
+  return BOSSES[(Math.floor(level / 5) - 1) % BOSSES.length];
+}
+
+function getMonsterScale(level, isBoss = false) {
+  const depth = Math.max(0, level - 1);
+  const hp = 1 + depth * 0.15 + Math.pow(depth, 1.25) * 0.018;
+  const atk = 1 + depth * 0.12 + Math.pow(depth, 1.18) * 0.012;
+  const def = 1 + depth * 0.10 + Math.pow(depth, 1.15) * 0.010;
+  const reward = 1 + depth * 0.16;
+  return isBoss ? { hp: hp * 1.10, atk: atk * 1.08, def: def * 1.05, xp: reward * 1.25, stones: reward * 1.25 } : { hp, atk, def, xp: reward, stones: reward };
+}
+
+function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0) {
+  const baseScale = getMonsterScale(level, !!template.isBoss);
+  const mult = { hp: 1, atk: 1, def: 1, xp: 1, stones: 1, ...biomeMult };
+  const maxHp = Math.floor(template.hp * baseScale.hp * mult.hp);
+  const skillIds = [...(template.skillIds || [])];
+  return {
+    ...template,
+    hp: maxHp,
+    maxHp,
+    atk: Math.floor(template.atk * baseScale.atk * mult.atk),
+    def: Math.floor(template.def * baseScale.def * mult.def),
+    xp: Math.floor(template.xp * baseScale.xp * mult.xp),
+    stones: Math.floor(template.stones * baseScale.stones * mult.stones),
+    skillIds,
+    x,
+    y,
+  };
 }
 
 function spawnMonsters(dungeonObj, level) {
-  const count = 8 + Math.floor(level * 1.5);
+  const roomCount = Math.max(1, (dungeonObj.rooms || []).length - 1);
+  const count = Math.min(18, Math.max(4, Math.floor(roomCount * 1.35) + Math.floor(level * 0.45)));
   const rooms = dungeonObj.rooms;
   const grid = dungeonObj.grid;
-  const scale = 1 + (level - 1) * 0.2;
   const biome = dungeonObj.biome || (typeof getBiomeForLevel === 'function' ? getBiomeForLevel(level) : null);
   const biomeMult = biome?.monsterMult || { hp: 1, atk: 1, def: 1, xp: 1, stones: 1 };
   const monsterPool = biome?.monsters || MONSTERS;
 
   // Place boss first if boss floor
   if (isBossFloor(level)) {
-    const boss = BOSSES.find(b => b.floor === level);
+    const boss = getBossForLevel(level);
     if (boss && rooms.length > 1) {
       const bossRoom = rooms[rooms.length - 1];
       const bx = Math.floor(bossRoom.x + bossRoom.w / 2);
       const by = Math.floor(bossRoom.y + bossRoom.h / 2);
-      if (grid[by][bx] === TILE.FLOOR) {
-        dungeonObj._monsters.set(`${bx},${by}`, {
-          ...boss,
-          hp: Math.floor(boss.hp * scale * biomeMult.hp),
-          atk: Math.floor(boss.atk * scale * biomeMult.atk),
-          def: Math.floor(boss.def * scale * biomeMult.def),
-          maxHp: Math.floor(boss.hp * scale * biomeMult.hp),
-          xp: Math.floor(boss.xp * scale * biomeMult.xp),
-          stones: Math.floor(boss.stones * scale * biomeMult.stones),
-          biome: biome?.name,
-          x: bx,
-          y: by,
-        });
+      if (grid[by][bx] === TILE.FLOOR || grid[by][bx] === TILE.STAIRS_DOWN) {
+        const scaledBoss = createScaledEnemy(boss, level, biomeMult, bx, by);
+        scaledBoss.biome = biome?.name;
+        scaledBoss.title = level > boss.floor ? `${boss.name}·轮回${Math.floor(level / 30) + 1}` : boss.name;
+        dungeonObj._monsters.set(`${bx},${by}`, scaledBoss);
       }
     }
   }
@@ -184,18 +250,9 @@ function spawnMonsters(dungeonObj, level) {
         roll -= mon.weight;
         if (roll <= 0) { picked = mon; break; }
       }
-      dungeonObj._monsters.set(`${mx},${my}`, {
-        ...picked,
-        hp: Math.floor(picked.hp * scale * biomeMult.hp),
-        atk: Math.floor(picked.atk * scale * biomeMult.atk),
-        def: Math.floor(picked.def * scale * biomeMult.def),
-        maxHp: Math.floor(picked.hp * scale * biomeMult.hp),
-        xp: Math.floor(picked.xp * scale * biomeMult.xp),
-        stones: Math.floor(picked.stones * scale * biomeMult.stones),
-        biome: biome?.name,
-        x: mx,
-        y: my,
-      });
+      const scaledMonster = createScaledEnemy(picked, level, biomeMult, mx, my);
+      scaledMonster.biome = biome?.name;
+      dungeonObj._monsters.set(`${mx},${my}`, scaledMonster);
     }
   }
 }

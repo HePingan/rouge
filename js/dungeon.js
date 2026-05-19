@@ -8,12 +8,20 @@ const TILE = {
   STAIRS_DOWN: 3,
 };
 
-const DUNGEON_WIDTH = 80;
-const DUNGEON_HEIGHT = 55;
+const ROOM_TYPE = {
+  START: 'start',
+  NORMAL: 'normal',
+  TREASURE: 'treasure',
+  ELITE: 'elite',
+  BOSS: 'boss',
+};
+
+const DUNGEON_WIDTH = 52;
+const DUNGEON_HEIGHT = 36;
 const MIN_ROOM_SIZE = 5;
-const MAX_ROOM_SIZE = 14;
+const MAX_ROOM_SIZE = 12;
 const MIN_LEAF_SIZE = 10;
-const MAX_DEPTH = 4;
+const MAX_DEPTH = 3;
 
 const BIOMES = [
   {
@@ -22,10 +30,10 @@ const BIOMES = [
     border: 'rgba(220,245,255,0.16)', speck: 'rgba(235,250,255,0.42)', stairs: '#8ed8ff',
     monsterMult: { hp: 1.12, atk: 0.92, def: 1.15, xp: 1.05, stones: 1.00 },
     monsters: [
-      { name: '雪狼', symbol: '狼', hp: 28, atk: 9, def: 2, xp: 14, stones: 3, color: '#24506c', weight: 34 },
-      { name: '冰魄', symbol: '冰', hp: 24, atk: 8, def: 4, xp: 17, stones: 4, color: '#1f7292', weight: 28 },
-      { name: '霜甲兽', symbol: '甲', hp: 42, atk: 7, def: 6, xp: 21, stones: 5, color: '#37627c', weight: 22 },
-      { name: '寒鸦妖', symbol: '鸦', hp: 20, atk: 13, def: 1, xp: 20, stones: 5, color: '#263244', weight: 16 },
+      { name: '雪狼', symbol: '狼', hp: 30, atk: 9, def: 2, xp: 14, stones: 3, color: '#24506c', weight: 34, skillIds: ['frostBite'] },
+      { name: '冰魄', symbol: '冰', hp: 28, atk: 8, def: 4, xp: 17, stones: 4, color: '#1f7292', weight: 28, skillIds: ['frostBite', 'ironShell'] },
+      { name: '霜甲兽', symbol: '甲', hp: 46, atk: 7, def: 7, xp: 21, stones: 5, color: '#37627c', weight: 22, skillIds: ['ironShell'] },
+      { name: '寒鸦妖', symbol: '鸦', hp: 24, atk: 13, def: 1, xp: 20, stones: 5, color: '#263244', weight: 16, skillIds: ['shadowBackstab'] },
     ],
   },
   {
@@ -34,10 +42,10 @@ const BIOMES = [
     border: 'rgba(120,210,110,0.32)', speck: 'rgba(190,255,120,0.55)', stairs: '#b6e36b',
     monsterMult: { hp: 1.00, atk: 1.08, def: 0.95, xp: 1.08, stones: 1.05 },
     monsters: [
-      { name: '藤妖', symbol: '藤', hp: 32, atk: 8, def: 3, xp: 18, stones: 4, color: '#66bb55', weight: 32 },
-      { name: '毒蟒', symbol: '蟒', hp: 30, atk: 13, def: 2, xp: 22, stones: 5, color: '#44aa66', weight: 28 },
-      { name: '树精', symbol: '树', hp: 48, atk: 9, def: 6, xp: 25, stones: 6, color: '#8bb35a', weight: 22 },
-      { name: '花魅', symbol: '魅', hp: 24, atk: 15, def: 1, xp: 26, stones: 7, color: '#ff77cc', weight: 18 },
+      { name: '藤妖', symbol: '藤', hp: 36, atk: 8, def: 3, xp: 18, stones: 4, color: '#66bb55', weight: 32, skillIds: ['thornBind'] },
+      { name: '毒蟒', symbol: '蟒', hp: 34, atk: 13, def: 2, xp: 22, stones: 5, color: '#44aa66', weight: 28, skillIds: ['venomFang'] },
+      { name: '树精', symbol: '树', hp: 54, atk: 9, def: 7, xp: 25, stones: 6, color: '#8bb35a', weight: 22, skillIds: ['thornBind', 'ironShell'] },
+      { name: '花魅', symbol: '魅', hp: 28, atk: 15, def: 1, xp: 26, stones: 7, color: '#ff77cc', weight: 18, skillIds: ['soulDrain'] },
     ],
   },
   {
@@ -46,10 +54,10 @@ const BIOMES = [
     border: 'rgba(255,120,40,0.38)', speck: 'rgba(255,190,70,0.6)', stairs: '#ffdd55',
     monsterMult: { hp: 1.10, atk: 1.22, def: 1.00, xp: 1.18, stones: 1.15 },
     monsters: [
-      { name: '岩浆蜥', symbol: '蜥', hp: 40, atk: 15, def: 3, xp: 26, stones: 6, color: '#ff6644', weight: 34 },
-      { name: '炎魔', symbol: '炎', hp: 45, atk: 17, def: 4, xp: 30, stones: 8, color: '#ff3311', weight: 26 },
-      { name: '火灵', symbol: '火', hp: 28, atk: 20, def: 1, xp: 29, stones: 8, color: '#ffaa33', weight: 22 },
-      { name: '熔甲兽', symbol: '熔', hp: 62, atk: 13, def: 7, xp: 34, stones: 10, color: '#cc4422', weight: 18 },
+      { name: '岩浆蜥', symbol: '蜥', hp: 46, atk: 15, def: 3, xp: 26, stones: 6, color: '#ff6644', weight: 34, skillIds: ['flameSpit'] },
+      { name: '炎魔', symbol: '炎', hp: 52, atk: 17, def: 4, xp: 30, stones: 8, color: '#ff3311', weight: 26, skillIds: ['lavaBurst'] },
+      { name: '火灵', symbol: '火', hp: 32, atk: 20, def: 1, xp: 29, stones: 8, color: '#ffaa33', weight: 22, skillIds: ['flameSpit', 'shadowBackstab'] },
+      { name: '熔甲兽', symbol: '熔', hp: 70, atk: 13, def: 8, xp: 34, stones: 10, color: '#cc4422', weight: 18, skillIds: ['lavaBurst', 'ironShell'] },
     ],
   },
 ];
@@ -201,6 +209,30 @@ function generateDungeon(width = DUNGEON_WIDTH, height = DUNGEON_HEIGHT, depth =
     }
   }
 
+  const roomMeta = rooms.map((room, idx) => ({
+    ...room,
+    index: idx,
+    type: idx === 0 ? ROOM_TYPE.START : ROOM_TYPE.NORMAL,
+    cx: Math.floor(room.x + room.w / 2),
+    cy: Math.floor(room.y + room.h / 2),
+  }));
+
+  if (roomMeta.length > 1) {
+    roomMeta[roomMeta.length - 1].type = ROOM_TYPE.BOSS;
+    const candidates = roomMeta.slice(1, -1).sort((a, b) => (b.w * b.h) - (a.w * a.h));
+    if (candidates[0]) candidates[0].type = ROOM_TYPE.TREASURE;
+    if (candidates[1]) candidates[1].type = ROOM_TYPE.ELITE;
+  }
+
+  const roomTypeByCell = new Map();
+  for (const room of roomMeta) {
+    for (let y = room.y; y < room.y + room.h; y++) {
+      for (let x = room.x; x < room.x + room.w; x++) {
+        roomTypeByCell.set(`${x},${y}`, room.type);
+      }
+    }
+  }
+
   // Place stairs down in a random room (not the spawn room)
   if (rooms.length > 1) {
     const stairRoom = rooms[rooms.length - 1];
@@ -213,8 +245,9 @@ function generateDungeon(width = DUNGEON_WIDTH, height = DUNGEON_HEIGHT, depth =
     grid,
     width,
     height,
-    rooms,
-    spawnRoom: rooms[0],
+    rooms: roomMeta,
+    roomTypeByCell,
+    spawnRoom: roomMeta[0],
     biome: getBiomeForLevel(level),
   };
 }

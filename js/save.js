@@ -16,6 +16,10 @@ function saveGame() {
       realmIndex: player.realmIndex,
       xp: player.xp,
       spiritStones: player.spiritStones,
+      daoFoundation: player.daoFoundation || null,
+      breakthroughFails: Number(player.breakthroughFails || 0),
+      breakthroughChanceBonus: Number(player.breakthroughChanceBonus || 0),
+      breakthroughProtect: Number(player.breakthroughProtect || 0),
       // Base attributes
       baseHp: player.baseHp,
       baseMp: player.baseMp,
@@ -77,6 +81,10 @@ function loadGame() {
     player.realmIndex = data.realmIndex ?? 0;
     player.xp = data.xp ?? 0;
     player.spiritStones = data.spiritStones ?? 0;
+    player.daoFoundation = data.daoFoundation || null;
+    player.breakthroughFails = Number(data.breakthroughFails || 0);
+    player.breakthroughChanceBonus = Number(data.breakthroughChanceBonus || 0);
+    player.breakthroughProtect = Number(data.breakthroughProtect || 0);
     player.baseHp = data.baseHp ?? 100;
     player.baseMp = data.baseMp ?? 50;
     player.baseAtk = data.baseAtk ?? 10;
