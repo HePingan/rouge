@@ -348,14 +348,16 @@ function enemyAttack() {
   finishEnemyTurn();
 }
 function onVictory() {
-  const xpReward = Math.ceil((currentEnemy.xp || 20) * 1.35);
-  const stonesReward = Math.ceil((currentEnemy.stones || 5) * 1.45);
+  const rewardMult = currentEnemy.isElite ? (currentEnemy.eliteRewardMult || 1.8) : 1;
+  const xpReward = Math.ceil((currentEnemy.xp || 20) * 1.35 * rewardMult);
+  const stonesReward = Math.ceil((currentEnemy.stones || 5) * 1.45 * rewardMult);
   player.gainXp(xpReward);
   player.addSpiritStones(stonesReward);
   // 休闲节奏：地图更短，单场战斗奖励更爽，减少重复刷怪压力
-  const lootCount = currentEnemy.isBoss ? 4 : (Math.random() < 0.65 ? 2 : 1);
+  const lootCount = currentEnemy.isBoss ? 4 : (currentEnemy.isElite ? 3 : (Math.random() < 0.65 ? 2 : 1));
   let msg = `获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
   if (currentEnemy.isBoss) msg += ' | 👑 Boss击杀！';
+  else if (currentEnemy.isElite) msg += ' | 🔥 精英击杀！';
   const MAX_INVENTORY = 24;
   for (let l = 0; l < lootCount; l++) {
     const loot = generateLootDrop(dungeonLevel, currentEnemy);

@@ -1368,12 +1368,14 @@ function generateNewFloor() {
      dungeon = generateDungeon(DUNGEON_WIDTH, DUNGEON_HEIGHT, MAX_DEPTH, dungeonLevel);
      dungeon._monsters = new Map();
      dungeon._materials = [];
+     dungeon._chests = [];
      discoveredMap = new Set();
      visibleMap = new Set();
      resetDomMapCache();
      window.dungeon = dungeon;
      spawnMonsters(dungeon, dungeonLevel);
      scatterMaterials(dungeon, dungeonLevel);
+     spawnTreasureChests(dungeon, dungeonLevel);
      // Boss floor notification
      if (isBossFloor(dungeonLevel)) {
        const boss = typeof getBossForLevel === 'function' ? getBossForLevel(dungeonLevel) : BOSSES.find(b => b.floor === dungeonLevel);
@@ -1465,6 +1467,96 @@ function generateNewFloor() {
 
    function roomTypeAt(x, y) {
      return dungeon?.roomTypeByCell?.get?.(`${x},${y}`) || ROOM_TYPE?.NORMAL || 'normal';
+   }
+
+   function roomLabelForType(type) {
+     switch (type) {
+       case 'treasure': return { label: '宝藏房', cls: 'treasure' };
+       case 'elite': return { label: '精英房', cls: 'elite' };
+       case 'boss': return { label: 'Boss房', cls: 'boss' };
+       default: return null;
+     }
+   }
+
+   function findFreeRoomCell(room, avoid = () => false) {
+     if (!room || !dungeon) return null;
+     const cells = [];
+     for (let y = room.y + 1; y < room.y + room.h - 1; y++) {
+       for (let x = room.x + 1; x < room.x + room.w - 1; x++) {
+         if (dungeon.grid?.[y]?.[x] === TILE.FLOOR && !avoid(x, y)) cells.push({ x, y });
+       }
+     }
+     if (!cells.length) return null;
+     return cells[Math.floor(Math.random() * cells.length)];
+   }
+
+   function spawnTreasureChests(dungeonObj, floorLevel = 1) {
+     if (!dungeonObj) return [];
+     dungeonObj._chests = dungeonObj._chests || [];
+     const treasureRooms = (dungeonObj.rooms || []).filter(r => r.type === ROOM_TYPE.TREASURE);
+     for (const room of treasureRooms) {
+       const count = floorLevel >= 6 && room.w * room.h >= 56 ? 2 : 1;
+       for (let i = 0; i < count; i++) {
+         const cell = findFreeRoomCell(room, (x, y) =>
+           dungeonObj._chests.some(c => c.x === x && c.y === y) ||
+           dungeonObj._materials?.some?.(m => m.x === x && m.y === y) ||
+           dungeonObj._monsters?.has?.(`${x},${y}`)
+         );
+         if (!cell) continue;
+         dungeonObj._chests.push({
+           ...cell,
+           roomIndex: room.index,
+           opened: false,
+           name: floorLevel >= 8 ? '秘藏宝匣' : '宝藏木匣',
+           rewardLevel: floorLevel,
+         });
+       }
+     }
+     return dungeonObj._chests;
+   }
+
+   function addChestRewardMaterial(msgParts, floorLevel) {
+     if (typeof MATERIALS === 'undefined') return;
+     const matCount = floorLevel >= 8 ? 3 : 2;
+     for (let i = 0; i < matCount; i++) {
+       const mat = (typeof generateMaterialDrop === 'function' && generateMaterialDrop()) || MATERIALS[Math.floor(Math.random() * Math.min(5, MATERIALS.length))];
+       if (!mat) continue;
+       playerMaterials[mat.id] = (playerMaterials[mat.id] || 0) + 1;
+       msgParts.push(`🔹${mat.name}`);
+     }
+   }
+
+   function checkTreasureChestPickup() {
+     if (!dungeon?._chests?.length || !player) return false;
+     const px = Math.floor(player.x);
+     const py = Math.floor(player.y);
+     const idx = dungeon._chests.findIndex(c => c.x === px && c.y === py);
+     if (idx < 0) return false;
+     const chest = dungeon._chests[idx];
+     const rewardLevel = chest.rewardLevel || dungeonLevel;
+     const stones = Math.ceil((18 + rewardLevel * 7) * (1 + Math.random() * 0.35));
+     player.addSpiritStones(stones);
+     const msgParts = [`💰${stones}灵石`];
+     const MAX_INVENTORY = 24;
+     const lootRolls = rewardLevel >= 6 ? 2 : 1;
+     for (let i = 0; i < lootRolls; i++) {
+       if (player.inventory.length >= MAX_INVENTORY) {
+         msgParts.push('⚠️背包已满');
+         break;
+       }
+       const item = generateEquipment(Math.max(1, rewardLevel + 1));
+       if (item) {
+         player.inventory.push(item);
+         msgParts.push(`🎁${item.name}`);
+       }
+     }
+     addChestRewardMaterial(msgParts, rewardLevel);
+     dungeon._chests.splice(idx, 1);
+     if (typeof resetDomMapCache === 'function') resetDomMapCache();
+     showMessage(`开启${chest.name || '宝箱'}：${msgParts.join(' · ')}`, '#ffdd66');
+     if (typeof sfxDrop === 'function') sfxDrop();
+     autoSave();
+     return true;
    }
 
    function roomTint(type) {
@@ -1622,17 +1714,24 @@ function generateNewFloor() {
          parts.push(`<div class="map-material" style="--mat-color:${escapeHtml(mat.color || '#aaddff')};color:${escapeHtml(mat.color || '#aaddff')};transform:translate3d(${mat.x * CELL_SIZE}px,${mat.y * CELL_SIZE}px,0)">✦</div>`);
        }
      }
+     if (dungeon._chests) {
+       for (const chest of dungeon._chests) {
+         const key = `${chest.x},${chest.y}`;
+         if (!visibleMap.has(key) || chest.x < startCol || chest.x >= endCol || chest.y < startRow || chest.y >= endRow) continue;
+         parts.push(`<div class="map-chest" style="transform:translate3d(${chest.x * CELL_SIZE}px,${chest.y * CELL_SIZE}px,0)"><span>宝</span></div>`);
+       }
+     }
      if (dungeon._monsters && !isInCombat()) {
        for (const [key, mon] of dungeon._monsters.entries()) {
          if (!visibleMap.has(key)) continue;
          const [mx, my] = key.split(',').map(Number);
          if (mx < startCol || mx >= endCol || my < startRow || my >= endRow) continue;
-         const bossCls = mon.isBoss ? ' boss' : '';
-         parts.push(`<div class="map-monster${bossCls}" style="--mob-color:${escapeHtml(mon.color || '#c05060')};transform:translate3d(${mx * CELL_SIZE}px,${my * CELL_SIZE}px,0)"><span>${escapeHtml(mon.symbol || '妖')}</span></div>`);
+         const mobCls = mon.isBoss ? ' boss' : (mon.isElite ? ' elite' : '');
+         parts.push(`<div class="map-monster${mobCls}" style="--mob-color:${escapeHtml(mon.color || '#c05060')};transform:translate3d(${mx * CELL_SIZE}px,${my * CELL_SIZE}px,0)"><span>${escapeHtml(mon.symbol || '妖')}</span></div>`);
        }
      }
      parts.push(`<div id="map-player"><i class="map-player-glow"></i><i class="map-player-body"></i><i class="map-player-head"></i><i class="map-player-eyes"><b></b><b></b></i></div>`);
-     const entityKey = `${parts.length}:${dungeon._materials?.length || 0}:${dungeon._monsters?.size || 0}:${isInCombat() ? 1 : 0}:${mapRenderCache.visibilityKey}`;
+     const entityKey = `${parts.length}:${dungeon._materials?.length || 0}:${dungeon._chests?.length || 0}:${dungeon._monsters?.size || 0}:${isInCombat() ? 1 : 0}:${mapRenderCache.visibilityKey}`;
      if (entityKey !== mapRenderCache.entityKey || !mapRenderCache.playerEl?.isConnected) {
        mapRenderCache.entitiesEl.innerHTML = parts.join('');
        mapRenderCache.playerEl = mapRenderCache.entitiesEl.querySelector('#map-player');
@@ -1658,7 +1757,9 @@ function generateNewFloor() {
          if (!visibleMap.has(key)) continue;
          const [x, y] = key.split(',').map(Number);
          const dist = Math.hypot(x - px, y - py);
-         if (!nearest || dist < nearest.dist) nearest = { x, y, dist, label: mon.isBoss ? 'Boss' : '妖物', cls: mon.isBoss ? 'boss' : 'mob' };
+         const label = mon.isBoss ? 'Boss' : (mon.isElite ? '精英' : '妖物');
+         const cls = mon.isBoss ? 'boss' : (mon.isElite ? 'elite' : 'mob');
+         if (!nearest || dist < nearest.dist) nearest = { x, y, dist, label, cls };
        }
        if (nearest) hints.push(nearest);
      }
@@ -1852,6 +1953,18 @@ function generateNewFloor() {
        }
      }
      if (stairs) hints.push(stairs);
+     for (const room of dungeon.rooms || []) {
+       const meta = roomLabelForType(room.type);
+       if (!meta) continue;
+       const key = `${room.cx},${room.cy}`;
+       if (discoveredMap.has(key) || visibleMap.has(key)) hints.push({ x: room.cx, y: room.cy, label: meta.label, cls: meta.cls });
+     }
+     if (dungeon._chests) {
+       for (const chest of dungeon._chests) {
+         const key = `${chest.x},${chest.y}`;
+         if (visibleMap.has(key)) hints.push({ x: chest.x, y: chest.y, label: '宝箱', cls: 'treasure' });
+       }
+     }
      if (dungeon._monsters) {
        let nearest = null;
        for (const [key, mon] of dungeon._monsters.entries()) {
@@ -2956,6 +3069,7 @@ function generateNewFloor() {
      if (!isInCombat()) checkCombatTrigger();
      if (!isInCombat() && !breakthroughQueue) checkBreakthrough();
      if (!isInCombat()) checkMaterialPickup();
+     if (!isInCombat()) checkTreasureChestPickup();
      if (!isInCombat()) checkStairs();
      updateCamera();
      tickMessages();

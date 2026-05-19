@@ -189,19 +189,24 @@ function getMonsterScale(level, isBoss = false) {
   return isBoss ? { hp: hp * 1.10, atk: atk * 1.08, def: def * 1.05, xp: reward * 1.25, stones: reward * 1.25 } : { hp, atk, def, xp: reward, stones: reward };
 }
 
-function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0) {
+function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0, extra = {}) {
+  const isElite = !!extra.isElite;
   const baseScale = getMonsterScale(level, !!template.isBoss);
   const mult = { hp: 1, atk: 1, def: 1, xp: 1, stones: 1, ...biomeMult };
-  const maxHp = Math.floor(template.hp * baseScale.hp * mult.hp);
+  const eliteMult = isElite ? { hp: 1.75, atk: 1.28, def: 1.18, xp: 2.1, stones: 2.2 } : { hp: 1, atk: 1, def: 1, xp: 1, stones: 1 };
+  const maxHp = Math.floor(template.hp * baseScale.hp * mult.hp * eliteMult.hp);
   const skillIds = [...(template.skillIds || [])];
   return {
     ...template,
+    ...extra,
+    name: isElite ? `精英·${template.name}` : template.name,
+    title: isElite ? `精英·${template.name}` : template.title,
     hp: maxHp,
     maxHp,
-    atk: Math.floor(template.atk * baseScale.atk * mult.atk),
-    def: Math.floor(template.def * baseScale.def * mult.def),
-    xp: Math.floor(template.xp * baseScale.xp * mult.xp),
-    stones: Math.floor(template.stones * baseScale.stones * mult.stones),
+    atk: Math.floor(template.atk * baseScale.atk * mult.atk * eliteMult.atk),
+    def: Math.floor(template.def * baseScale.def * mult.def * eliteMult.def),
+    xp: Math.floor(template.xp * baseScale.xp * mult.xp * eliteMult.xp),
+    stones: Math.floor(template.stones * baseScale.stones * mult.stones * eliteMult.stones),
     skillIds,
     x,
     y,
@@ -230,6 +235,25 @@ function spawnMonsters(dungeonObj, level) {
         scaledBoss.title = level > boss.floor ? `${boss.name}·轮回${Math.floor(level / 30) + 1}` : boss.name;
         dungeonObj._monsters.set(`${bx},${by}`, scaledBoss);
       }
+    }
+  }
+
+  // Place one elite guardian in the elite room for a clear risk/reward target.
+  const eliteRoom = rooms.find(r => r.type === ROOM_TYPE.ELITE);
+  if (eliteRoom) {
+    const ex = Math.floor(eliteRoom.x + eliteRoom.w / 2);
+    const ey = Math.floor(eliteRoom.y + eliteRoom.h / 2);
+    if ((grid[ey][ex] === TILE.FLOOR || grid[ey][ex] === TILE.STAIRS_DOWN) && !dungeonObj._monsters.has(`${ex},${ey}`)) {
+      const totalWeight = monsterPool.reduce((s, m) => s + m.weight, 0);
+      let roll = Math.random() * totalWeight;
+      let picked = monsterPool[0];
+      for (const mon of monsterPool) {
+        roll -= mon.weight;
+        if (roll <= 0) { picked = mon; break; }
+      }
+      const elite = createScaledEnemy(picked, level, biomeMult, ex, ey, { isElite: true, eliteRewardMult: 2.0, color: picked.color || '#ff7744' });
+      elite.biome = biome?.name;
+      dungeonObj._monsters.set(`${ex},${ey}`, elite);
     }
   }
 

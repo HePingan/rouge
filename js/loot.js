@@ -440,7 +440,7 @@ function generateEquipment(floorLevel = 1) {
 // Generate drop from a monster kill
 function generateLootDrop(floorLevel = 1, enemy = null) {
   const roll = Math.random();
-  const dropChance = enemy?.isBoss ? 1.0 : 0.72;
+  const dropChance = (enemy?.isBoss || enemy?.isElite) ? 1.0 : 0.72;
   if (roll > dropChance) return null; // normal 72%, boss guaranteed per roll
   return generateEquipment(floorLevel);
 }
