@@ -3089,6 +3089,9 @@ function generateNewFloor() {
     const enemyDisplayName = currentEnemy.title || currentEnemy.name;
     const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
     const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
+    const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
+    const enemyAtkText = Number(currentEnemy.atk || 0);
+    const enemyDefText = Math.floor(currentEnemy.def * enemyBuffDef);
     const playerHpPct = player.maxHp ? Math.max(0, Math.min(100, player.hp / player.maxHp * 100)) : 100;
     const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
     const pEnemyName = `${currentEnemy.isBoss ? '👑' : '👺'} ${enemyDisplayName}`;
@@ -3133,7 +3136,7 @@ function generateNewFloor() {
     p.innerHTML = `<div class="cbt-topline">
       <div class="cbt-enemy-block">
         <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
-        <div class="cbt-enemy-tags">${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : '<span class="skill-tag">普通妖兽</span>'}</div>
+        <div class="cbt-enemy-tags"><span class="stat-tag atk">攻 ${escapeHtml(enemyAtkText)}</span><span class="stat-tag def">防 ${escapeHtml(enemyDefText)}</span>${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
       </div>
       <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
     </div>

@@ -3728,6 +3728,9 @@ body.combat-active #joystick-zone {
 .cbt-enemy-name { font-size: 15px; font-weight: 900; color: #ff9d6f; line-height: 1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cbt-enemy-tags { margin-top:3px; display:flex; flex-wrap:wrap; gap:4px; }
 .cbt-enemy-tags span { padding:2px 5px; border-radius:999px; background:rgba(255,110,80,.10); border:1px solid rgba(255,140,100,.18); color:#f2c0a2; font:900 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cbt-enemy-tags .stat-tag { min-width:36px; justify-content:center; color:#ffd7c8; background:rgba(255,92,68,.12); border-color:rgba(255,142,104,.24); }
+.cbt-enemy-tags .stat-tag.atk { color:#ffd2ba; background:rgba(255,102,51,.14); }
+.cbt-enemy-tags .stat-tag.def { color:#d7e5ff; background:rgba(110,160,255,.12); border-color:rgba(150,190,255,.20); }
 .cbt-enemy-tags .skill-tag { color:#ffe1a8; border-color:rgba(255,210,120,.20); background:rgba(255,190,80,.08); }
 .cbt-turn { flex:0 0 auto; padding:5px 8px; border-radius:999px; font-size:11px; font-weight:900; letter-spacing:.5px; }
 .cbt-turn.player { color:#10151f; background:#9fe7ff; box-shadow:0 0 12px rgba(120,210,255,.25); }

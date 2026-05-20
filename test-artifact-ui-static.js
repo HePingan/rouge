@@ -37,7 +37,7 @@ const mustBust = [
   'js/main.js',
 ];
 for (const file of mustBust) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520combatclean1`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520combatstats1`);
   assert(re.test(html), `${file} should use the current cachebuster so mobile browsers do not keep stale artifact HUD/UI code`);
 }
 
