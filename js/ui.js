@@ -11,24 +11,24 @@ function updateHUD(player, dungeonLevel) {
   }
   document.getElementById('hud-spirit-stones').textContent = `💎 灵石: ${player.spiritStones}`;
 
-  const weaponHud = document.getElementById('hud-weapon');
-  if (weaponHud) {
-    const weapon = player.equipment?.weapon;
-    const wrapEl = weaponHud.querySelector('.weapon-icon-wrap');
-    const iconEl = weaponHud.querySelector('.weapon-icon');
-    const nameEl = weaponHud.querySelector('.weapon-name');
-    const badgeEl = weaponHud.querySelector('.rarity-corner');
-    if (weapon) {
-      weaponHud.classList.remove('empty');
-      weaponHud.style.setProperty('--rarity-color', weapon.rarityColor || '#d4a0ff');
-      if (iconEl) iconEl.textContent = weapon.icon || '⚔️';
-      if (nameEl) nameEl.textContent = weapon.name || '已装备';
-      if (badgeEl) badgeEl.textContent = ({ '普通': '普', '魔法': '魔', '稀有': '稀', '传说': '传', '神话': '神' }[weapon.rarity] || weapon.rarity?.[0] || '?');
+  const artifactHud = document.getElementById('hud-artifact');
+  if (artifactHud) {
+    const activeArtifact = typeof getActiveArtifact === 'function' ? getActiveArtifact(player) : null;
+    const iconEl = artifactHud.querySelector('.artifact-icon');
+    const nameEl = artifactHud.querySelector('.artifact-name');
+    const badgeEl = artifactHud.querySelector('.artifact-level-badge') || artifactHud.querySelector('.rarity-corner');
+    if (activeArtifact) {
+      const level = Number(activeArtifact.progress?.level || 1);
+      artifactHud.classList.remove('empty');
+      artifactHud.style.setProperty('--artifact-color', activeArtifact.color || '#ffdd66');
+      if (iconEl) iconEl.textContent = activeArtifact.icon || '🗡️';
+      if (nameEl) nameEl.textContent = activeArtifact.name || '已激活神器';
+      if (badgeEl) badgeEl.textContent = String(level);
     } else {
-      weaponHud.classList.add('empty');
-      weaponHud.style.setProperty('--rarity-color', '#6d5a78');
-      if (iconEl) iconEl.textContent = '⚔️';
-      if (nameEl) nameEl.textContent = '未装备';
+      artifactHud.classList.add('empty');
+      artifactHud.style.setProperty('--artifact-color', '#6d5a78');
+      if (iconEl) iconEl.textContent = '🗡️';
+      if (nameEl) nameEl.textContent = '未激活神器';
       if (badgeEl) badgeEl.textContent = '-';
     }
   }

@@ -1219,6 +1219,7 @@ function escapeHtml(value) {
     bindTap(document.getElementById('btn-skills'), onSkills);
     bindTap(document.getElementById('btn-more'), toggleMoreMenu);
     bindTap(document.getElementById('btn-artifact'), onArtifact);
+    bindTap(document.getElementById('hud-artifact'), onArtifact);
     bindTap(document.getElementById('btn-alchemy'), onAlchemy);
     bindTap(document.getElementById('btn-break'), onBreakthrough);
     bindTap(document.getElementById('btn-save'), onSave);

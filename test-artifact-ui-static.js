@@ -7,8 +7,12 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 
 assert(html.includes('id="btn-artifact"'), 'index.html should expose an artifact button');
 assert(html.includes('js/artifacts.js'), 'index.html should load artifact logic before main.js');
+assert(html.includes('id="hud-artifact"'), 'top-left HUD should be the artifact HUD, not equipment');
+assert(html.includes('artifact-icon-wrap') && html.includes('artifact-icon') && html.includes('artifact-name'), 'artifact HUD should expose icon, badge, and name nodes');
+assert(!html.includes('id="hud-weapon"'), 'top-left equipment HUD should be removed from the main screen');
 assert(main.includes("if (panel === 'artifact') showArtifactUI = true;"), 'openPanel should support artifact panel state');
 assert(main.includes("bindTap(document.getElementById('btn-artifact'), onArtifact);"), 'artifact button should be bound to onArtifact');
+assert(main.includes("bindTap(document.getElementById('hud-artifact'), onArtifact);"), 'top-left artifact HUD should open the artifact panel');
 assert(main.includes("if (showArtifactUI && typeof renderArtifactDomPanel === 'function') renderArtifactDomPanel();"), 'syncBodyPanelState should render artifact DOM panel');
 assert(main.includes("p.addEventListener('touchstart', e => { if (e.target.closest('.pclose'))"), 'artifact panel close button should handle mobile touch');
 assert(main.includes("data-artifact-id"), 'artifact cards should expose activation action');
@@ -29,11 +33,12 @@ const mustBust = [
   'js/skills.js',
   'js/alchemy.js',
   'js/save.js',
+  'js/ui.js',
   'js/main.js',
 ];
 for (const file of mustBust) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520artifact3`);
-  assert(re.test(html), `${file} should use the artifact3 cachebuster so mobile browsers do not keep stale artifact UI code`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520artifact4`);
+  assert(re.test(html), `${file} should use the artifact4 cachebuster so mobile browsers do not keep stale artifact HUD/UI code`);
 }
 
 console.log('artifact UI static tests passed');

@@ -3830,3 +3830,80 @@ body.combat-active #joystick-zone {
   .cbt-actions-row { gap:5px; }
   .cbt-act-btn { min-height:37px; font-size:15px; }
 }
+
+
+/* Artifact HUD override */
+#hud-artifact {
+  position: absolute;
+  top: calc(34px + var(--safe-top));
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(56vw, 260px);
+  padding: 3px 8px 3px 4px;
+  color: var(--artifact-color, #d4a0ff);
+  background: rgba(10,5,20,0.58);
+  border: 1px solid color-mix(in srgb, var(--artifact-color, #d4a0ff) 55%, transparent);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1;
+  text-shadow: 0 0 6px rgba(0,0,0,0.85);
+  pointer-events: auto;
+  z-index: 9;
+}
+#hud-artifact .artifact-icon-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.07);
+  border: 1.5px solid var(--artifact-color, #d4a0ff);
+  border-radius: 6px;
+  box-shadow: inset 0 0 8px rgba(0,0,0,0.5), 0 0 4px color-mix(in srgb, var(--artifact-color, #d4a0ff) 40%, transparent);
+}
+#hud-artifact .artifact-icon {
+  font-size: 18px;
+  line-height: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--artifact-color, #d4a0ff) 60%, transparent));
+}
+#hud-artifact .artifact-level-badge,
+#hud-artifact .rarity-corner {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1b1028;
+  background: var(--artifact-color, #d4a0ff);
+  border-radius: 999px;
+  font: 900 9px/1 monospace;
+  border: 1px solid rgba(255,255,255,0.55);
+}
+#hud-artifact .artifact-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-weight: 600;
+}
+#hud-artifact.empty {
+  color: #9a86a8;
+  opacity: 0.78;
+}
+#hud-artifact.empty .artifact-icon-wrap {
+  border-color: color-mix(in srgb, #9a86a8 50%, transparent);
+  box-shadow: none;
+}
+#hud-artifact.empty .artifact-level-badge,
+#hud-artifact.empty .rarity-corner {
+  background: #6d5a78;
+  color: #3f2a48;
+}
