@@ -2,7 +2,7 @@
 // Saves player progress, inventory, skills, materials between sessions
 
 const SAVE_KEY = 'xian_save_v1';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const SAVE_BACKUP_KEY = `${SAVE_KEY}_backup`;
 const SAVE_CORRUPT_KEY = `${SAVE_KEY}_corrupt`;
 
@@ -71,6 +71,7 @@ function migrateSave(data) {
   if (!migrated.materials || typeof migrated.materials !== 'object' || Array.isArray(migrated.materials)) {
     migrated.materials = {};
   }
+  migrated.artifacts = typeof normalizeArtifactsState === 'function' ? normalizeArtifactsState(migrated.artifacts) : (migrated.artifacts || { activeId: null, owned: {} });
   migrated.floor = normalizeNumber(migrated.floor, 1);
 
   return migrated;
@@ -83,6 +84,7 @@ function validateSave(data) {
   if (data.inventory !== undefined && !Array.isArray(data.inventory)) return false;
   if (data.learnedSkills !== undefined && !Array.isArray(data.learnedSkills)) return false;
   if (data.materials !== undefined && (!data.materials || typeof data.materials !== 'object' || Array.isArray(data.materials))) return false;
+  if (data.artifacts !== undefined && (!data.artifacts || typeof data.artifacts !== 'object' || Array.isArray(data.artifacts))) return false;
 
   const numericFields = [
     'realmIndex', 'xp', 'spiritStones', 'breakthroughFails', 'breakthroughChanceBonus',
@@ -135,6 +137,8 @@ function saveGame() {
       learnedSkills: learnedSkills.map(s => ({ tree: s.tree, index: s.index })),
       // Materials
       materials: { ...playerMaterials },
+      // Artifacts
+      artifacts: typeof serializeArtifactsState === 'function' ? serializeArtifactsState(player.artifacts) : (player.artifacts || { activeId: null, owned: {} }),
       // Dungeon progress
       floor: dungeonLevel,
     };
@@ -216,6 +220,10 @@ function applySaveData(data) {
 
   // Restore materials
   playerMaterials = data.materials ? { ...data.materials } : {};
+
+  // Restore artifacts
+  player.artifacts = typeof normalizeArtifactsState === 'function' ? normalizeArtifactsState(data.artifacts) : (data.artifacts || { activeId: null, owned: {} });
+  player.recalcStats();
 
   // Restore floor level
   dungeonLevel = data.floor ?? 1;

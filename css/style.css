@@ -1726,7 +1726,7 @@ body.combat-active #hud-bottom { display: block; }
   /* 打开背包/技能/炼丹/突破面板时，只看面板，不让主界面功能格和摇杆抢空间 */
   
 /* ─── DOM HD Skill Tree Panel 1778974652 ─── */
-#skills-dom-panel, #alchemy-dom-panel, #breakthrough-dom-panel {
+#skills-dom-panel, #alchemy-dom-panel, #breakthrough-dom-panel, #artifact-dom-panel {
   display: none;
   position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
   width: min(92vw, 860px); max-height: 88vh;
@@ -1739,6 +1739,7 @@ body.combat-active #hud-bottom { display: block; }
 }
 /* class-based open toggling */
 body.skills-open #skills-dom-panel,
+body.artifact-open #artifact-dom-panel,
 body.alchemy-open #alchemy-dom-panel,
 body.breakthrough-open #breakthrough-dom-panel {
   display: flex; flex-direction: column;
@@ -2069,7 +2070,7 @@ body.breakthrough-open #breakthrough-dom-panel {
 .bt-btn:active { background: rgba(180,120,20,0.4); transform: scale(0.96); }
 /* Mobile responsive */
 @media (max-width: 620px) {
-  #skills-dom-panel, #alchemy-dom-panel, #breakthrough-dom-panel {
+  #skills-dom-panel, #alchemy-dom-panel, #breakthrough-dom-panel, #artifact-dom-panel {
     width: 96vw; max-height: 84vh; padding: 14px 12px;
     top: calc(50px + env(safe-area-inset-top));
     transform: translate(-50%, 0);
@@ -2077,6 +2078,10 @@ body.breakthrough-open #breakthrough-dom-panel {
     overscroll-behavior: contain;
     touch-action: pan-y;
   }
+  #artifact-dom-panel .panel-body { overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y; padding-bottom:max(16px, env(safe-area-inset-bottom)); }
+  #artifact-dom-panel .artifact-card { padding:9px; }
+  #artifact-dom-panel .artifact-actions { justify-content:stretch; }
+  #artifact-dom-panel .artifact-action { flex:1; min-height:34px; }
   .skills-panel-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
   .skill-orbit-board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-height: auto; padding: 9px 7px; overflow: visible; }
   .skill-branch { padding: 6px; border-radius: 12px; }
@@ -2981,8 +2986,7 @@ body.character-open #character-dom-panel {
   align-items: center;
   gap: 10px;
   min-height: 38px;
-  padding: 2px 2px 10px;
-  border-bottom: 1px solid rgba(255,226,168,0.13);
+  padding: 2px 2px 8px;
 }
 #character-dom-panel .char-head > div:first-child { flex: 1; min-width: 0; text-align: left; }
 #character-dom-panel .char-title { color: #ffe0a2; font-size: 18px; font-weight: 900; letter-spacing: .5px; text-shadow: 0 1px 3px rgba(0,0,0,0.75); }
@@ -2998,6 +3002,29 @@ body.character-open #character-dom-panel {
   font: 900 18px/1 sans-serif;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 }
+#character-dom-panel .char-tabs {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 2px 9px;
+  border-bottom: 1px solid rgba(255,226,168,0.13);
+}
+#character-dom-panel .char-tab {
+  min-height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,226,168,.22);
+  background: rgba(255,255,255,.055);
+  color: #cfc2da;
+  font: 900 12px/1.2 "KaiTi", "STKaiti", "SimSun", serif;
+  touch-action: manipulation;
+}
+#character-dom-panel .char-tab.active {
+  color: #160c20;
+  border-color: rgba(255,238,190,.78);
+  background: linear-gradient(180deg, #ffe5a8, #d7a94f);
+  box-shadow: 0 0 14px rgba(255,210,112,.22);
+}
 #character-dom-panel .char-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -3009,6 +3036,9 @@ body.character-open #character-dom-panel {
   overscroll-behavior: contain;
   padding: 10px 2px calc(22px + env(safe-area-inset-bottom));
 }
+#character-dom-panel [data-char-tab-panel] { display: none; }
+#character-dom-panel [data-char-tab-panel].active { display: block; }
+#character-dom-panel .char-tab-panel { min-height: 0; }
 #character-dom-panel .char-section {
   margin-bottom: 10px;
   padding: 10px;
@@ -3149,7 +3179,10 @@ body.character-open #character-dom-panel {
 #character-dom-panel .item-action.disabled { opacity: 0.55; filter: grayscale(0.5); }
 @media (max-width: 560px) {
   #character-dom-panel { left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); top: calc(46px + env(safe-area-inset-top)); bottom: calc(10px + env(safe-area-inset-bottom)); padding: 10px; border-radius: 20px; }
-  #character-dom-panel .char-head { min-height: 34px; padding-bottom: 8px; }
+  #character-dom-panel .char-head { min-height: 34px; padding-bottom: 6px; }
+  #character-dom-panel .char-tabs { gap: 5px; padding-bottom: 7px; }
+  #character-dom-panel .char-tab { min-height: 28px; font-size: 11.5px; }
+  #character-dom-panel .char-body { padding-top: 8px; }
   #character-dom-panel .char-title { font-size: 17px; }
   #character-dom-panel .char-sub { font-size: 10px; }
   #character-dom-panel .top-equipment h3 small { display: none; }
@@ -3633,10 +3666,71 @@ body.character-open #character-dom-panel {
 #combat-dom-panel { z-index: 40; }
 #inventory-dom-panel { z-index: 980; }
 #skills-dom-panel,
+#artifact-dom-panel,
 #alchemy-dom-panel,
 #breakthrough-dom-panel { z-index: 9990; }
+.artifact-list { display:grid; gap:10px; }
+.artifact-card { border:1px solid rgba(255,255,255,.12); border-left:3px solid var(--artifact-color,#ffdd66); border-radius:12px; padding:10px; background:rgba(255,255,255,.045); }
+.artifact-card.locked { opacity:.68; }
+.artifact-card.active { box-shadow:0 0 18px color-mix(in srgb, var(--artifact-color,#ffdd66) 34%, transparent); }
+.artifact-top { display:flex; align-items:center; gap:9px; }
+.artifact-top i { font-style:normal; font-size:24px; }
+.artifact-top b { display:block; color:var(--artifact-color,#ffdd66); }
+.artifact-top em { display:block; color:#cfc4dd; font-style:normal; font-size:12px; }
+.artifact-card p { margin:6px 0 8px; color:#cfc4dd; font-size:12px; line-height:1.35; }
+.artifact-stats { display:flex; flex-wrap:wrap; gap:6px; }
+.artifact-stats span { display:inline-flex; gap:4px; border:1px solid rgba(255,255,255,.1); border-radius:999px; padding:3px 7px; font-size:11px; background:rgba(0,0,0,.18); }
+.artifact-stats em { color:#aaa; font-style:normal; }
+.artifact-stats b { color:#fff2b0; }
+.artifact-cost { margin-top:8px; display:flex; flex-wrap:wrap; gap:5px; align-items:center; color:#cfc4dd; font-size:11px; }
+.artifact-cost b { color:#ffdd66; margin-right:2px; }
+.artifact-cost span, .artifact-cost .mat-cost { border:1px solid rgba(255,255,255,.10); border-radius:999px; padding:2px 6px; background:rgba(0,0,0,.16); }
+.artifact-cost .mat-cost.lack { color:#ff7777; border-color:rgba(255,90,90,.35); }
+.artifact-cost.muted { color:#888; }
+.artifact-actions { margin-top:9px; display:flex; gap:7px; justify-content:flex-end; flex-wrap:wrap; }
+.artifact-action { border:1px solid var(--artifact-color,#ffdd66); color:var(--artifact-color,#ffdd66); background:rgba(0,0,0,.24); border-radius:999px; padding:5px 11px; font-size:12px; }
+.artifact-action.upgrade { background:color-mix(in srgb, var(--artifact-color,#ffdd66) 16%, rgba(0,0,0,.24)); }
+.artifact-action:disabled { opacity:.42; border-color:#777; color:#999; }
+.artifact-action:not(:disabled):active { transform:scale(.96); background:rgba(255,255,255,.08); }
 #character-dom-panel { z-index: 9992; }
 #skill-detail-layer { z-index: 10020; }
+
+/* ─── Inventory Scroll Fix 20260519bagscroll1 ───
+   The global game shell uses touch-action:none for fullscreen movement. On mobile
+   this can suppress native scrolling inside the backpack unless the panel chain
+   explicitly opts back into vertical pan. Keep the inventory body as the single
+   scroll container on phones so the enlarged 36+ slot grid can move naturally. */
+body.inventory-open,
+body.inventory-open #game-container {
+  touch-action: auto;
+}
+body.inventory-open #inventory-dom-panel,
+body.inventory-open #inventory-dom-panel .inv-body,
+body.inventory-open #inventory-dom-panel .bag-list,
+body.inventory-open #inventory-dom-panel .material-list,
+body.inventory-open #inventory-dom-panel .process-section {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 620px) {
+  body.inventory-open #inventory-dom-panel .inv-body {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    min-height: 0;
+    flex: 1 1 auto;
+    padding-bottom: 10px;
+  }
+  body.inventory-open #inventory-dom-panel [data-tab-panel].active {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+  body.inventory-open #inventory-dom-panel .bag-list,
+  body.inventory-open #inventory-dom-panel .material-list {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+}
 
 body.panel-open #touch-controls,
 body.combat-active #touch-controls {

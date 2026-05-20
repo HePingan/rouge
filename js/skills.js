@@ -258,14 +258,28 @@ const DAO_FOUNDATIONS = {
 };
 
 const REALM_UNLOCKS = {
-  1: ['装备强化上限提升到 +8', '解锁装备副词条与道基方向', '获得 2 点技能点'],
-  2: ['装备强化上限提升到 +10', '解锁套装掉落', '技能树第二层全面开放'],
-  3: ['装备强化上限提升到 +12', '突破失败保留更多经验', '技能触发流派成型'],
-  4: ['装备强化上限提升到 +15', '高阶词条与领域玩法预留入口', '终阶功法开放'],
+  1: ['装备强化上限提升到 +8', '解锁道基选择与装备副词条', '获得 2 点技能点'],
+  2: ['装备强化上限提升到 +10', '解锁套装掉落', '神器碎片开始掉落'],
+  3: ['装备强化上限提升到 +12', '解锁神器系统入口', '神器最高可升到 1 阶'],
+  4: ['装备强化上限提升到 +15', '神器最高可升到 3 阶', '终阶功法开放'],
+  5: ['装备强化上限提升到 +18', '解锁神器主动效果', '高阶词条权重提升'],
+  6: ['装备强化上限提升到 +21', '神器最高可升到 6 阶', '轮回首领奖励提升'],
+  7: ['装备强化上限提升到 +24', '解锁神器第二被动', '深层材料产出提升'],
+  8: ['装备强化上限提升到 +27', '神器最高可升到 9 阶', '突破失败保护收益提升'],
+  9: ['装备强化上限提升到 +30', '真仙轮回 Boss 开放', '神器最高可升到 12 阶并开放终极效果'],
 };
 
+const REALM_ENHANCE_CAPS = [5, 8, 10, 12, 15, 18, 21, 24, 27, 30];
+const REALM_SKILL_POINT_REWARDS = [0, 2, 2, 2, 2, 3, 3, 3, 4, 4];
+
 function getRealmEnhanceCap(realmIndex = player?.realmIndex || 0) {
-  return [5, 8, 10, 12, 15][Math.max(0, Math.min(4, Number(realmIndex) || 0))] || 5;
+  const idx = Math.max(0, Math.min(REALM_ENHANCE_CAPS.length - 1, Number(realmIndex) || 0));
+  return REALM_ENHANCE_CAPS[idx] || REALM_ENHANCE_CAPS[0];
+}
+
+function getRealmSkillPointReward(realmIndex = player?.realmIndex || 0) {
+  const idx = Math.max(0, Math.min(REALM_SKILL_POINT_REWARDS.length - 1, Number(realmIndex) || 0));
+  return REALM_SKILL_POINT_REWARDS[idx] || 2;
 }
 
 function getDoctrineInfo(id = player?.daoFoundation) {
@@ -288,7 +302,7 @@ function getBreakthroughPreview() {
     mp: Math.floor((player?.baseMp || 50) * next.mpMult) - mpNow,
     atk: (next.atkBonus || 0) - (cur.atkBonus || 0),
     def: (next.defBonus || 0) - (cur.defBonus || 0),
-    skillPoints: 2,
+    skillPoints: getRealmSkillPointReward((player?.realmIndex || 0) + 1),
     unlocks: REALM_UNLOCKS[(player?.realmIndex || 0) + 1] || ['更高境界属性成长'],
   };
 }
@@ -787,9 +801,10 @@ function doBreakthrough(selectedFoundation = null) {
     player.breakthroughChanceBonus = 0;
     player.breakthroughProtect = 0;
     player.recalcStats();
-    availableSkillPoints += 2;
+    const skillPointReward = getRealmSkillPointReward(player.realmIndex);
+    availableSkillPoints += skillPointReward;
     const doctrineText = needsFoundation ? ` · 奠定【${DAO_FOUNDATIONS[selectedFoundation].name}】` : '';
-    showMessage(`🌟 突破成功！踏入【${player.realm.name}】${doctrineText}，获得 2 点技能点`, '#ffdd44');
+    showMessage(`🌟 突破成功！踏入【${player.realm.name}】${doctrineText}，获得 ${skillPointReward} 点技能点`, '#ffdd44');
     const bx = player.x * CELL_SIZE + CELL_SIZE / 2;
     const by = player.y * CELL_SIZE + CELL_SIZE / 2;
     spawnBreakthroughEffect(bx, by);

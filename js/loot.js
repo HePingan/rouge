@@ -11,6 +11,25 @@ const RARITY = {
 const EQUIPMENT_SLOT_ORDER = ['weapon', 'helmet', 'armor', 'gloves', 'belt', 'pants', 'boots', 'accessory'];
 const SLOTS = EQUIPMENT_SLOT_ORDER;
 
+// 背包容量随境界解锁：前期比原 24 格更宽松，后期继续扩容以承接更多掉落。
+// 只由当前境界计算，不写入存档，旧存档加载后会自动获得对应容量。
+const INVENTORY_CAPACITY_BY_REALM = [36, 48, 60, 72, 90, 108, 126, 148, 172, 200];
+
+function getInventoryCapacity(p = player) {
+  const realmIndex = Math.max(0, Math.min(INVENTORY_CAPACITY_BY_REALM.length - 1, Number(p?.realmIndex) || 0));
+  return INVENTORY_CAPACITY_BY_REALM[realmIndex] || INVENTORY_CAPACITY_BY_REALM[0];
+}
+
+function getNextInventoryCapacityUnlock(p = player) {
+  const realmIndex = Math.max(0, Number(p?.realmIndex) || 0);
+  const current = getInventoryCapacity(p);
+  for (let i = realmIndex + 1; i < INVENTORY_CAPACITY_BY_REALM.length; i++) {
+    const capacity = INVENTORY_CAPACITY_BY_REALM[i];
+    if (capacity > current) return { realmIndex: i, realmName: REALMS?.[i]?.name || `境界${i + 1}`, capacity, increase: capacity - current };
+  }
+  return null;
+}
+
 const PREFIXES = [
   { name: '锋利的',   stat: 'atk',  value: 3,  weight: 10 },
   { name: '坚硬的',   stat: 'def',  value: 2,  weight: 10 },
@@ -204,7 +223,7 @@ function equipmentSlotKeys() {
   return EQUIPMENT_SLOT_ORDER.slice();
 }
 
-const MAX_EQUIPMENT_ENHANCE_LEVEL = 15;
+const MAX_EQUIPMENT_ENHANCE_LEVEL = 30;
 function getCurrentEquipmentEnhanceCap() {
   return typeof getRealmEnhanceCap === 'function' ? getRealmEnhanceCap(player?.realmIndex || 0) : MAX_EQUIPMENT_ENHANCE_LEVEL;
 }
@@ -241,7 +260,13 @@ function equipmentEnhanceBonusValue(item, level = getEquipmentEnhanceLevel(item)
   if (EQUIPMENT_ENHANCE_PERCENT_STATS.has(stat) || stat === 'speed') {
     return Math.max(1, Math.floor(lv * 0.55 + base * lv * 0.08));
   }
-  const scale = lv <= 5 ? lv * 0.14 : lv <= 10 ? 0.70 + (lv - 5) * 0.18 : 1.60 + (lv - 10) * 0.24;
+  const scale = lv <= 5
+    ? lv * 0.14
+    : lv <= 10
+      ? 0.70 + (lv - 5) * 0.18
+      : lv <= 20
+        ? 1.60 + (lv - 10) * 0.24
+        : 4.00 + (lv - 20) * 0.32;
   return Math.max(lv, Math.floor(base * scale));
 }
 
@@ -272,6 +297,8 @@ function getEquipmentEnhanceCost(item, nextLevel = getEquipmentEnhanceLevel(item
   if (lv >= 4) cost.materials.ginseng = Math.max(1, Math.floor((lv - 1) / 4));
   if (lv >= 7) cost.materials.soulJade = Math.max(1, Math.floor((lv - 4) / 3));
   if (lv >= 11) cost.materials.starDust = Math.max(1, Math.ceil((lv - 10) / 3));
+  if (lv >= 19) cost.materials.soulJade = (cost.materials.soulJade || 0) + Math.ceil((lv - 18) / 3);
+  if (lv >= 23) cost.materials.starDust = (cost.materials.starDust || 0) + Math.ceil((lv - 22) / 2);
   return cost;
 }
 
@@ -279,7 +306,8 @@ function getEquipmentEnhanceChance(currentLevel = 0) {
   const next = Math.max(1, Number(currentLevel || 0) + 1);
   if (next <= 5) return 1;
   if (next <= 10) return Math.max(0.55, 0.75 - (next - 6) * 0.05);
-  return Math.max(0.34, 0.50 - (next - 11) * 0.04);
+  if (next <= 20) return Math.max(0.28, 0.50 - (next - 11) * 0.025);
+  return Math.max(0.18, 0.28 - (next - 21) * 0.012);
 }
 
 function canPayEquipmentEnhanceCost(cost, materials, playerObj) {
@@ -317,7 +345,8 @@ function enhanceEquipment(item, materials, playerObj, rng = Math.random) {
     afterLevel = nextLevel;
   } else if (nextLevel >= 11) {
     const protectedFail = playerObj?.daoFoundation === 'body' && Math.random() < 0.35;
-    afterLevel = protectedFail ? beforeLevel : Math.max(10, beforeLevel - 1);
+    const floorLevel = nextLevel >= 21 ? 20 : 10;
+    afterLevel = protectedFail ? beforeLevel : Math.max(floorLevel, beforeLevel - 1);
   }
   item.enhanceLevel = afterLevel;
   rebuildEquipmentStats(item);
@@ -437,6 +466,33 @@ function generateEquipment(floorLevel = 1) {
   return rebuildEquipmentStats(item);
 }
 
+function weightedArtifactMaterialPick(pool, rng = Math.random) {
+  if (!pool || !pool.length) return null;
+  const total = pool.reduce((sum, mat) => sum + Number(mat.weight || 1), 0);
+  let roll = rng() * total;
+  for (const mat of pool) {
+    roll -= Number(mat.weight || 1);
+    if (roll <= 0) return mat;
+  }
+  return pool[pool.length - 1];
+}
+
+function generateArtifactMaterialDrop(p = player, enemy = null, rng = Math.random) {
+  if (typeof ARTIFACT_MATERIALS === 'undefined') return null;
+  const realmIndex = Number(p?.realmIndex || 0);
+  if (realmIndex < 1) return null; // 筑基期后开始攒碎片，炼气期不掉。
+  const boss = !!enemy?.isBoss;
+  const elite = !!enemy?.isElite;
+  let chance = boss ? 0.85 : (elite ? 0.45 : 0.12);
+  if (typeof getArtifactEffectValue === 'function') chance += Number(getArtifactEffectValue('artifactDropBonus', p) || 0) / 100;
+  if (rng() > Math.min(0.95, chance)) return null;
+
+  const shardPool = ARTIFACT_MATERIALS.filter(m => String(m.id).startsWith('artifact_shard_'));
+  if (boss && realmIndex >= 3 && rng() > 0.92) return ARTIFACT_MATERIALS.find(m => m.id === 'artifact_core') || null;
+  if ((boss || elite) && realmIndex >= 2 && rng() > 0.82) return ARTIFACT_MATERIALS.find(m => m.id === 'artifact_essence') || weightedArtifactMaterialPick(shardPool, rng);
+  return weightedArtifactMaterialPick(shardPool, rng);
+}
+
 // Generate drop from a monster kill
 function generateLootDrop(floorLevel = 1, enemy = null) {
   const roll = Math.random();
@@ -508,8 +564,9 @@ function equipItem(player, invIndex) {
 function unequipItem(player, slot) {
   const item = player.equipment[slot];
   if (!item) return false;
-  if (player.inventory.length >= 24) {
-    showMessage(`⚠️ 背包已满，无法取下 ${item.name}`, '#ff4444');
+  const capacity = getInventoryCapacity(player);
+  if (player.inventory.length >= capacity) {
+    showMessage(`⚠️ 背包已满（${capacity}格），无法取下 ${item.name}`, '#ff4444');
     return false;
   }
   player.equipment[slot] = null;

@@ -10,6 +10,7 @@ const MATERIALS = [
   { id: 'phoenixFeather', name: '凤凰羽', rarity: 'rare', color: '#ff3366', weight: 4 },
   { id: 'soulJade', name: '魂玉', rarity: 'rare', color: '#aa44ff', weight: 5 },
   { id: 'starDust', name: '星辰砂', rarity: 'legendary', color: '#ffdd44', weight: 2 },
+  ...(typeof ARTIFACT_MATERIALS !== 'undefined' ? ARTIFACT_MATERIALS : []),
 ];
 // ─── Pill Recipes ───
 const RECIPES = [

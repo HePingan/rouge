@@ -6,6 +6,11 @@ const REALMS = [
   { name: '金丹期', xpNeeded: 550, hpMult: 2.0, mpMult: 1.6, atkBonus: 10, defBonus: 6 },
   { name: '元婴期', xpNeeded: 1200, hpMult: 2.8, mpMult: 2.2, atkBonus: 20, defBonus: 12 },
   { name: '化神期', xpNeeded: 2400, hpMult: 3.8, mpMult: 3.2, atkBonus: 32, defBonus: 22 },
+  { name: '炼虚期', xpNeeded: 4800, hpMult: 5.0, mpMult: 4.4, atkBonus: 48, defBonus: 34 },
+  { name: '合体期', xpNeeded: 9000, hpMult: 6.4, mpMult: 5.8, atkBonus: 68, defBonus: 50 },
+  { name: '大乘期', xpNeeded: 16000, hpMult: 8.0, mpMult: 7.4, atkBonus: 94, defBonus: 70 },
+  { name: '渡劫期', xpNeeded: 28000, hpMult: 10.0, mpMult: 9.3, atkBonus: 128, defBonus: 96 },
+  { name: '真仙境', xpNeeded: 48000, hpMult: 12.5, mpMult: 11.6, atkBonus: 172, defBonus: 130 },
 ];
 
 class Player {
@@ -50,6 +55,7 @@ class Player {
       accessory: null,
     };
     this.inventory = [];
+    this.artifacts = typeof createDefaultArtifactsState === 'function' ? createDefaultArtifactsState() : { activeId: null, owned: {} };
     this.skillPoints = 0;
     this.learnedSkills = [];
   }
@@ -108,6 +114,10 @@ class Player {
       const skillBonuses = getSkillPassiveBonuses();
       for (const [stat, value] of Object.entries(skillBonuses || {})) applyStatBonus(stat, value);
     }
+    if (typeof getArtifactStatBonuses === 'function') {
+      const artifactBonuses = getArtifactStatBonuses(this);
+      for (const [stat, value] of Object.entries(artifactBonuses || {})) applyStatBonus(stat, value);
+    }
     if (this.tempAtkBuff) this.atk = Math.floor(this.atk * (1 + this.tempAtkBuff));
     if (this.tempDefBuff) this.def = Math.floor(this.def * (1 + this.tempDefBuff));
     this.hp = Math.max(1, Math.min(this.maxHp, Math.floor(this.maxHp * hpRatio)));
@@ -159,6 +169,10 @@ const BOSSES = [
   { floor: 20, name: '无间修罗',   symbol: '罗', hp: 520, atk: 45, def: 21, xp: 480, stones: 210, isBoss: true, color: '#ff0066', skillIds: ['shuraCombo', 'abyssCleave'] },
   { floor: 25, name: '冰狱妖后',   symbol: '后', hp: 680, atk: 52, def: 24, xp: 650, stones: 280, isBoss: true, color: '#66ddff', skillIds: ['frostDomain', 'frostBite'] },
   { floor: 30, name: '万毒魔君',   symbol: '毒', hp: 820, atk: 60, def: 26, xp: 820, stones: 360, isBoss: true, color: '#66cc66', skillIds: ['poisonDomain', 'venomFang'] },
+  { floor: 35, name: '炼虚天魔',   symbol: '虚', hp: 1050, atk: 72, def: 32, xp: 1080, stones: 480, isBoss: true, color: '#bb88ff', skillIds: ['ghostCurse', 'frostDomain'] },
+  { floor: 40, name: '合体妖皇',   symbol: '皇', hp: 1360, atk: 86, def: 40, xp: 1400, stones: 640, isBoss: true, color: '#ffbb44', skillIds: ['shuraCombo', 'ironShell'] },
+  { floor: 45, name: '大乘古魔',   symbol: '古', hp: 1760, atk: 104, def: 50, xp: 1820, stones: 860, isBoss: true, color: '#ff5577', skillIds: ['abyssCleave', 'poisonDomain'] },
+  { floor: 50, name: '渡劫雷君',   symbol: '劫', hp: 2280, atk: 126, def: 62, xp: 2380, stones: 1160, isBoss: true, color: '#ffdd44', skillIds: ['dragonBreath', 'shuraCombo'] },
 ];
 
 function getMonsterSkill(id) {

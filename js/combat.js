@@ -44,6 +44,50 @@ function combatLog(text, color = '#d4c8b0') {
 function equipmentAbilityValue(key) {
   return typeof getEquipmentAbility === 'function' ? Number(getEquipmentAbility(key) || 0) : 0;
 }
+function activeArtifactIdForCombat(p = player) {
+  return (typeof getActiveArtifact === 'function' && getActiveArtifact(p)?.id) || null;
+}
+function rollArtifactAttackEffects(p = player, baseDamage = 1, rng = Math.random) {
+  const id = activeArtifactIdForCombat(p);
+  const effects = [];
+  if (!id || typeof getArtifactEffectValue !== 'function') return effects;
+  if (id === 'zhuxian') {
+    const chance = Number(getArtifactEffectValue('swordQiChance', p) || 0);
+    if (chance > 0 && rng() * 100 < chance) {
+      const ratio = Number(getArtifactEffectValue('swordQiRatio', p) || 0.35);
+      effects.push({ id: 'zhuxian', label: '诛仙剑气', icon: '🗡️', color: '#ff5577', damage: Math.max(1, Math.floor(baseDamage * ratio)) });
+    }
+  }
+  if (id === 'leifa') {
+    const chance = Number(getArtifactEffectValue('thunderSealChain', p) || 0);
+    if (chance > 0 && rng() * 100 < chance) {
+      const ratio = Number(getArtifactEffectValue('thunderSealRatio', p) || 0.35);
+      effects.push({ id: 'leifa', label: '雷罚天雷', icon: '⚡', color: '#d9c3ff', damage: Math.max(1, Math.floor(baseDamage * ratio)) });
+    }
+  }
+  return effects;
+}
+function applyArtifactDeathSave(p = player) {
+  if (!p || typeof getArtifactEffectValue !== 'function') return { ok: false, reason: 'unavailable' };
+  if (activeArtifactIdForCombat(p) !== 'haotian') return { ok: false, reason: 'not_active' };
+  if (Number(getArtifactEffectValue('deathSave', p) || 0) <= 0) return { ok: false, reason: 'no_effect' };
+  p._combatTriggers = p._combatTriggers || {};
+  if (p._combatTriggers.haotianDeathSave) return { ok: false, reason: 'used' };
+  if (p.hp > 0) return { ok: false, reason: 'not_lethal' };
+  p._combatTriggers.haotianDeathSave = true;
+  p.hp = Math.max(1, Math.floor(Number(p.maxHp || 1) * 0.30));
+  return { ok: true, hp: p.hp };
+}
+function applyArtifactVictoryEffects(p = player) {
+  if (!p || typeof getArtifactEffectValue !== 'function') return { ok: false, reason: 'unavailable' };
+  const pct = Number(getArtifactEffectValue('killRecoverPct', p) || 0);
+  if (activeArtifactIdForCombat(p) !== 'lianyao' || pct <= 0) return { ok: false, reason: 'not_active' };
+  const hp = Math.floor(Number(p.maxHp || 0) * pct);
+  const mp = Math.floor(Number(p.maxMp || 0) * pct);
+  p.hp = Math.min(p.maxHp, Number(p.hp || 0) + hp);
+  p.mp = Math.min(p.maxMp, Number(p.mp || 0) + mp);
+  return { ok: true, hp, mp };
+}
 function applyEquipmentOnHitEffects(damage, crit) {
   if (!player || !currentEnemy || currentEnemy.hp <= 0) return;
   const lifesteal = equipmentAbilityValue('lifesteal');
@@ -109,6 +153,13 @@ function playerAttack() {
   currentEnemy.hp -= dmg;
   const flameBurst = equipmentAbilityValue('flameBurst');
   if (flameBurst > 0) { const extra = Math.max(1, Math.floor(player.atk * flameBurst)); currentEnemy.hp -= extra; dmg += extra; combatLog(`🔥 焚天真火追加 ${extra} 火焰伤害`, '#ff8844'); }
+  const artifactEffects = typeof rollArtifactAttackEffects === 'function' ? rollArtifactAttackEffects(player, baseDmg) : [];
+  for (const effect of artifactEffects) {
+    if (currentEnemy.hp <= 0) break;
+    currentEnemy.hp -= effect.damage;
+    dmg += effect.damage;
+    combatLog(`${effect.icon || '🗡️'} ${effect.label}追加 ${effect.damage} 点伤害`, effect.color || '#ffdd66');
+  }
   combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}`, '#ffaa44');
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
   applyEquipmentOnHitEffects(dmg, crit);
@@ -129,6 +180,8 @@ function playerAttack() {
     currentEnemy.hp = 0;
     if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
     applyEquipmentOnVictory();
+    const artifactRecover = typeof applyArtifactVictoryEffects === 'function' ? applyArtifactVictoryEffects(player) : null;
+    if (artifactRecover?.ok) combatLog(`🏺 炼妖壶炼化妖力，恢复生命 ${artifactRecover.hp}、灵力 ${artifactRecover.mp}`, '#90ee90');
     combatLog(`✅ 你击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
@@ -297,16 +350,23 @@ function useEnemySkill(skill) {
 
 function finishEnemyTurn() {
   if (player.hp <= 0) {
-    player.hp = 0;
-    combatLog('💀 你被击败了...', '#ff3333');
-    combatState = COMBAT_STATE.DEFEAT;
-    onDefeat();
-    return;
+    const saved = typeof applyArtifactDeathSave === 'function' ? applyArtifactDeathSave(player) : null;
+    if (saved?.ok) {
+      combatLog(`🗼 昊天塔护住元神，生命恢复至 ${player.hp}`, '#ffd166');
+    } else {
+      player.hp = 0;
+      combatLog('💀 你被击败了...', '#ff3333');
+      combatState = COMBAT_STATE.DEFEAT;
+      onDefeat();
+      return;
+    }
   }
   if (currentEnemy && currentEnemy.hp <= 0) {
     currentEnemy.hp = 0;
     if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
     applyEquipmentOnVictory();
+    const artifactRecover = typeof applyArtifactVictoryEffects === 'function' ? applyArtifactVictoryEffects(player) : null;
+    if (artifactRecover?.ok) combatLog(`🏺 炼妖壶炼化妖力，恢复生命 ${artifactRecover.hp}、灵力 ${artifactRecover.mp}`, '#90ee90');
     combatLog(`✅ 你反震击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
@@ -358,12 +418,12 @@ function onVictory() {
   let msg = `获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
   if (currentEnemy.isBoss) msg += ' | 👑 Boss击杀！';
   else if (currentEnemy.isElite) msg += ' | 🔥 精英击杀！';
-  const MAX_INVENTORY = 24;
+  const maxInventory = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
   for (let l = 0; l < lootCount; l++) {
     const loot = generateLootDrop(dungeonLevel, currentEnemy);
     if (loot) {
-      if (player.inventory.length >= MAX_INVENTORY) {
-        msg += ` | ⚠️ 背包已满，${loot.name} 无法拾取`;
+      if (player.inventory.length >= maxInventory) {
+        msg += ` | ⚠️ 背包已满（${maxInventory}格），${loot.name} 无法拾取`;
         break;
       }
       player.inventory.push(loot);
@@ -379,6 +439,13 @@ function onVictory() {
       playerMaterials[drop.id] = (playerMaterials[drop.id] || 0) + 1;
       msg += ` | 🔹 ${drop.name}`;
     }
+  }
+  const artifactDropCount = currentEnemy.isBoss ? 2 : (currentEnemy.isElite ? 1 : 1);
+  for (let a = 0; a < artifactDropCount; a++) {
+    const artifactMat = typeof generateArtifactMaterialDrop === 'function' ? generateArtifactMaterialDrop(player, currentEnemy) : null;
+    if (!artifactMat) continue;
+    playerMaterials[artifactMat.id] = (playerMaterials[artifactMat.id] || 0) + 1;
+    msg += ` | 🗡️ ${artifactMat.name}`;
   }
   // Clear enemy tile and remove from monsters map.
   // Boss guards spawn on the same cell as STAIRS_DOWN, so preserve/reveal the exit.

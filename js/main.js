@@ -22,6 +22,8 @@
      let characterPanelTouchState = null;
      let characterPanelLastHtml = '';
      let characterEquipmentDetailSlot = null;
+     let characterTab = 'attributes';
+    let showArtifactUI = false;
     let inventoryBulkRarity = '普通';
     let inventoryBulkMode = 'sell';
     let inventoryTab = 'equipment';
@@ -169,7 +171,7 @@
      if (typeof resetDomMapCache === 'function') resetDomMapCache();
    }
   function isAnyPanelOpen() {
-    return showInventory || showCharacterPanel || showSkillTreeUI || showAlchemyUI || showBreakthroughUI;
+    return showInventory || showCharacterPanel || showSkillTreeUI || showArtifactUI || showAlchemyUI || showBreakthroughUI;
   }
   function syncMainNavState() {
     if (typeof document === 'undefined') return;
@@ -191,6 +193,7 @@
     document.body.classList.toggle('inventory-open', !!showInventory);
     document.body.classList.toggle('character-open', !!showCharacterPanel);
     document.body.classList.toggle('skills-open', !!showSkillTreeUI);
+    document.body.classList.toggle('artifact-open', !!showArtifactUI);
     document.body.classList.toggle('alchemy-open', !!showAlchemyUI);
     document.body.classList.toggle('breakthrough-open', !!showBreakthroughUI);
     const moreMenu = document.getElementById('more-menu');
@@ -202,6 +205,7 @@
     if (showInventory && typeof renderInventoryDomPanel === 'function') renderInventoryDomPanel();
     if (showCharacterPanel && typeof renderCharacterDomPanel === 'function') renderCharacterDomPanel();
     if (showSkillTreeUI && typeof renderSkillsDomPanel === 'function') renderSkillsDomPanel();
+    if (showArtifactUI && typeof renderArtifactDomPanel === 'function') renderArtifactDomPanel();
     if (showAlchemyUI && typeof renderAlchemyDomPanel === 'function') renderAlchemyDomPanel();
     if (showBreakthroughUI && typeof renderBreakthroughDomPanel === 'function') renderBreakthroughDomPanel();
   }
@@ -345,7 +349,7 @@ function escapeHtml(value) {
     const chance = typeof getEquipmentEnhanceChance === 'function' ? Math.round(getEquipmentEnhanceChance(level) * 100) : 100;
     const maxed = level >= maxLevel;
     const cost = maxed ? null : getEquipmentEnhanceCost(item, level + 1);
-    const risk = maxed ? '已达最高强化' : level + 1 <= 5 ? '必定成功' : level + 1 <= 10 ? '失败不掉级' : '失败掉1级（最低+10）';
+    const risk = maxed ? '已达最高强化' : level + 1 <= 5 ? '必定成功' : level + 1 <= 10 ? '失败不掉级' : level + 1 <= 20 ? '失败掉1级（最低+10）' : '失败掉1级（最低+20）';
     return `<div class="enhance-panel">
       <div class="enhance-head"><b>强化 +${level}</b><span>${escapeHtml(risk)}</span></div>
       <div class="enhance-main"><span>${escapeHtml(statLabelDom(stat))}强化</span><b>${escapeHtml(formatStatValueDom(stat, curBonus))}${maxed ? '' : ` → ${escapeHtml(formatStatValueDom(stat, nextBonus))}`}</b></div>
@@ -756,7 +760,7 @@ function escapeHtml(value) {
         <div class="inv-tabs" role="tablist"><button class="inv-tab" type="button" data-inv-tab="equipment">装备</button><button class="inv-tab" type="button" data-inv-tab="materials">材料</button><button class="inv-tab" type="button" data-inv-tab="process">处理</button></div>
       </div>
       <div class="inv-body">
-        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="section-title bag-title">装备库存 0/24</div><div class="bag-list"></div></section>
+        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="section-title bag-title">装备库存 0/36</div><div class="bag-list"></div></section>
         <section class="inv-section material-section" data-tab-panel="materials"><div class="section-title">材料库存</div><div class="material-list"></div></section>
         <section class="inv-section process-section" data-tab-panel="process"><div class="section-title">售卖 / 分解</div><div class="bulk-panel"><div class="bulk-tabs"><button class="bulk-tab sell" type="button" data-bulk-mode="sell">售卖</button><button class="bulk-tab decompose" type="button" data-bulk-mode="decompose">分解</button></div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div></div><div class="process-note">只处理背包库存，不影响角色页当前装备。高品质请先点装备卡片查看详情。</div></section>
       </div>
@@ -816,7 +820,15 @@ function escapeHtml(value) {
     const detailLayer = panel.querySelector('.inv-detail-layer');
     const bulkSelect = panel.querySelector('.bulk-rarity');
     const bulkSummary = panel.querySelector('.bulk-summary');
-    panel.querySelector('.bag-title').textContent = `装备库存 ${player.inventory.length}/24`;
+    const inventoryCapacity = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+    const nextCapacityUnlock = typeof getNextInventoryCapacityUnlock === 'function' ? getNextInventoryCapacityUnlock(player) : null;
+    panel.querySelector('.bag-title').textContent = `装备库存 ${player.inventory.length}/${inventoryCapacity}`;
+    const invSub = panel.querySelector('.inv-sub');
+    if (invSub) {
+      invSub.textContent = nextCapacityUnlock
+        ? `物品容器：装备库存、材料库存、售卖/分解处理 · ${nextCapacityUnlock.realmName}解锁 ${nextCapacityUnlock.capacity} 格（+${nextCapacityUnlock.increase}）`
+        : `物品容器：装备库存、材料库存、售卖/分解处理 · 背包容量已满阶 ${inventoryCapacity} 格`;
+    }
     panel.querySelectorAll('.inv-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.invTab === inventoryTab));
     panel.querySelectorAll('[data-tab-panel]').forEach(section => section.classList.toggle('active', section.dataset.tabPanel === inventoryTab));
     const availableRarities = ITEM_RARITIES_DOM.filter(rarity => player.inventory.some(item => item?.rarity === rarity));
@@ -885,6 +897,7 @@ function escapeHtml(value) {
     inventoryBulkConfirm = null;
     inventoryDetailScrollKey = '';
     showSkillTreeUI = false;
+    showArtifactUI = false;
     skillDetailModalOpen = false;
     const skillLayer = document.getElementById('skill-detail-layer');
     if (skillLayer) skillLayer.innerHTML = '';
@@ -899,6 +912,7 @@ function escapeHtml(value) {
       inventory: showInventory,
       character: showCharacterPanel,
       skills: showSkillTreeUI,
+      artifact: showArtifactUI,
       alchemy: showAlchemyUI,
       breakthrough: showBreakthroughUI,
     }[panel];
@@ -907,6 +921,7 @@ function escapeHtml(value) {
     if (panel === 'inventory') showInventory = true;
     if (panel === 'character') showCharacterPanel = true;
     if (panel === 'skills') showSkillTreeUI = true;
+    if (panel === 'artifact') showArtifactUI = true;
     if (panel === 'alchemy') showAlchemyUI = true;
     if (panel === 'breakthrough') {
       openBreakthroughPanel();
@@ -1195,6 +1210,7 @@ function escapeHtml(value) {
     function onBag() { closeMoreMenu(); openPanel('inventory'); }
     function onCharacter() { closeMoreMenu(); openPanel('character'); }
     function onSkills() { closeMoreMenu(); openPanel('skills'); }
+    function onArtifact() { closeMoreMenu(); openPanel('artifact'); }
     function onAlchemy() { closeMoreMenu(); openPanel('alchemy'); }
     function onBreakthrough() { closeMoreMenu(); openPanel('breakthrough'); }
     function onSave() { closeMoreMenu(); saveGame(); showMessage('💾 存档已保存！', '#88cc88'); }
@@ -1202,6 +1218,7 @@ function escapeHtml(value) {
     bindTap(document.getElementById('btn-character'), onCharacter);
     bindTap(document.getElementById('btn-skills'), onSkills);
     bindTap(document.getElementById('btn-more'), toggleMoreMenu);
+    bindTap(document.getElementById('btn-artifact'), onArtifact);
     bindTap(document.getElementById('btn-alchemy'), onAlchemy);
     bindTap(document.getElementById('btn-break'), onBreakthrough);
     bindTap(document.getElementById('btn-save'), onSave);
@@ -1537,11 +1554,11 @@ function generateNewFloor() {
      const stones = Math.ceil((18 + rewardLevel * 7) * (1 + Math.random() * 0.35));
      player.addSpiritStones(stones);
      const msgParts = [`💰${stones}灵石`];
-     const MAX_INVENTORY = 24;
+     const maxInventory = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
      const lootRolls = rewardLevel >= 6 ? 2 : 1;
      for (let i = 0; i < lootRolls; i++) {
-       if (player.inventory.length >= MAX_INVENTORY) {
-         msgParts.push('⚠️背包已满');
+       if (player.inventory.length >= maxInventory) {
+         msgParts.push(`⚠️背包已满(${maxInventory}格)`);
          break;
        }
        const item = generateEquipment(Math.max(1, rewardLevel + 1));
@@ -2240,6 +2257,14 @@ function generateNewFloor() {
   }
   function bindCharacterPanelActionsDom(p) {
     if (!p) return;
+    p.querySelectorAll('[data-char-tab]').forEach(btn => {
+      bindPanelActionDom(btn, () => {
+        characterTab = btn.dataset.charTab || 'attributes';
+        characterPanelLastHtml = '';
+        closeCharacterDetailPopupDom();
+        renderCharacterDomPanel();
+      });
+    });
     p.querySelectorAll('.char-equip-card[data-char-equip-slot]').forEach(card => {
       bindInventoryTapDom(card, () => {
         const slot = card.dataset.charEquipSlot;
@@ -2325,27 +2350,36 @@ function generateNewFloor() {
       </button>`;
     }).join('');
     const detailItem = characterDetailDom()?.item || null;
+    const tabKeys = ['equipment', 'attributes', 'bonus', 'sets'];
+    if (!tabKeys.includes(characterTab)) characterTab = 'attributes';
+    const equipmentPanel = `<section class="char-tab-panel char-equipment-section top-equipment" data-char-tab-panel="equipment"><h3>当前装备 <small>点击已装备槽位，直接弹出详情卡片</small></h3><div class="char-equip-grid">${slots}</div></section>`;
+    const attributesPanel = `<section class="char-tab-panel" data-char-tab-panel="attributes">
+      <div class="char-section char-realm">
+        <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">第 ${dungeonLevel} 层 · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
+        <div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div>
+      </div>
+      <div class="char-stats-grid">
+        <div><b>${player.hp}</b><span>/ ${player.maxHp}</span><em>生命</em></div>
+        <div><b>${player.mp}</b><span>/ ${player.maxMp}</span><em>灵力</em></div>
+        <div><b>${player.atk}</b><span></span><em>攻击</em></div>
+        <div><b>${player.def}</b><span></span><em>防御</em></div>
+        <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('crit') : (player.crit || 0))}</b><span>%</span><em>暴击</em></div>
+        <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('dodge') : (player.dodge || 0))}</b><span>%</span><em>闪避</em></div>
+        <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('speed') : (player.speed || 0))}</b><span></span><em>速度</em></div>
+        <div><b>${availableSkillPoints || 0}</b><span></span><em>技能点</em></div>
+        <div><b>${(player.inventory || []).length}</b><span></span><em>背包装备</em></div>
+      </div>
+    </section>`;
+    const bonusPanel = `<section class="char-tab-panel" data-char-tab-panel="bonus"><div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div></section>`;
+    const setsPanel = `<section class="char-tab-panel" data-char-tab-panel="sets"><div class="char-section"><h3>套装效果</h3><div class="char-set-list">${getEquipmentSetRowsDom()}</div></div></section>`;
     const html = `
-      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 套装 · 战力</div></div><button class="char-close">×</button></div>
-      <div class="char-body">
-        <div class="char-section char-equipment-section top-equipment"><h3>当前装备 <small>点击已装备槽位，直接弹出详情卡片</small></h3><div class="char-equip-grid">${slots}</div></div>
-        <div class="char-section char-realm">
-          <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">第 ${dungeonLevel} 层 · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
-          <div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div>
-        </div>
-        <div class="char-stats-grid">
-          <div><b>${player.hp}</b><span>/ ${player.maxHp}</span><em>生命</em></div>
-          <div><b>${player.mp}</b><span>/ ${player.maxMp}</span><em>灵力</em></div>
-          <div><b>${player.atk}</b><span></span><em>攻击</em></div>
-          <div><b>${player.def}</b><span></span><em>防御</em></div>
-          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('crit') : (player.crit || 0))}</b><span>%</span><em>暴击</em></div>
-          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('dodge') : (player.dodge || 0))}</b><span>%</span><em>闪避</em></div>
-          <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('speed') : (player.speed || 0))}</b><span></span><em>速度</em></div>
-          <div><b>${availableSkillPoints || 0}</b><span></span><em>技能点</em></div>
-          <div><b>${(player.inventory || []).length}</b><span></span><em>背包装备</em></div>
-        </div>
-        <div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div>
-        <div class="char-section"><h3>套装效果</h3><div class="char-set-list">${getEquipmentSetRowsDom()}</div></div>
+      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 加成 · 套装</div></div><button class="char-close">×</button></div>
+      <div class="char-tabs" role="tablist"><button class="char-tab" type="button" data-char-tab="equipment">装备</button><button class="char-tab" type="button" data-char-tab="attributes">属性</button><button class="char-tab" type="button" data-char-tab="bonus">加成</button><button class="char-tab" type="button" data-char-tab="sets">套装</button></div>
+      <div class="char-body" data-active-char-tab="${escapeHtml(characterTab)}">
+        ${equipmentPanel}
+        ${attributesPanel}
+        ${bonusPanel}
+        ${setsPanel}
       </div>`;
     if (html !== characterPanelLastHtml) {
       const body = p.querySelector('.char-body');
@@ -2353,6 +2387,8 @@ function generateNewFloor() {
       p.innerHTML = html;
       const nextBody = p.querySelector('.char-body');
       if (nextBody) nextBody.scrollTop = previousScrollTop;
+      p.querySelectorAll('.char-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.charTab === characterTab));
+      p.querySelectorAll('[data-char-tab-panel]').forEach(section => section.classList.toggle('active', section.dataset.charTabPanel === characterTab));
       characterPanelLastHtml = html;
       bindCharacterPanelActionsDom(p);
       if (detailItem) showCharacterDetailPopupDom();
@@ -2469,9 +2505,16 @@ function generateNewFloor() {
     const invTitleY = stacked ? Math.min(equipY + 14, frame.y + frame.h - 72) : layout.invTitleY;
     ctx.fillStyle = '#e7d5ff';
     ctx.font = `${compact ? 14 : 16}px "KaiTi","SimSun",serif`;
-    ctx.fillText(`背包 ${player.inventory.length}/24`, rightX, invTitleY);
+    const inventoryCapacity = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+    const nextCapacityUnlock = typeof getNextInventoryCapacityUnlock === 'function' ? getNextInventoryCapacityUnlock(player) : null;
+    ctx.fillText(`背包 ${player.inventory.length}/${inventoryCapacity}`, rightX, invTitleY);
+    if (nextCapacityUnlock) {
+      ctx.fillStyle = '#a897b8';
+      ctx.font = `${compact ? 9 : 10}px monospace`;
+      ctx.fillText(`${nextCapacityUnlock.realmName}解锁${nextCapacityUnlock.capacity}格`, rightX, invTitleY + (compact ? 12 : 14));
+    }
 
-    let invY = invTitleY + (compact ? 12 : 16);
+    let invY = invTitleY + (nextCapacityUnlock ? (compact ? 24 : 30) : (compact ? 12 : 16));
     const availableBottom = frame.y + frame.h - (compact ? 18 : 24);
     const itemStep = layout.itemH + layout.itemGap;
     const maxFit = Math.max(0, Math.floor((availableBottom - invY) / itemStep));
@@ -2810,6 +2853,110 @@ function generateNewFloor() {
       const fn = () => { craftPill(parseInt(el.dataset.recipe)); renderAlchemyDomPanel(); };
       // 炼丹卡片也只响应真正点击；滑动丹方列表不触发炼制。
       bindInventoryTapDom(el, fn);
+    });
+  }
+
+  // ─── DOM HD: Artifact Panel ───
+  function ensureArtifactDomPanel() {
+    let p = document.getElementById('artifact-dom-panel');
+    if (p) return p;
+    p = document.createElement('div'); p.id = 'artifact-dom-panel';
+    p.addEventListener('click', e => { if (e.target.closest('.pclose')) { showArtifactUI = false; syncBodyPanelState(); } });
+    p.addEventListener('touchstart', e => { if (e.target.closest('.pclose')) { e.preventDefault(); showArtifactUI = false; syncBodyPanelState(); } }, { passive: false });
+    document.body.appendChild(p);
+    return p;
+  }
+  function artifactStatsHtmlDom(artifact, progress = { level: 1 }) {
+    const stats = {};
+    for (const [stat, base] of Object.entries(artifact?.baseStats || {})) {
+      stats[stat] = typeof artifactStatTotal === 'function' ? artifactStatTotal(base, artifact.perLevelStats?.[stat], progress.level || 1) : base;
+    }
+    return Object.entries(stats).map(([k, v]) => `<span><em>${escapeHtml(statLabelDom(k))}</em><b>${escapeHtml(formatStatValueDom(k, v))}</b></span>`).join('');
+  }
+  function renderArtifactDomPanel() {
+    const p = ensureArtifactDomPanel();
+    const realmCap = typeof getArtifactLevelCap === 'function' ? getArtifactLevelCap(player?.realmIndex || 0) : 0;
+    const unlockRealm = typeof getArtifactUnlockRealm === 'function' ? getArtifactUnlockRealm() : 2;
+    const unlocked = (player?.realmIndex || 0) >= unlockRealm;
+    const state = typeof getArtifactState === 'function' ? getArtifactState(player) : { activeId: null, owned: {} };
+    const active = state.activeId && ARTIFACTS?.[state.activeId] ? ARTIFACTS[state.activeId] : null;
+    const activeProgress = active ? state.owned?.[active.id] : null;
+    const listHtml = Object.values(typeof ARTIFACTS !== 'undefined' ? ARTIFACTS : {}).map(artifact => {
+      const progress = state.owned?.[artifact.id] || null;
+      const isActive = state.activeId === artifact.id;
+      const levelText = progress ? `Lv.${progress.level}${progress.awakened ? ' · 已觉醒' : ''}` : '未获得';
+      const canUse = typeof canUseArtifact === 'function' ? canUseArtifact(artifact.id, player).ok : unlocked;
+      const upgradeCheck = progress && typeof hasArtifactUpgradeMaterials === 'function' ? hasArtifactUpgradeMaterials(player, playerMaterials, artifact.id) : null;
+      const cost = progress && typeof getArtifactUpgradeCost === 'function' ? getArtifactUpgradeCost(artifact.id, progress.level) : null;
+      const costHtml = progress && cost
+        ? `<div class="artifact-cost"><b>升阶消耗</b><span>灵石 ${escapeHtml(player?.spiritStones || 0)}/${escapeHtml(cost.spiritStones)}</span>${materialTextDom(cost.materials, { withOwned: true, asHtml: true })}</div>`
+        : `<div class="artifact-cost muted">${progress ? '已达当前最高阶' : '激活后可查看升阶消耗'}</div>`;
+      const activateHtml = isActive
+        ? `<button class="artifact-action" type="button" data-artifact-off="1">卸下</button>`
+        : `<button class="artifact-action" type="button" data-artifact-id="${escapeHtml(artifact.id)}"${canUse ? '' : ' disabled'}>${canUse ? (progress ? '激活' : '解锁并激活') : '未解锁'}</button>`;
+      const upgradeText = upgradeCheck?.reason === 'realm_cap' ? `境界上限 Lv.${realmCap}` : (upgradeCheck?.reason === 'max_level' ? '已满级' : '升阶');
+      const upgradeHtml = progress ? `<button class="artifact-action upgrade" type="button" data-artifact-upgrade="${escapeHtml(artifact.id)}"${upgradeCheck?.ok ? '' : ' disabled'}>${escapeHtml(upgradeText)}</button>` : '';
+      return `<div class="artifact-card${isActive ? ' active' : ''}${progress ? '' : ' locked'}" style="--artifact-color:${escapeHtml(artifact.color)}">
+        <div class="artifact-top"><i>${escapeHtml(artifact.icon)}</i><div><b>${escapeHtml(artifact.name)}</b><em>${escapeHtml(levelText)}</em></div></div>
+        <p>${escapeHtml(artifact.desc)}</p>
+        <div class="artifact-stats">${artifactStatsHtmlDom(artifact, progress || { level: 1 })}</div>
+        ${costHtml}
+        <div class="artifact-actions">${activateHtml}${upgradeHtml}</div>
+      </div>`;
+    }).join('');
+    const matHtml = (typeof ARTIFACT_MATERIALS !== 'undefined' ? ARTIFACT_MATERIALS : []).map(mat => {
+      const count = Number(playerMaterials?.[mat.id] || 0);
+      return `<div class="mat-row" style="color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} x${escapeHtml(count)}</div>`;
+    }).join('') || '<div class="mat-row" style="color:#666">暂无神器材料</div>';
+    p.innerHTML = `<div class="panel-head">
+      <span class="ptitle" style="color:#ffdd66">🗡️ 神器</span>
+      <span class="psub">${unlocked ? `当前境界上限 Lv.${realmCap}` : `金丹期解锁，筑基期开始收集碎片`}</span>
+      <button class="pclose" type="button">×</button>
+    </div><div class="panel-body">
+      <section class="bt-section">
+        <div class="bt-section-title">当前激活</div>
+        ${active ? `<div class="dao-current" style="--dao-color:${escapeHtml(active.color)}"><i>${escapeHtml(active.icon)}</i><b>${escapeHtml(active.name)} ${escapeHtml(activeProgress ? `Lv.${activeProgress.level}` : '')}</b><span>${escapeHtml(active.desc)}</span></div>` : `<div class="dao-current" style="--dao-color:#777"><i>○</i><b>${unlocked ? '尚未激活神器' : '神器未解锁'}</b><span>${unlocked ? '选择一件神器激活；同一时间只生效一件' : '到达金丹期后开放神器激活与升阶'}</span></div>`}
+      </section>
+      <section class="bt-section">
+        <div class="bt-section-title">神器列表 <small>激活 / 升阶 / 战斗触发</small></div>
+        <div class="artifact-list">${listHtml}</div>
+      </section>
+      <section class="bt-section">
+        <div class="bt-section-title">神器材料</div>
+        <div class="mat-list">${matHtml}</div>
+      </section>
+    </div>`;
+    p.querySelectorAll('[data-artifact-id]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        const result = typeof activateArtifact === 'function' ? activateArtifact(player, btn.dataset.artifactId) : { ok: false };
+        if (result.ok) showMessage(`🗡️ 已激活神器：${result.artifact.name}`, result.artifact.color || '#ffdd66');
+        else showMessage('神器尚未解锁', '#ff7777');
+        renderArtifactDomPanel();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof autoSave === 'function') autoSave();
+      });
+    });
+    p.querySelectorAll('[data-artifact-off]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        if (typeof deactivateArtifact === 'function') deactivateArtifact(player);
+        showMessage('已卸下神器', '#aaaaff');
+        renderArtifactDomPanel();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof autoSave === 'function') autoSave();
+      });
+    });
+    p.querySelectorAll('[data-artifact-upgrade]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        const result = typeof upgradeArtifact === 'function' ? upgradeArtifact(player, playerMaterials, btn.dataset.artifactUpgrade) : { ok: false };
+        if (result.ok) showMessage(`🗡️ ${result.artifact.name} 升至 Lv.${result.progress.level}`, result.artifact.color || '#ffdd66');
+        else {
+          const reasonText = result.reason === 'realm_cap' ? '当前境界上限不足' : (result.reason === 'stones' ? '灵石不足' : (result.reason === 'materials' ? '神器材料不足' : '暂时无法升阶'));
+          showMessage(reasonText, '#ff7777');
+        }
+        renderArtifactDomPanel();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof autoSave === 'function') autoSave();
+      });
     });
   }
 
