@@ -37,8 +37,8 @@ const mustBust = [
   'js/main.js',
 ];
 for (const file of mustBust) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520artifact4`);
-  assert(re.test(html), `${file} should use the artifact4 cachebuster so mobile browsers do not keep stale artifact HUD/UI code`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260520combatclean1`);
+  assert(re.test(html), `${file} should use the current cachebuster so mobile browsers do not keep stale artifact HUD/UI code`);
 }
 
 console.log('artifact UI static tests passed');

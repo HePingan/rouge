@@ -3089,19 +3089,10 @@ function generateNewFloor() {
     const enemyDisplayName = currentEnemy.title || currentEnemy.name;
     const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
     const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
-    const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
-    const shownEnemyDef = Math.floor(currentEnemy.def * enemyBuffDef);
     const playerHpPct = player.maxHp ? Math.max(0, Math.min(100, player.hp / player.maxHp * 100)) : 100;
     const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
     const pEnemyName = `${currentEnemy.isBoss ? '👑' : '👺'} ${enemyDisplayName}`;
-    const weaponItem = player.equipment?.weapon;
-    const weaponIcon = weaponItem?.icon || '⚔️';
-    const weaponRarity = weaponItem?.rarity || null;
-    const weaponRarityColor = weaponItem?.rarityColor || '#6d5a78';
-    const rarityShort = rarityShortDom(weaponRarity);
-    const weaponName = weaponItem ? weaponItem.name : '未装备武器';
     const safeCombatColor = color => /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#d4c8b0';
-    const weaponHtml = `<div class="cbt-weapon" ${weaponRarity ? `style="--weapon-color:${safeCombatColor(weaponRarityColor)}"` : ''}><div class="cbt-weapon-icon-box"><span class="cbt-weapon-icon">${escapeHtml(weaponIcon)}</span><span class="cbt-weapon-rarity">${weaponRarity ? escapeHtml(rarityShort) : '-'}</span></div><span class="cbt-weapon-name">${escapeHtml(weaponName)}</span></div>`;
     const statusLabelMap = {
       burn: ['🔥', '灼烧'], bleed: ['🩸', '流血'], freeze: ['🧊', '冻结'], stun: ['⚡', '麻痹'],
       weaken: ['🌑', '虚弱'], defBreak: ['🗡️', '破甲'], poison: ['☠️', '中毒'], curse: ['🌘', '诅咒'],
@@ -3142,18 +3133,17 @@ function generateNewFloor() {
     p.innerHTML = `<div class="cbt-topline">
       <div class="cbt-enemy-block">
         <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
-        <div class="cbt-enemy-tags"><span>攻 ${escapeHtml(Number(currentEnemy.atk || 0))}</span><span>防 ${escapeHtml(shownEnemyDef)}</span>${enemySkills.length ? `<span>技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
+        <div class="cbt-enemy-tags">${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : '<span class="skill-tag">普通妖兽</span>'}</div>
       </div>
       <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
     </div>
     <div class="cbt-hp-bar-wrap enemy"><b>妖血</b><div class="cbt-hp-bar-outer"><div class="cbt-hp-bar-inner" style="width:${Math.max(0, Math.min(100, eHpPct * 100))}%"></div></div><span class="cbt-hp-text">${escapeHtml(Number(currentEnemy.hp || 0))}/${escapeHtml(Number(currentEnemy.maxHp || 0))}</span></div>
     <div class="cbt-status-row">${enemyStatusHtml || '<span class="cbt-status-empty">敌方无状态</span>'}</div>
-    <div class="cbt-player-card">
+    <div class="cbt-player-card compact">
       <div class="cbt-player-bars">
         <div class="cbt-mini-bar hp"><span>生命</span><i><b style="width:${playerHpPct}%"></b></i><em>${escapeHtml(Number(player.hp || 0))}/${escapeHtml(Number(player.maxHp || 0))}</em></div>
         <div class="cbt-mini-bar mp"><span>灵力</span><i><b style="width:${playerMpPct}%"></b></i><em>${escapeHtml(Number(player.mp || 0))}/${escapeHtml(Number(player.maxMp || 0))}</em></div>
       </div>
-      <div class="cbt-player-side"><div class="cbt-player-stats"><span>攻 ${escapeHtml(Number(player.atk || 0))}</span><span>防 ${escapeHtml(Number(player.def || 0))}</span></div>${weaponHtml}</div>
     </div>
     <div class="cbt-status-row player-status">${playerStatusHtml || '<span class="cbt-status-empty">我方无状态</span>'}</div>
     <div class="cbt-log">${logsHtml || '<div class="cbt-log-entry tone-info"><span>战斗记录将在这里显示</span></div>'}</div>${skillsHtml}${drawerHtml}<div class="cbt-actions-row"><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-attack" style="--act-color:#ff6633">⚔️<b>攻击</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-defend" style="--act-color:#dd9944">🛡️<b>防御</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-skill-toggle-action" style="--act-color:#d4a0ff">📜<b>技能</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-flee" style="--act-color:#66bbcc">🏃<b>逃跑</b></div></div>`;
