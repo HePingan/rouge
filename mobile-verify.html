@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mobile verify</title>
+<style>
+  html,body{margin:0;background:#111;color:#eee;font:12px sans-serif;height:100%;display:grid;place-items:center;}
+  .phone{width:390px;height:844px;border:10px solid #222;border-radius:34px;box-shadow:0 20px 60px #000;overflow:hidden;background:#000;}
+  iframe{width:390px;height:844px;border:0;display:block;background:#000;}
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260526nexthint1"></iframe></div>
+<script>
+  window.inspectGame = () => {
+    const w = document.getElementById('game').contentWindow;
+    const d = w.document;
+    const ids = ['hud-top','menu-bar','message-log','inventory-dom-panel','character-dom-panel','stage-dom-panel','secretrealm-dom-panel','tribulation-dom-panel','skills-dom-panel','artifact-dom-panel','alchemy-dom-panel','breakthrough-dom-panel'];
+    const out = {viewport:{w:w.innerWidth,h:w.innerHeight}, bodyClass:d.body.className, errors: window.__errors || []};
+    for (const id of ids) {
+      const e = d.getElementById(id);
+      if (!e) continue;
+      const cs = w.getComputedStyle(e);
+      const b = e.getBoundingClientRect();
+      out[id] = {display:cs.display, position:cs.position, left:Math.round(b.left), top:Math.round(b.top), right:Math.round(b.right), bottom:Math.round(b.bottom), w:Math.round(b.width), h:Math.round(b.height), radius:cs.borderRadius, overflow:cs.overflow};
+    }
+    return out;
+  };
+</script>

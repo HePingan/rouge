@@ -140,3 +140,9 @@ function spawnDeathEffect(worldX, worldY) {
 function spawnHealEffect(worldX, worldY) {
   spawnParticles(worldX, worldY, 10, '#55ff55', 1.5, 4);
 }
+
+function spawnArtifactTriggerEffect(worldX, worldY, color = '#ffdd66') {
+  spawnParticles(worldX, worldY, 18, color, 2.1, 5);
+  spawnParticles(worldX, worldY, 8, '#ffffff', 1.2, 3);
+  triggerScreenShake(4, 6);
+}

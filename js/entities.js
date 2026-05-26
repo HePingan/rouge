@@ -58,6 +58,21 @@ class Player {
     this.artifacts = typeof createDefaultArtifactsState === 'function' ? createDefaultArtifactsState() : { activeId: null, owned: {} };
     this.skillPoints = 0;
     this.learnedSkills = [];
+    this.secretRealmKeys = {};
+    this.secretRealmClears = {};
+    this.secretRealmProgress = null;
+    this.lastSecretRealmRun = null;
+    this.tribulationClears = {};
+    this.tribulationMarks = {};
+    this.tribulationProgress = null;
+    this.stageProgress = typeof createDefaultStageProgress === 'function' ? createDefaultStageProgress() : { unlockedStages: { qingyun_foot: true }, clearedStages: {}, firstClearClaimed: {}, selectedStageId: 'qingyun_foot', currentRun: null };
+    this.titles = typeof createDefaultTitleState === 'function' ? createDefaultTitleState() : { unlocked: {}, equipped: null };
+    this.tribulationEssence = 0;
+    this.tribulationResist = 0;
+    this.heartDemonResist = 0;
+    this.bodyTemperLevel = 0;
+    this.thunderAffinity = 0;
+    this.ascension = typeof createDefaultAscensionState === 'function' ? createDefaultAscensionState() : { ascended: false, ascendedAt: null, classId: null, immortalBody: { level: 0, xp: 0 }, laws: {}, unlockedStages: {} };
   }
 
   get realm() { return REALMS[this.realmIndex]; }
@@ -77,7 +92,8 @@ class Player {
       'fireDmg', 'iceDmg', 'poisonDmg', 'lightningDmg', 'hpRegen', 'mpRegen', 'allRes',
       'killMpRestore', 'thorns', 'bossDmg', 'extraHitChance', 'weakenOnHit', 'critWeaken',
       'lowHpGuard', 'dmgReduce', 'burnOnHit', 'freezeOnHit', 'shadowCounter', 'flameBurst',
-      'thunderChain', 'frostBarrier', 'victoryRecoverPct'
+      'thunderChain', 'frostBarrier', 'victoryRecoverPct', 'tribulationResist',
+      'heartDemonResist', 'thunderAffinity', 'immortalPower', 'artifactPower'
     ];
     for (const stat of derivedStats) this[stat] = 0;
     this._equipmentSetEffects = {};
@@ -118,6 +134,14 @@ class Player {
       const artifactBonuses = getArtifactStatBonuses(this);
       for (const [stat, value] of Object.entries(artifactBonuses || {})) applyStatBonus(stat, value);
     }
+    if (typeof getTitleStatBonuses === 'function') {
+      const titleBonuses = getTitleStatBonuses(this);
+      for (const [stat, value] of Object.entries(titleBonuses || {})) applyStatBonus(stat, value);
+    }
+    if (typeof getAscensionStatBonuses === 'function') {
+      const ascensionBonuses = getAscensionStatBonuses(this);
+      for (const [stat, value] of Object.entries(ascensionBonuses || {})) applyStatBonus(stat, value);
+    }
     if (this.tempAtkBuff) this.atk = Math.floor(this.atk * (1 + this.tempAtkBuff));
     if (this.tempDefBuff) this.def = Math.floor(this.def * (1 + this.tempDefBuff));
     this.hp = Math.max(1, Math.min(this.maxHp, Math.floor(this.maxHp * hpRatio)));
@@ -145,6 +169,10 @@ const MONSTER_SKILLS = {
   frostBite: { name: '霜咬', icon: '❄️', chance: 0.28, type: 'damageDebuff', mult: 0.95, debuff: { type: 'slow', turns: 2, ratio: 0.12 }, color: '#88ccff', log: '寒气侵体' },
   thornBind: { name: '藤缚', icon: '🌿', chance: 0.30, type: 'damageDebuff', mult: 0.9, debuff: { type: 'entangle', turns: 1, ratio: 0.18 }, color: '#77cc66', log: '藤蔓缠身' },
   lavaBurst: { name: '熔爆', icon: '🌋', chance: 0.32, type: 'damageStatus', mult: 1.25, status: { type: 'burn', turns: 2, ratio: 0.12 }, color: '#ff5522', log: '引爆岩浆' },
+  wolfHowl: { name: '狼王号令', icon: '🐺', chance: 0.36, type: 'selfBuff', buff: { atkRatio: 0.18, turns: 2 }, color: '#8ed8ff', log: '召唤山狼虚影，攻击提升' },
+  bloodBurst: { name: '血煞爆', icon: '🩸', chance: 0.34, type: 'damageDebuff', mult: 1.25, debuff: { type: 'curse', turns: 2, ratio: 0.14 }, color: '#ff5577', log: '引爆血煞，令你承伤加深' },
+  bloodDrain: { name: '血祭汲取', icon: '🧛', chance: 0.30, type: 'drain', mult: 1.10, healRatio: 0.55, color: '#ff3355', log: '抽取气血恢复自身' },
+  thunderParalyze: { name: '雷击预警', icon: '⚡', chance: 0.38, type: 'damageDebuff', mult: 1.20, debuff: { type: 'slow', turns: 2, ratio: 0.16 }, color: '#ffe27a', log: '落雷锁定，行动迟缓' },
   ironShell: { name: '铁甲', icon: '🛡️', chance: 0.22, type: 'selfBuff', buff: { defRatio: 0.18, turns: 2 }, color: '#aaddff', log: '缩入坚甲' },
   abyssCleave: { name: '深渊横扫', icon: '👑', chance: 0.40, type: 'damage', mult: 1.55, color: '#ff4444', log: '挥出深渊横扫' },
   dragonBreath: { name: '魔龙吐息', icon: '🐉', chance: 0.45, type: 'damageStatus', mult: 1.35, status: { type: 'burn', turns: 3, ratio: 0.12 }, color: '#ff6622', log: '喷吐魔焰' },
@@ -152,6 +180,8 @@ const MONSTER_SKILLS = {
   shuraCombo: { name: '修罗连斩', icon: '🩸', chance: 0.46, type: 'multiHit', hits: 3, mult: 0.62, color: '#ff3366', log: '斩出修罗血光' },
   frostDomain: { name: '冰狱领域', icon: '🧊', chance: 0.44, type: 'damageDebuff', mult: 1.10, debuff: { type: 'slow', turns: 3, ratio: 0.2 }, color: '#66ddff', log: '展开冰狱领域' },
   poisonDomain: { name: '万毒妖域', icon: '🐍', chance: 0.44, type: 'damageStatus', mult: 1.05, status: { type: 'poison', turns: 4, ratio: 0.10 }, color: '#66cc66', log: '释放万毒妖域' },
+  eliteFury: { name: '精英狂暴', icon: '🔥', chance: 0.36, type: 'selfBuff', buff: { atkRatio: 0.18, defRatio: 0.10, turns: 2 }, color: '#ff9966', log: '妖力暴涨' },
+  bossEnrage: { name: '首领威压', icon: '👑', chance: 0.34, type: 'damageDebuff', mult: 1.0, debuff: { type: 'curse', turns: 2, ratio: 0.14 }, color: '#ff77aa', log: '释放首领威压' },
 };
 
 const MONSTERS = [
@@ -196,20 +226,23 @@ function getBossForLevel(level) {
 
 function getMonsterScale(level, isBoss = false) {
   const depth = Math.max(0, level - 1);
-  const hp = 1 + depth * 0.15 + Math.pow(depth, 1.25) * 0.018;
-  const atk = 1 + depth * 0.12 + Math.pow(depth, 1.18) * 0.012;
-  const def = 1 + depth * 0.10 + Math.pow(depth, 1.15) * 0.010;
-  const reward = 1 + depth * 0.16;
-  return isBoss ? { hp: hp * 1.10, atk: atk * 1.08, def: def * 1.05, xp: reward * 1.25, stones: reward * 1.25 } : { hp, atk, def, xp: reward, stones: reward };
+  // 强化深层曲线：玩家境界/装备上限扩展后，怪物需要更快跟上成长，否则中后期会被碾压。
+  const hp = 1 + depth * 0.20 + Math.pow(depth, 1.30) * 0.026;
+  const atk = 1 + depth * 0.16 + Math.pow(depth, 1.24) * 0.018;
+  const def = 1 + depth * 0.13 + Math.pow(depth, 1.20) * 0.014;
+  const reward = 1 + depth * 0.18;
+  return isBoss ? { hp: hp * 1.22, atk: atk * 1.18, def: def * 1.12, xp: reward * 1.30, stones: reward * 1.30 } : { hp, atk, def, xp: reward, stones: reward };
 }
 
 function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0, extra = {}) {
   const isElite = !!extra.isElite;
   const baseScale = getMonsterScale(level, !!template.isBoss);
   const mult = { hp: 1, atk: 1, def: 1, xp: 1, stones: 1, ...biomeMult };
-  const eliteMult = isElite ? { hp: 1.75, atk: 1.28, def: 1.18, xp: 2.1, stones: 2.2 } : { hp: 1, atk: 1, def: 1, xp: 1, stones: 1 };
+  const eliteMult = isElite ? { hp: 2.05, atk: 1.42, def: 1.28, xp: 2.35, stones: 2.35 } : { hp: 1, atk: 1, def: 1, xp: 1, stones: 1 };
   const maxHp = Math.floor(template.hp * baseScale.hp * mult.hp * eliteMult.hp);
   const skillIds = [...(template.skillIds || [])];
+  if (isElite && !skillIds.includes('eliteFury')) skillIds.push('eliteFury');
+  if (template.isBoss && !skillIds.includes('bossEnrage')) skillIds.push('bossEnrage');
   return {
     ...template,
     ...extra,

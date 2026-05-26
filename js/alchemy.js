@@ -10,6 +10,33 @@ const MATERIALS = [
   { id: 'phoenixFeather', name: '凤凰羽', rarity: 'rare', color: '#ff3366', weight: 4 },
   { id: 'soulJade', name: '魂玉', rarity: 'rare', color: '#aa44ff', weight: 5 },
   { id: 'starDust', name: '星辰砂', rarity: 'legendary', color: '#ffdd44', weight: 2 },
+  // 秘境钥匙材料
+  { id: 'secret_key_herb', name: '灵草秘境令', rarity: 'uncommon', color: '#55aa55', weight: 0, source: '灵草秘境通关 / 秘境商人 / 普通首通' },
+  { id: 'secret_key_forge', name: '炼器秘境令', rarity: 'uncommon', color: '#cc8844', weight: 0, source: '炼器秘境通关 / 秘境商人 / 普通首通' },
+  { id: 'secret_key_artifact', name: '神器秘境令', rarity: 'rare', color: '#d4a0ff', weight: 0, source: '神器秘境通关 / 高阶 Boss / 普通首通' },
+  { id: 'tribulation_mark', name: '天劫印记', rarity: 'legendary', color: '#ffdd44', weight: 0, source: '天劫秘境通关 / 雷系 Boss / 渡劫挑战' },
+  // 副本专属材料
+  { id: 'qingyun_fur', name: '青云狼毫', rarity: 'uncommon', color: '#8ed8ff', weight: 0 },
+  { id: 'blood_crystal', name: '血煞晶', rarity: 'rare', color: '#ff5577', weight: 0 },
+  { id: 'thunder_core', name: '雷劫兽核', rarity: 'legendary', color: '#ffe27a', weight: 0 },
+  { id: 'yaogu_essence', name: '万妖精魄', rarity: 'legendary', color: '#7ee072', weight: 0 },
+  { id: 'nether_jade', name: '幽冥魂玉', rarity: 'legendary', color: '#b086ff', weight: 0 },
+  { id: 'void_shard', name: '虚空碎片', rarity: 'legendary', color: '#8aa0ff', weight: 0 },
+  { id: 'demon_blade', name: '天魔刃片', rarity: 'legendary', color: '#ff8a55', weight: 0 },
+  { id: 'ascension_stone', name: '登仙石', rarity: 'legendary', color: '#ffd98e', weight: 0 },
+  { id: 'nine_thunder_seal', name: '九劫雷印', rarity: 'legendary', color: '#f6e05e', weight: 0 },
+  { id: 'ascension_trial_token', name: '飞升试炼令', rarity: 'legendary', color: '#c8f7ff', weight: 0, source: '仙门镇守者首通 / 仙门镇守者复刷' },
+  { id: 'immortal_jade', name: '真仙玉', rarity: 'legendary', color: '#f7fafc', weight: 0, source: '仙门镇守者 / 飞升仪式' },
+  { id: 'immortal_marrow', name: '仙髓', rarity: 'legendary', color: '#c8f7ff', weight: 0, source: '飞升仪式 / 仙界副本 / 仙界秘境' },
+  { id: 'immortal_jade_ascended', name: '仙玉', rarity: 'legendary', color: '#fff0a8', weight: 0, source: '仙界副本 / 仙职突破 / 仙魔战场' },
+  { id: 'immortal_refine_stone', name: '仙炼石', rarity: 'legendary', color: '#ffcc88', weight: 0, source: '万器仙宫 / 仙魔战场 / 高阶仙域首通' },
+  { id: 'demon_war_banner', name: '仙魔战旗', rarity: 'legendary', color: '#ff8a55', weight: 0, source: '仙界副本首通 / 魔尊投影 / 每轮仙魔战场结算' },
+  { id: 'law_fragment_sword', name: '剑之法则碎片', rarity: 'legendary', color: '#d8f3ff', weight: 0, source: '接引仙域 / 剑仙试炼' },
+  { id: 'law_fragment_thunder', name: '雷之法则碎片', rarity: 'legendary', color: '#ffe27a', weight: 0, source: '玄雷天域 / 九霄雷台' },
+  { id: 'law_fragment_pill', name: '丹之法则碎片', rarity: 'legendary', color: '#88ffcc', weight: 0, source: '仙灵试炼 / 丹仙任务' },
+  { id: 'law_fragment_forge', name: '器之法则碎片', rarity: 'legendary', color: '#ffcc88', weight: 0, source: '万器仙宫 / 仙炼装备' },
+  { id: 'law_fragment_void', name: '虚空法则碎片', rarity: 'legendary', color: '#9aa8ff', weight: 0, source: '虚空裂界 / 高阶仙域' },
+  { id: 'law_fragment_nether', name: '幽冥法则碎片', rarity: 'legendary', color: '#b086ff', weight: 0, source: '幽都裂界 / 冥仙王座' },
   ...(typeof ARTIFACT_MATERIALS !== 'undefined' ? ARTIFACT_MATERIALS : []),
 ];
 // ─── Pill Recipes ───
@@ -122,7 +149,7 @@ function craftPill(recipeIndex) {
   // Check materials
   for (const [matId, required] of Object.entries(recipe.materials)) {
     if ((playerMaterials[matId] || 0) < required) {
-      showMessage('材料不足！', '#ff4444');
+      showMessage('药草不足，仙丹难成！', '#ff4444');
       return false;
     }
   }
@@ -139,51 +166,51 @@ function craftPill(recipeIndex) {
       case 'healPct':
         const healAmt = Math.floor(player.maxHp * recipe.value);
         player.hp = Math.min(player.maxHp, player.hp + healAmt);
-        showMessage(`服用【${recipe.name}】！恢复 ${healAmt} 生命`, '#55ff55');
+        showMessage(`丹成！【${recipe.name}】入腹，生命回复 ${healAmt}`, '#55ff55');
         break;
       case 'restoreMpPct':
         const mpAmt = Math.floor(player.maxMp * recipe.value);
         player.mp = Math.min(player.maxMp, player.mp + mpAmt);
-        showMessage(`服用【${recipe.name}】！恢复 ${mpAmt} 灵力`, '#4488ff');
+        showMessage(`丹成！【${recipe.name}】入腹，灵力回复 ${mpAmt}`, '#4488ff');
         break;
       case 'tempAtkBuff':
         player.tempAtkBuff = recipe.value;
         player.recalcStats();
-        showMessage(`服用【${recipe.name}】！攻击力暂时大幅提升`, '#ffaa44');
+        showMessage(`丹成！【${recipe.name}】入腹，攻击力暴涨！`, '#ffaa44');
         break;
       case 'tempDefBuff':
         player.tempDefBuff = recipe.value;
         player.recalcStats();
-        showMessage(`服用【${recipe.name}】！防御力暂时大幅提升`, '#aaaaaa');
+        showMessage(`丹成！【${recipe.name}】入腹，防御力大增！`, '#aaaaaa');
         break;
       case 'permMaxHp':
         player.baseHp += recipe.value;
         player.recalcStats();
         player.hp = Math.min(player.maxHp, player.hp + recipe.value);
-        showMessage(`服用【${recipe.name}】！永久提升生命上限 +${recipe.value}`, '#ffdd44');
+        showMessage(`丹成！【${recipe.name}】炼体，生命上限永久 +${recipe.value}`, '#ffdd44');
         break;
       case 'gainXp':
         player.gainXp(recipe.value);
-        showMessage(`服用【${recipe.name}】！获得 ${recipe.value} 经验`, '#aa44ff');
+        showMessage(`丹成！【${recipe.name}】入腹，悟道 +${recipe.value} 经验`, '#aa44ff');
         if (typeof checkBreakthrough === 'function') checkBreakthrough();
         break;
       case 'breakthroughChance':
         player.breakthroughChanceBonus = Math.min(0.24, Number(player.breakthroughChanceBonus || 0) + recipe.value);
-        showMessage(`服用【${recipe.name}】！下次突破成功率提升`, '#ffdd66');
+        showMessage(`丹成！【${recipe.name}】护心，下次突破成功率加持`, '#ffdd66');
         break;
       case 'breakthroughProtect':
         player.breakthroughProtect = Math.max(Number(player.breakthroughProtect || 0), Number(recipe.value || 1));
-        showMessage(`服用【${recipe.name}】！下次突破失败将护住根基`, '#88ffcc');
+        showMessage(`丹成！【${recipe.name}】固元，下次突破失败不损根基`, '#88ffcc');
         break;
       case 'fullRestore':
         player.hp = player.maxHp;
         player.mp = player.maxMp;
-        showMessage(`服用【${recipe.name}】！生命灵力完全恢复`, '#ff3366');
+        showMessage(`丹成！【${recipe.name}】归元，生命灵力尽复！`, '#ff3366');
         break;
     }
     autoSave();
   } else {
-    showMessage(`炼丹失败！材料化为灰烬...`, '#ff4444');
+    showMessage(`🔥 炉火失控！丹药化为飞灰...`, '#ff4444');
   }
   return true;
 }

@@ -26,13 +26,13 @@ const MAX_DEPTH = 3;
 const BIOMES = [
   {
     id: 'snow', name: '雪原', icon: '❄️', floorRange: [1, 3],
-    bg: '#263d52', wall: '#233a4d', wall2: '#1a3043', floor: '#86b7d0', floor2: '#74a7c3',
-    border: 'rgba(220,245,255,0.16)', speck: 'rgba(235,250,255,0.42)', stairs: '#8ed8ff',
+    bg: '#203647', wall: '#1f3547', wall2: '#172b3b', floor: '#6f9eb9', floor2: '#668faf',
+    border: 'rgba(220,245,255,0.11)', speck: 'rgba(235,250,255,0.30)', stairs: '#8ed8ff',
     monsterMult: { hp: 1.12, atk: 0.92, def: 1.15, xp: 1.05, stones: 1.00 },
     monsters: [
-      { name: '雪狼', symbol: '狼', hp: 30, atk: 9, def: 2, xp: 14, stones: 3, color: '#24506c', weight: 34, skillIds: ['frostBite'] },
-      { name: '冰魄', symbol: '冰', hp: 28, atk: 8, def: 4, xp: 17, stones: 4, color: '#1f7292', weight: 28, skillIds: ['frostBite', 'ironShell'] },
-      { name: '霜甲兽', symbol: '甲', hp: 46, atk: 7, def: 7, xp: 21, stones: 5, color: '#37627c', weight: 22, skillIds: ['ironShell'] },
+      { name: '雪狼', symbol: '狼', hp: 30, atk: 9, def: 2, xp: 14, stones: 3, color: '#29485d', weight: 34, skillIds: ['frostBite'] },
+      { name: '冰魄', symbol: '冰', hp: 28, atk: 8, def: 4, xp: 17, stones: 4, color: '#2d637c', weight: 28, skillIds: ['frostBite', 'ironShell'] },
+      { name: '霜甲兽', symbol: '甲', hp: 46, atk: 7, def: 7, xp: 21, stones: 5, color: '#3f5f72', weight: 22, skillIds: ['ironShell'] },
       { name: '寒鸦妖', symbol: '鸦', hp: 24, atk: 13, def: 1, xp: 20, stones: 5, color: '#263244', weight: 16, skillIds: ['shadowBackstab'] },
     ],
   },

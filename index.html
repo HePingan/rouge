@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>仙途·无尽深渊 v1.1</title>
     <link rel="icon" href="favicon.ico">
-    <link rel="stylesheet" href="css/style.css?v=20260520combatstats1">
+    <link rel="stylesheet" href="css/style.css?v=20260526nexthint1">
 </head>
 <body>
 <div id="game-container">
@@ -19,6 +19,7 @@
       <span id="hud-realm">境界: 炼气期</span>
       <span id="hud-spirit-stones">💎 灵石: 0</span>
     </div>
+    <div id="hud-next-step">点击「副本」选择青云山</div>
     <button id="hud-artifact" class="empty" type="button" aria-label="打开神器面板">
       <div class="artifact-icon-wrap">
         <span class="artifact-icon">🗡️</span>
@@ -34,17 +35,22 @@
         <div class="stat-bar"><span class="stat-label">灵力</span><div class="bar-bg"><div id="mp-fill" class="bar-fill mp"></div></div><span id="mp-text">50/50</span></div>
         <div class="stat-bar"><span class="stat-label">经验</span><div class="bar-bg"><div id="xp-fill" class="bar-fill xp"></div></div><span id="xp-text">0/100</span></div>
       </div>
+      <div id="hud-next-step">下一步：点击「副本」选择青云山</div>
     </div>
   </div>
   <div id="message-log"></div>
   <div id="menu-bar">
     <button class="menu-btn" id="btn-bag">🎒背包</button>
     <button class="menu-btn primary" id="btn-character">👤角色</button>
-    <button class="menu-btn" id="btn-skills">📜技能</button>
+    <button class="menu-btn" id="btn-stages">🗺️副本</button>
     <button class="menu-btn more" id="btn-more">☰更多</button>
   </div>
-  <div id="more-menu" aria-hidden="true">
+  <div id="more-menu" aria-hidden="true" inert>
+    <button class="more-menu-btn" id="btn-skills">📜 技能</button>
     <button class="more-menu-btn" id="btn-artifact">🗡️ 神器</button>
+    <button class="more-menu-btn" id="btn-secret-realm">🏞️ 秘境</button>
+    <button class="more-menu-btn" id="btn-tribulation">⚡ 天劫</button>
+    <button class="more-menu-btn" id="btn-ascension">☁️ 飞升</button>
     <button class="more-menu-btn" id="btn-alchemy">🔥 炼丹</button>
     <button class="more-menu-btn" id="btn-break">⚡ 突破</button>
     <button class="more-menu-btn" id="btn-save">💾 保存</button>
@@ -56,23 +62,31 @@
       </div>
     </div>
     <div id="action-buttons">
+      <button class="act-btn stage-quick-btn" id="btn-stage-quick-clear">⚡速战</button>
+      <button class="act-btn stage-exit-btn" id="btn-stage-exit">🚪退出</button>
+      <button class="act-btn secret-quick-btn" id="btn-secret-quick-challenge">⚡速挑</button>
+      <button class="act-btn secret-exit-btn" id="btn-secret-exit">🚪离境</button>
       <button class="act-btn" id="btn-attack">⚔️攻击</button>
       <button class="act-btn" id="btn-defend">🛡️防御</button>
       <button class="act-btn" id="btn-flee">🏃逃跑</button>
     </div>
   </div>
 </div>
-<script src="js/debug.js?v=20260520combatstats1"></script>
-<script src="js/dungeon.js?v=20260520combatstats1"></script>
-<script src="js/entities.js?v=20260520combatstats1"></script>
-<script src="js/combat.js?v=20260520combatstats1"></script>
-<script src="js/loot.js?v=20260520combatstats1"></script>
-<script src="js/artifacts.js?v=20260520combatstats1"></script>
-<script src="js/skills.js?v=20260520combatstats1"></script>
-<script src="js/alchemy.js?v=20260520combatstats1"></script>
-<script src="js/particles.js?v=20260520combatstats1"></script>
-<script src="js/ui.js?v=20260520combatstats1"></script>
-<script src="js/save.js?v=20260520combatstats1"></script>
-<script src="js/main.js?v=20260520combatstats1"></script>
+<script src="js/debug.js?v=20260526nexthint1"></script>
+<script src="js/dungeon.js?v=20260526nexthint1"></script>
+<script src="js/stages.js?v=20260526nexthint1"></script>
+<script src="js/entities.js?v=20260526nexthint1"></script>
+<script src="js/combat.js?v=20260526nexthint1"></script>
+<script src="js/loot.js?v=20260526nexthint1"></script>
+<script src="js/artifacts.js?v=20260526nexthint1"></script>
+<script src="js/skills.js?v=20260526nexthint1"></script>
+<script src="js/alchemy.js?v=20260526nexthint1"></script>
+<script src="js/ascension.js?v=20260526nexthint1"></script>
+<script src="js/particles.js?v=20260526nexthint1"></script>
+<script src="js/ui.js?v=20260526nexthint1"></script>
+<script src="js/save.js?v=20260526nexthint1"></script>
+<script src="js/secretRealms.js?v=20260526nexthint1"></script>
+<script src="js/tribulation.js?v=20260526nexthint1"></script>
+<script src="js/main.js?v=20260526nexthint1"></script>
 </body>
 </html>

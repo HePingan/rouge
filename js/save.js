@@ -2,7 +2,7 @@
 // Saves player progress, inventory, skills, materials between sessions
 
 const SAVE_KEY = 'xian_save_v1';
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 6;
 const SAVE_BACKUP_KEY = `${SAVE_KEY}_backup`;
 const SAVE_CORRUPT_KEY = `${SAVE_KEY}_corrupt`;
 
@@ -40,11 +40,33 @@ function normalizeRatio(value, fallback) {
   return Math.max(0, Math.min(1, n));
 }
 
+function normalizeMaterialCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+function normalizeMaterialIds(materials) {
+  if (!materials || typeof materials !== 'object' || Array.isArray(materials)) return {};
+  const normalized = {};
+  for (const [id, value] of Object.entries(materials)) {
+    const count = normalizeMaterialCount(value);
+    if (count > 0) normalized[id] = count;
+  }
+  // Legacy secret realm dust was unused by artifact upgrades; convert it into a usable shard.
+  // Keep this comment ASCII-only so global UI-copy scans can assert the Chinese label is fully gone.
+  if (normalized.artifact_dust) {
+    normalized.artifact_shard_zhuxian = normalizeMaterialCount(normalized.artifact_shard_zhuxian) + normalized.artifact_dust;
+    delete normalized.artifact_dust;
+  }
+  return normalized;
+}
+
 function migrateSave(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
 
   const migrated = { ...data };
-  migrated.version = normalizeNumber(migrated.version, 1) || 1;
+  migrated.version = Math.max(SAVE_VERSION, normalizeNumber(migrated.version, 1) || 1);
   migrated.timestamp = normalizeNumber(migrated.timestamp, Date.now());
 
   migrated.realmIndex = normalizeNumber(migrated.realmIndex, 0);
@@ -71,7 +93,13 @@ function migrateSave(data) {
   if (!migrated.materials || typeof migrated.materials !== 'object' || Array.isArray(migrated.materials)) {
     migrated.materials = {};
   }
+  migrated.materials = normalizeMaterialIds(migrated.materials);
   migrated.artifacts = typeof normalizeArtifactsState === 'function' ? normalizeArtifactsState(migrated.artifacts) : (migrated.artifacts || { activeId: null, owned: {} });
+  migrated.ascension = typeof normalizeAscensionState === 'function' ? normalizeAscensionState(migrated.ascension) : (migrated.ascension || { ascended: false, ascendedAt: null, classId: null, immortalBody: { level: 0, xp: 0 }, laws: {}, unlockedStages: {} });
+  if (!migrated.tribulationClears || typeof migrated.tribulationClears !== 'object' || Array.isArray(migrated.tribulationClears)) migrated.tribulationClears = {};
+  if (!migrated.tribulationMarks || typeof migrated.tribulationMarks !== 'object' || Array.isArray(migrated.tribulationMarks)) migrated.tribulationMarks = {};
+  migrated.tribulationEssence = normalizeNumber(migrated.tribulationEssence, 0);
+  migrated.bodyTemperLevel = normalizeNumber(migrated.bodyTemperLevel, 0);
   migrated.floor = normalizeNumber(migrated.floor, 1);
 
   return migrated;
@@ -85,6 +113,7 @@ function validateSave(data) {
   if (data.learnedSkills !== undefined && !Array.isArray(data.learnedSkills)) return false;
   if (data.materials !== undefined && (!data.materials || typeof data.materials !== 'object' || Array.isArray(data.materials))) return false;
   if (data.artifacts !== undefined && (!data.artifacts || typeof data.artifacts !== 'object' || Array.isArray(data.artifacts))) return false;
+  if (data.ascension !== undefined && (!data.ascension || typeof data.ascension !== 'object' || Array.isArray(data.ascension))) return false;
 
   const numericFields = [
     'realmIndex', 'xp', 'spiritStones', 'breakthroughFails', 'breakthroughChanceBonus',
@@ -136,9 +165,23 @@ function saveGame() {
       skillPoints: availableSkillPoints,
       learnedSkills: learnedSkills.map(s => ({ tree: s.tree, index: s.index })),
       // Materials
-      materials: { ...playerMaterials },
+      materials: normalizeMaterialIds(playerMaterials),
+      // Stage dungeon progress
+      stageProgress: typeof normalizeStageProgress === 'function' ? normalizeStageProgress(player.stageProgress) : (player.stageProgress || null),
+      // Player title state
+      titles: typeof normalizeTitleState === 'function' ? normalizeTitleState(player.titles) : (player.titles || { unlocked: {}, equipped: null }),
+      // Secret realm state
+      secretRealmClears: player.secretRealmClears ? { ...player.secretRealmClears } : {},
+      lastSecretRealmRun: player.lastSecretRealmRun ? { ...player.lastSecretRealmRun } : null,
+      // Tribulation state
+      tribulationClears: player.tribulationClears ? { ...player.tribulationClears } : {},
+      tribulationMarks: player.tribulationMarks ? { ...player.tribulationMarks } : {},
+      tribulationEssence: Number(player.tribulationEssence || 0),
+      bodyTemperLevel: Number(player.bodyTemperLevel || 0),
       // Artifacts
       artifacts: typeof serializeArtifactsState === 'function' ? serializeArtifactsState(player.artifacts) : (player.artifacts || { activeId: null, owned: {} }),
+      // Ascension / immortal world progression
+      ascension: typeof normalizeAscensionState === 'function' ? normalizeAscensionState(player.ascension) : (player.ascension || null),
       // Dungeon progress
       floor: dungeonLevel,
     };
@@ -165,6 +208,9 @@ function serializeItem(item) {
     affixes: (item.affixes || []).map(a => ({ ...a })),
     enhanceLevel: Number(item.enhanceLevel) || 0,
     enhanceBonus: { ...(item.enhanceBonus || {}) },
+    immortalRefined: !!item.immortalRefined,
+    immortalRefinePower: Number(item.immortalRefinePower || 0),
+    immortalRefineBossDmg: Number(item.immortalRefineBossDmg || 0),
     setId: item.setId || null,
     setName: item.setName || null,
     setIcon: item.setIcon || null,
@@ -219,10 +265,24 @@ function applySaveData(data) {
   }));
 
   // Restore materials
-  playerMaterials = data.materials ? { ...data.materials } : {};
+  playerMaterials = normalizeMaterialIds(data.materials);
+  // Restore stage dungeon progress
+  player.stageProgress = typeof normalizeStageProgress === 'function' ? normalizeStageProgress(data.stageProgress) : (data.stageProgress || player.stageProgress);
+  // Restore title state
+  player.titles = typeof normalizeTitleState === 'function' ? normalizeTitleState(data.titles) : (data.titles || player.titles || { unlocked: {}, equipped: null });
+  // Restore secret realm state
+  if (data.secretRealmClears) player.secretRealmClears = { ...data.secretRealmClears };
+  player.lastSecretRealmRun = data.lastSecretRealmRun ? { ...data.lastSecretRealmRun } : null;
+  // Restore tribulation state
+  player.tribulationClears = data.tribulationClears ? { ...data.tribulationClears } : {};
+  player.tribulationMarks = data.tribulationMarks ? { ...data.tribulationMarks } : {};
+  player.tribulationEssence = Number(data.tribulationEssence || 0);
+  player.bodyTemperLevel = Number(data.bodyTemperLevel || 0);
 
   // Restore artifacts
   player.artifacts = typeof normalizeArtifactsState === 'function' ? normalizeArtifactsState(data.artifacts) : (data.artifacts || { activeId: null, owned: {} });
+  // Restore ascension / immortal world progression
+  player.ascension = typeof normalizeAscensionState === 'function' ? normalizeAscensionState(data.ascension) : (data.ascension || player.ascension || null);
   player.recalcStats();
 
   // Restore floor level
@@ -268,6 +328,9 @@ function deserializeItem(data) {
     affixes: (data.affixes || []).map(a => ({ ...a })),
     enhanceLevel: Number(data.enhanceLevel) || 0,
     enhanceBonus: { ...(data.enhanceBonus || {}) },
+    immortalRefined: !!data.immortalRefined,
+    immortalRefinePower: Number(data.immortalRefinePower || data.stats?.immortalPower || 0),
+    immortalRefineBossDmg: Number(data.immortalRefineBossDmg || data.stats?.bossDmg || 0),
     setId: data.setId || null,
     setName: data.setName || null,
     setIcon: data.setIcon || null,

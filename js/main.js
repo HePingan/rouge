@@ -1,4 +1,6 @@
 // Game Main Loop — Entry Point, Input, Rendering, Camera
+if (typeof STAGES === 'undefined') console.error('[致命] stages.js 未加载或变量不可访问'); else console.log('[OK] STAGES loaded:', Object.keys(STAGES).length, 'stages');
+if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.js 未加载或变量不可访问'); else console.log('[OK] SECRET_REALMS loaded:', Object.keys(SECRET_REALMS).length, 'realms');
      let CELL_SIZE = (window.innerWidth < 600) ? Math.max(20, Math.floor(Math.min(window.innerWidth, window.innerHeight) / 22)) : 18;
      let canvasW = 1280;
      let canvasH = 720;
@@ -24,8 +26,28 @@
      let characterEquipmentDetailSlot = null;
      let characterTab = 'attributes';
     let showArtifactUI = false;
+    let selectedArtifactId = null;
     let inventoryBulkRarity = '普通';
     let inventoryBulkMode = 'sell';
+    let inventorySortMode = 'power';
+    let inventoryListHtmlCacheKeyDom = '';
+    let inventoryListHtmlCacheDom = '';
+    let inventoryMaterialHtmlCacheKeyDom = '';
+    let inventoryMaterialHtmlCacheDom = '';
+    let showSecretRealmUI = false;
+    let showStageSelectUI = false;
+    let selectedStageId = 'qingyun_foot';
+    let showStageClearPanel = false;
+    let stageTab = 'stages'; // 'stages' | 'codex'
+    let stageDetailOpen = false;
+    let stageSweepOpen = false;
+    let selectedStageChapterId = 'qingyun';
+    let lastStageClearSummary = null;
+    let showTribulationUI = false;
+    let showAscensionUI = false;
+    let ascensionTab = 'overview';
+    let selectedAscensionLawId = 'sword';
+    let selectedTribulationId = 'minor';
     let inventoryTab = 'equipment';
     let inventoryBulkConfirm = null;
     let inventoryDetailScrollKey = '';
@@ -102,18 +124,71 @@
     }
     function bindPanelActionDom(el, onAction) {
       if (!el || typeof onAction !== 'function') return;
+      // 可滚动面板里的按钮不能在 touchstart 阶段 preventDefault，否则从按钮/卡片上起手会抢走滚动。
+      // 统一改为“移动阈值 tap”：滑动只滚动，未移动的轻触才执行动作并抑制后续合成 click。
+      let start = null;
+      let moved = false;
+      let handledTouchUntil = 0;
+      const point = e => {
+        const t = e.changedTouches?.[0] || e.touches?.[0] || e;
+        return { x: Number(t.clientX) || 0, y: Number(t.clientY) || 0 };
+      };
+      const scrollTop = () => inventoryScrollableParentDom(el)?.scrollTop || 0;
+      const begin = e => {
+        const p = point(e);
+        start = { x: p.x, y: p.y, scrollTop: scrollTop() };
+        moved = false;
+      };
+      const move = e => {
+        if (!start) return;
+        const p = point(e);
+        if (Math.hypot(p.x - start.x, p.y - start.y) > INVENTORY_TAP_MOVE_THRESHOLD || Math.abs(scrollTop() - start.scrollTop) > 2) moved = true;
+      };
+      const finish = e => {
+        const shouldTap = start && !moved && Math.abs(scrollTop() - start.scrollTop) <= 2;
+        start = null;
+        moved = false;
+        if (!shouldTap) return;
+        markInventoryTouchActionDom();
+        handledTouchUntil = Date.now() + 700;
+        e.preventDefault();
+        e.stopPropagation();
+        onAction(e);
+      };
+      const cancel = () => { start = null; moved = false; handledTouchUntil = Date.now() + 450; };
+      if (window.PointerEvent) {
+        el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') begin(e); }, { passive: true });
+        el.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse') move(e); }, { passive: true });
+        el.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') finish(e); }, { passive: false });
+        el.addEventListener('pointercancel', cancel, { passive: true });
+      } else {
+        el.addEventListener('touchstart', begin, { passive: true });
+        el.addEventListener('touchmove', move, { passive: true });
+        el.addEventListener('touchend', finish, { passive: false });
+        el.addEventListener('touchcancel', cancel, { passive: true });
+      }
       el.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
-        if (shouldIgnoreInventorySyntheticClickDom()) return;
+        if (Date.now() < handledTouchUntil || shouldIgnoreInventorySyntheticClickDom()) return;
         onAction(e);
       });
-      el.addEventListener('touchstart', e => {
-        markInventoryTouchActionDom();
-        e.preventDefault();
-        e.stopPropagation();
-        onAction(e);
-      }, { passive: false });
+    }
+    let inventoryRenderQueuedDom = false;
+    let inventoryRenderReasonDom = '';
+    function scheduleInventoryRenderDom(reason = '') {
+      inventoryRenderReasonDom = reason || inventoryRenderReasonDom;
+      if (!showInventory || typeof renderInventoryDomPanel !== 'function') return;
+      if (inventoryRenderQueuedDom) return;
+      inventoryRenderQueuedDom = true;
+      const run = () => {
+        inventoryRenderQueuedDom = false;
+        const r = inventoryRenderReasonDom;
+        inventoryRenderReasonDom = '';
+        if (showInventory) renderInventoryDomPanel(r);
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+      else setTimeout(run, 0);
     }
    function init() {
       canvas = document.getElementById('game-canvas');
@@ -122,10 +197,22 @@
       ctx = canvas.getContext('2d');
       player = new Player();
       const loaded = loadGame();
-      if (!loaded) generateNewFloor();
-      else generateNewFloor();  // generates floor at saved dungeonLevel
+      if (player.stageProgress?.currentRun?.stageId) {
+        const runStage = STAGES?.[player.stageProgress.currentRun.stageId];
+        isInStageRun = !!runStage;
+        stageRoomIndex = Number(player.stageProgress.currentRun.roomIndex || 0);
+        stageRoomCount = Number(runStage?.roomCount || 0);
+      }
+      if (!loaded) {
+        generateHomeMap({ welcome: true });
+        showStageSelectUI = false;
+      } else if (isInStageRun) {
+        generateNewFloor();
+      } else {
+        generateHomeMap();
+      }
       // If save was loaded, show welcome message
-      if (loaded) showMessage('📂 读取存档成功，继续你的仙途之旅！', '#d4a0ff');
+      if (loaded) showMessage('📂 仙缘未断，旧梦重续！道友，仙途再起！', '#d4a0ff');
       // Keyboard listeners
       window.addEventListener('keydown', e => {
         initAudio();  // Initialize audio on first keypress
@@ -171,7 +258,7 @@
      if (typeof resetDomMapCache === 'function') resetDomMapCache();
    }
   function isAnyPanelOpen() {
-    return showInventory || showCharacterPanel || showSkillTreeUI || showArtifactUI || showAlchemyUI || showBreakthroughUI;
+    return showInventory || showCharacterPanel || showSkillTreeUI || showArtifactUI || showAlchemyUI || showBreakthroughUI || showSecretRealmUI || showStageSelectUI || showStageClearPanel || showTribulationUI || showAscensionUI;
   }
   function syncMainNavState() {
     if (typeof document === 'undefined') return;
@@ -179,6 +266,7 @@
       'btn-bag': !!showInventory,
       'btn-character': !!showCharacterPanel,
       'btn-skills': !!showSkillTreeUI,
+      'btn-stages': !!showStageSelectUI,
       'btn-more': !!document.getElementById('more-menu')?.classList.contains('open'),
     };
     Object.entries(map).forEach(([id, active]) => {
@@ -190,24 +278,34 @@
     if (typeof document === 'undefined') return;
     const open = isAnyPanelOpen();
     document.body.classList.toggle('panel-open', open);
+    document.body.classList.toggle('stage-run-active', !!isInStageRun);
+    document.body.classList.toggle('secret-realm-run-active', !!isInSecretRealm);
     document.body.classList.toggle('inventory-open', !!showInventory);
     document.body.classList.toggle('character-open', !!showCharacterPanel);
     document.body.classList.toggle('skills-open', !!showSkillTreeUI);
     document.body.classList.toggle('artifact-open', !!showArtifactUI);
     document.body.classList.toggle('alchemy-open', !!showAlchemyUI);
     document.body.classList.toggle('breakthrough-open', !!showBreakthroughUI);
+    document.body.classList.toggle('secretrealm-open', !!showSecretRealmUI);
+    document.body.classList.toggle('stage-open', !!showStageSelectUI || !!showStageClearPanel);
+    document.body.classList.toggle('tribulation-open', !!showTribulationUI);
+    document.body.classList.toggle('ascension-open', !!showAscensionUI);
     const moreMenu = document.getElementById('more-menu');
     if (moreMenu && open) {
       moreMenu.classList.remove('open');
       moreMenu.setAttribute('aria-hidden', 'true');
     }
     syncMainNavState();
-    if (showInventory && typeof renderInventoryDomPanel === 'function') renderInventoryDomPanel();
+    if (showInventory && typeof scheduleInventoryRenderDom === 'function') scheduleInventoryRenderDom('sync');
     if (showCharacterPanel && typeof renderCharacterDomPanel === 'function') renderCharacterDomPanel();
     if (showSkillTreeUI && typeof renderSkillsDomPanel === 'function') renderSkillsDomPanel();
     if (showArtifactUI && typeof renderArtifactDomPanel === 'function') renderArtifactDomPanel();
     if (showAlchemyUI && typeof renderAlchemyDomPanel === 'function') renderAlchemyDomPanel();
     if (showBreakthroughUI && typeof renderBreakthroughDomPanel === 'function') renderBreakthroughDomPanel();
+    if (showSecretRealmUI && typeof renderSecretRealmDomPanel === 'function') renderSecretRealmDomPanel();
+    if ((showStageSelectUI || showStageClearPanel) && typeof renderStageDomPanel === 'function') renderStageDomPanel();
+    if (showTribulationUI && typeof renderTribulationDomPanel === 'function') renderTribulationDomPanel();
+    if (showAscensionUI && typeof renderAscensionDomPanel === 'function') renderAscensionDomPanel();
   }
   function clearTouchMovementState() {
     if (typeof joystick === 'undefined') return;
@@ -248,9 +346,6 @@ function escapeHtml(value) {
   const ITEM_RARITIES_DOM = ['普通', '魔法', '稀有', '传说', '神话'];
   function rarityShortDom(rarity) {
     return ({ '普通': '普', '魔法': '魔', '稀有': '稀', '传说': '传', '神话': '神' }[rarity] || String(rarity || '?').slice(0, 1));
-  }
-  function confirmDom(message) {
-    return window.confirm(message);
   }
   const STAT_NAMES = {
     atk: '攻击', def: '防御', hp: '生命', mp: '灵力',
@@ -297,6 +392,53 @@ function escapeHtml(value) {
   }
   function rarityValueDom(rarity) {
     return ({ '普通': 1, '魔法': 2, '稀有': 4, '传说': 8, '神话': 14 }[rarity] || 1);
+  }
+  function rarityRankDom(rarity) {
+    return ({ '普通': 1, '魔法': 2, '稀有': 3, '传说': 4, '神话': 5 }[rarity] || 0);
+  }
+  function inventoryItemStableKeyDom(item, index) {
+    return [
+      index, item?.id || '', item?.name || '', item?.slot || '', item?.rarity || '',
+      item?.floorLevel || 0, item?.enhanceLevel || 0, JSON.stringify(item?.stats || {})
+    ].join('|');
+  }
+  function inventoryItemsVersionDom() {
+    return `${inventorySortMode}:${(player?.inventory || []).map(inventoryItemStableKeyDom).join('~')}`;
+  }
+  function sortedInventoryEntriesDom() {
+    return (player?.inventory || []).map((item, index) => {
+      if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
+      return { item, index, power: itemPowerDom(item), rarityRank: rarityRankDom(item?.rarity), floor: Number(item?.floorLevel) || 0 };
+    }).sort((a, b) => {
+      if (inventorySortMode === 'rarity') {
+        const rarityDiff = b.rarityRank - a.rarityRank;
+        if (rarityDiff) return rarityDiff;
+      }
+      const powerDiff = b.power - a.power;
+      if (powerDiff) return powerDiff;
+      if (inventorySortMode === 'power') {
+        const rarityDiff = b.rarityRank - a.rarityRank;
+        if (rarityDiff) return rarityDiff;
+      }
+      const floorDiff = b.floor - a.floor;
+      if (floorDiff) return floorDiff;
+      return a.index - b.index;
+    });
+  }
+  function inventoryListHtmlDom() {
+    const key = `${inventoryItemsVersionDom()}:${inventoryDetailTarget?.type || ''}:${inventoryDetailTarget?.index ?? ''}`;
+    if (key === inventoryListHtmlCacheKeyDom) return inventoryListHtmlCacheDom;
+    inventoryListHtmlCacheKeyDom = key;
+    inventoryListHtmlCacheDom = sortedInventoryEntriesDom().map(({ item, index }) => {
+      const targetIndex = Number(inventoryDetailTarget?.index);
+      const active = (inventoryDetailTarget?.type === 'bag' || inventoryDetailTarget?.type === 'compare') && targetIndex === index;
+      return drawBagItemCardDom(item, index, active);
+    }).join('');
+    return inventoryListHtmlCacheDom;
+  }
+  function invalidateInventoryListCacheDom() {
+    inventoryListHtmlCacheKeyDom = '';
+    inventoryListHtmlCacheDom = '';
   }
   function itemPowerDom(item) {
     return Object.values(item?.stats || {}).reduce((sum, v) => sum + Math.max(0, Number(v) || 0), 0);
@@ -382,35 +524,9 @@ function escapeHtml(value) {
   }
   function removeInventoryItemDom(index) {
     if (!player || index < 0 || index >= player.inventory.length) return null;
-    return player.inventory.splice(index, 1)[0] || null;
-  }
-  function sellInventoryItemDom(index, skipConfirm = false) {
-    const item = player?.inventory?.[index];
-    if (!item) return false;
-    const value = itemSellValueDom(item);
-    if (!skipConfirm && !confirmDom(`确认售卖 ${item.name}？\n品质：${item.rarity || '未知'}\n可获得：${value} 灵石`)) return false;
-    removeInventoryItemDom(index);
-    player.addSpiritStones(value);
-    autoSave();
-    if (typeof updateUI === 'function') updateUI();
-    showMessage(`售卖 ${item.name}，获得 ${value} 灵石`, '#ffcc44');
-    refreshEquipmentPanelsDom();
-    return true;
-  }
-  function decomposeInventoryItemDom(index, skipConfirm = false) {
-    const item = player?.inventory?.[index];
-    if (!item) return false;
-    const gains = itemBreakdownDom(item);
-    if (!skipConfirm && !confirmDom(`确认分解 ${item.name}？\n品质：${item.rarity || '未知'}\n可获得：${materialTextDom(gains)}`)) return false;
-    removeInventoryItemDom(index);
-    for (const [id, count] of Object.entries(gains)) {
-      playerMaterials[id] = (playerMaterials[id] || 0) + count;
-    }
-    autoSave();
-    if (typeof updateUI === 'function') updateUI();
-    showMessage(`分解 ${item.name}，获得 ${materialTextDom(gains)}`, '#aaddff');
-    refreshEquipmentPanelsDom();
-    return true;
+    const removed = player.inventory.splice(index, 1)[0] || null;
+    if (removed) invalidateInventoryListCacheDom();
+    return removed;
   }
   function inventoryItemsByRarityDom(rarity) {
     if (!player?.inventory) return [];
@@ -434,13 +550,38 @@ function escapeHtml(value) {
   }
   function bulkPreviewHtmlDom(preview, mode = inventoryBulkMode) {
     const count = Number(preview?.count || 0);
-    const reward = mode === 'sell' ? `${preview?.sellValue || 0} 灵石` : materialTextDom(preview?.gains || {});
-    const action = mode === 'sell' ? '售卖' : '分解';
-    const sample = preview?.names?.length ? preview.names.map(escapeHtml).join('、') + (count > preview.names.length ? ` 等${count}件` : '') : '暂无装备';
-    return `<div class="bulk-preview ${count ? '' : 'empty'}">
-      <div class="bulk-preview-main"><b>${escapeHtml(preview?.rarity || '普通')}</b><span>${count ? `${count} 件 · ${action}预览` : '当前品质暂无装备'}</span></div>
-      <div class="bulk-preview-reward ${mode}">${escapeHtml(reward)}</div>
-      <div class="bulk-preview-sample">${sample}</div>
+    const isSell = mode === 'sell';
+    const rewardHtml = isSell ? `<span class="bulk-reward-stone">${preview?.sellValue || 0} 灵石</span>` : materialTextDom(preview?.gains || {}, { asHtml: true });
+    const action = isSell ? '售卖' : '分解';
+    const actionIcon = isSell ? '💰' : '🔧';
+    const sample = preview?.names?.length ? preview.names.map(escapeHtml).join('、') + (count > preview.names.length ? ` 等${count}件` : '') : '暂无';
+    const empty = count ? '' : ' empty';
+    /* Build small per-rarity summary row */
+    const rarityRow = ITEM_RARITIES_DOM.map(r => {
+      const p = bulkPreviewDom(r);
+      const cls = r === (preview?.rarity || '普通') ? ' active' : '';
+      const dis = p.count ? '' : ' disabled';
+      return `<button class="bulk-rarity-chip${cls}${dis}" type="button" data-bulk-rarity-chip="${escapeHtml(r)}" ${p.count ? '' : 'disabled'}><b>${escapeHtml(rarityShortDom(r))}</b><span>${p.count}</span></button>`;
+    }).join('');
+    /* Build reward detail chips for decompose */
+    let rewardDetail = '';
+    if (!isSell && count && preview?.gains) {
+      rewardDetail = Object.entries(preview.gains).map(([id, cnt]) => {
+        if (!cnt) return '';
+        const mat = (typeof MATERIALS !== 'undefined') ? MATERIALS.find(m => m.id === id) : null;
+        const name = mat ? mat.name : id;
+        const icon = mat ? materialIconDom(mat) : '📦';
+        const color = mat ? (mat.color || '#aaddff') : '#aaddff';
+        return `<span class="bulk-reward-chip" style="--mat-color:${escapeHtml(color)}"><i>${escapeHtml(icon)}</i><em>${escapeHtml(name)}</em><b>x${cnt}</b></span>`;
+      }).filter(Boolean).join('');
+    }
+    return `<div class="bulk-preview-card ${escapeHtml(mode)}${empty}">
+      <div class="bulk-preview-head"><span class="bulk-action-icon">${actionIcon}</span><b>${escapeHtml(preview?.rarity || '普通')}</b><em>${count ? `${count}件` : '暂无'}</em></div>
+      <div class="bulk-preview-reward ${escapeHtml(mode)}"><small>预计获得</small><strong>${count ? rewardHtml : '—'}</strong></div>
+      ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
+      ${count ? `<div class="bulk-preview-meta"><span>总战力 ${escapeHtml(preview?.power || 0)}</span><span>${escapeHtml(sample)}</span></div>` : ''}
+      <button class="bulk-primary ${escapeHtml(mode)}" type="button" data-bulk-${isSell ? 'sell' : 'decompose'}="1" ${count ? '' : 'disabled'}>${count ? `确认${action}（${count}件）` : `无可${action}装备`}</button>
+      <div class="bulk-safe-tip">仅处理背包库存；已穿装备不会受影响。</div>
     </div>`;
   }
   function openBulkConfirmDom(mode, rarity) {
@@ -465,21 +606,34 @@ function escapeHtml(value) {
     const preview = bulkPreviewDom(rarity);
     if (!preview.count) return '';
     const isSell = mode === 'sell';
-    const title = isSell ? '确认一键售卖' : '确认一键分解';
-    const reward = isSell ? `${preview.sellValue} 灵石` : materialTextDom(preview.gains);
+    const titleIcon = isSell ? '💰' : '🔧';
+    const title = isSell ? '确认售卖' : '确认分解';
     const rewardHtml = isSell ? `<span class="bulk-reward-stone">${preview.sellValue} 灵石</span>` : materialTextDom(preview.gains, { asHtml: true });
     const sample = preview.names.map(escapeHtml).join('、') + (preview.count > preview.names.length ? ` 等${preview.count}件` : '');
+    /* Build reward detail chips for decompose confirm */
+    let rewardDetail = '';
+    if (!isSell && preview?.gains) {
+      rewardDetail = Object.entries(preview.gains).map(([id, cnt]) => {
+        if (!cnt) return '';
+        const mat = (typeof MATERIALS !== 'undefined') ? MATERIALS.find(m => m.id === id) : null;
+        const name = mat ? mat.name : id;
+        const icon = mat ? materialIconDom(mat) : '📦';
+        const color = mat ? (mat.color || '#aaddff') : '#aaddff';
+        return `<span class="bulk-reward-chip" style="--mat-color:${escapeHtml(color)}"><i>${escapeHtml(icon)}</i><em>${escapeHtml(name)}</em><b>x${cnt}</b></span>`;
+      }).filter(Boolean).join('');
+    }
     return `<div class="bulk-confirm-layer show" data-bulk-layer="1">
       <div class="bulk-confirm-card ${isSell ? 'sell' : 'decompose'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
         <button class="bulk-close" type="button" data-bulk-cancel="1" aria-label="取消">×</button>
-        <div class="bulk-confirm-title">${escapeHtml(title)}</div>
+        <div class="bulk-confirm-title">${titleIcon} ${escapeHtml(title)}</div>
         <div class="bulk-confirm-sub">${escapeHtml(rarity)}品质 · ${preview.count} 件装备</div>
         <div class="bulk-confirm-reward"><span>预计获得</span><b>${rewardHtml}</b></div>
+        ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
         <div class="bulk-confirm-list">${sample}</div>
         <div class="bulk-warning">操作后装备会从背包移除，请确认这些品质装备都不需要保留。</div>
         <div class="bulk-confirm-actions">
           <button type="button" class="bulk-cancel" data-bulk-cancel="1">取消</button>
-          <button type="button" class="bulk-confirm-btn ${isSell ? 'sell' : 'decompose'}" data-bulk-confirm="${escapeHtml(mode)}">确认${isSell ? '售卖' : '分解'} · ${escapeHtml(reward)}</button>
+          <button type="button" class="bulk-confirm-btn ${isSell ? 'sell' : 'decompose'}" data-bulk-confirm="${escapeHtml(mode)}">确认${isSell ? '售卖' : '分解'} · ${isSell ? preview.sellValue + ' 灵石' : materialTextDom(preview.gains)}</button>
         </div>
       </div>
     </div>`;
@@ -489,6 +643,7 @@ function escapeHtml(value) {
     if (!preview.count) { inventoryBulkConfirm = null; renderInventoryDomPanel(); return false; }
     const indices = new Set(preview.entries.map(entry => entry.index));
     player.inventory = player.inventory.filter((_, index) => !indices.has(index));
+    invalidateInventoryListCacheDom();
     if (mode === 'sell') {
       player.addSpiritStones(preview.sellValue);
       showMessage(`已售卖 ${preview.count} 件${rarity}装备，获得 ${preview.sellValue} 灵石`, '#ffcc44');
@@ -499,8 +654,7 @@ function escapeHtml(value) {
     inventoryDetailTarget = null;
     inventoryBulkConfirm = null;
     autoSave();
-    if (typeof updateUI === 'function') updateUI();
-    refreshEquipmentPanelsDom();
+    refreshEquipmentPanelsDom({ deferInventory: true });
     return true;
   }
   function bulkSellInventoryByRarityDom(rarity) {
@@ -545,16 +699,32 @@ function escapeHtml(value) {
       <div class="slot-actions">${item ? `<button class="item-action detail" type="button" data-detail-slot="${escapeHtml(slot)}" title="详情">详</button><button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(slot)}" title="卸下">卸</button>` : ''}</div>
     </div>`;
   }
+  function itemPowerDeltaDom(item) {
+    if (!item) return { value: 0, tone: 'same', text: '=' };
+    const current = player?.equipment?.[item.slot] || null;
+    const delta = itemPowerDom(item) - itemPowerDom(current);
+    return {
+      value: delta,
+      tone: delta > 0 ? 'up' : delta < 0 ? 'down' : 'same',
+      text: delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : '='
+    };
+  }
   function drawBagItemCardDom(item, index, active = false) {
-    if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
     const color = item?.rarityColor || '#d4a0ff';
     const typeName = SLOT_NAMES?.[item.slot]?.name || '装备';
     const level = equipmentEnhanceLevelDom(item);
     const name = `${item.name}${level > 0 ? ` +${level}` : ''}`;
-    return `<button class="bag-item-card icon-card${active ? ' active' : ''}" type="button" data-index="${index}" aria-label="查看${escapeHtml(name)}详情" title="${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
+    const power = itemPowerDom(item);
+    const delta = itemPowerDeltaDom(item);
+    const primaryStats = itemPrimaryStatsHtmlDom(item, 2);
+    const floorText = item?.floorLevel ? `${item.floorLevel}层` : (item?.subType || typeName);
+    return `<button class="bag-item-card scan-card${active ? ' active' : ''}" type="button" data-index="${index}" aria-label="查看${escapeHtml(name)}详情，战力${escapeHtml(power)}，${escapeHtml(delta.text)}" title="${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
       <div class="bag-icon"><span>${escapeHtml(itemIconDom(item))}</span><i>${escapeHtml(rarityShortDom(item.rarity))}</i></div>
       ${level > 0 ? `<span class="enhance-badge">+${level}</span>` : ''}
       <span class="bag-slot-tag">${escapeHtml(typeName.slice(0, 1))}</span>
+      <div class="bag-main"><div class="bag-name-row"><b>${escapeHtml(item.name || '装备')}</b></div><div class="bag-meta"><span>${escapeHtml(typeName)}</span><em>${escapeHtml(floorText)}</em></div></div>
+      <div class="bag-power"><b>战力 ${escapeHtml(power)}</b><strong class="${escapeHtml(delta.tone)}">${escapeHtml(delta.text)}</strong></div>
+      <div class="bag-stats">${primaryStats}</div>
     </button>`;
   }
   function itemCardMetaDom(item, label = '') {
@@ -654,7 +824,7 @@ function escapeHtml(value) {
       </div>
     </div>`;
   }
-  function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；再选择对比、售卖或分解') {
+  function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上') {
     if (!detail?.item) return `<div class="item-detail empty">${escapeHtml(emptyText)}</div>`;
     if (detail.type === 'compare') return itemCompareHtmlDom(detail);
     const item = detail.item;
@@ -666,11 +836,9 @@ function escapeHtml(value) {
     const enhancedName = `${item.name}${level > 0 ? ` +${level}` : ''}`;
     const maxLevel = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
     const enhanceButton = level >= maxLevel ? `<button class="item-action enhance disabled" type="button" disabled>已满级</button>` : `<button class="item-action enhance" type="button" data-enhance-target="1">强化</button>`;
-    const bagActions = Number.isInteger(detail.index) ? `<div class="detail-actions enhance-actions">
+    const bagActions = Number.isInteger(detail.index) ? `<div class="detail-actions enhance-actions bag-detail-actions">
         ${enhanceButton}
-        <button class="item-action equip" type="button" data-equip-action-index="${detail.index}">对比</button>
-        <button class="item-action sell" type="button" data-sell-index="${detail.index}">售卖</button>
-        <button class="item-action decompose" type="button" data-decompose-index="${detail.index}">分解</button>
+        <button class="item-action equip primary-equip" type="button" data-equip-action-index="${detail.index}">装备</button>
       </div>` : '';
     const equipActions = detail.slot ? `<div class="detail-actions enhance-actions">${enhanceButton}<button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(detail.slot)}">卸下</button></div>` : '';
     return `<div class="item-detail" style="--rarity-color:${escapeHtml(color)}">
@@ -690,18 +858,75 @@ function escapeHtml(value) {
       ${bagActions || equipActions}
     </div>`;
   }
+  function materialRarityLabelDom(rarity) {
+    return ({ common: '凡', uncommon: '良', rare: '稀', epic: '史', legendary: '传', mythic: '神' }[rarity] || String(rarity || '?').slice(0, 1));
+  }
+  function materialIconDom(mat) {
+    const id = String(mat?.id || '');
+    if (/fire|blood|demon/i.test(id)) return '🔥';
+    if (/ice|void/i.test(id)) return '❄️';
+    if (/dragon|scale/i.test(id)) return '🐉';
+    if (/phoenix|feather/i.test(id)) return '🪶';
+    if (/soul|jade|essence|artifact/i.test(id)) return '💠';
+    if (/thunder|tribulation|seal/i.test(id)) return '⚡';
+    if (/star|dust/i.test(id)) return '✨';
+    if (/key|mark/i.test(id)) return '🔑';
+    if (/stone|core|marrow/i.test(id)) return '🪨';
+    if (/herb|ginseng|petal|fur/i.test(id)) return '🌿';
+    return '✦';
+  }
+  function materialUseTextDom(mat) {
+    const id = String(mat?.id || '');
+    if (/secret_key/i.test(id)) return '秘境开启';
+    if (/artifact|shard|core|essence/i.test(id)) return '神器养成';
+    if (/qingyun|blood|thunder|yaogu|nether|void|demon|ascension|nine_thunder|immortal/i.test(id)) return '副本材料';
+    if (/tribulation/i.test(id)) return '渡劫相关';
+    if (/stone|core|marrow/i.test(id)) return '强化/炼制';
+    return '炼丹材料';
+  }
+  function materialSourceTextDom(mat) {
+    const id = String(mat?.id || '');
+    if (mat?.source) return mat.source;
+    if (/secret_key_herb/i.test(id)) return '灵草秘境通关 / 秘境商人';
+    if (/secret_key_forge/i.test(id)) return '炼器秘境通关 / 秘境商人';
+    if (/secret_key_artifact/i.test(id)) return '神器秘境通关 / 高阶 Boss';
+    if (/tribulation/i.test(id)) return '天劫秘境通关 / 雷系 Boss';
+    if (/artifact|shard|core|essence/i.test(id)) return '精英怪 / Boss / 神器秘境';
+    if (/qingyun|blood|thunder|yaogu|nether|void|demon|ascension|nine_thunder|immortal/i.test(id)) return '章节副本 / 首领掉落';
+    if (/stone|core|marrow/i.test(id)) return '炼器秘境 / 地图采集 / 分解装备';
+    return '地图采集 / 怪物掉落 / 灵草秘境';
+  }
   function materialCardsHtmlDom() {
     if (typeof MATERIALS === 'undefined') return '<div class="empty-note">暂无材料定义</div>';
-    const cards = MATERIALS.map(mat => {
+    if (typeof normalizeMaterialIds === 'function') playerMaterials = normalizeMaterialIds(playerMaterials);
+    const visibleMaterials = MATERIALS.filter(mat => mat?.id !== 'artifact_dust');
+    const key = visibleMaterials.map(mat => `${mat.id}:${Number(playerMaterials?.[mat.id] || 0)}`).join('|');
+    if (key === inventoryMaterialHtmlCacheKeyDom) return inventoryMaterialHtmlCacheDom;
+    inventoryMaterialHtmlCacheKeyDom = key;
+    inventoryMaterialHtmlCacheDom = visibleMaterials.map(mat => {
       const count = Number(playerMaterials?.[mat.id] || 0);
       const empty = count <= 0 ? ' empty' : '';
-      return `<div class="mat-card${empty}" style="--mat-color:${escapeHtml(mat.color || '#aaa')}"><span class="mat-dot">✦</span><div><b>${escapeHtml(mat.name || mat.id)}</b><em>${escapeHtml(mat.rarity || '')}</em></div><strong>x${count}</strong></div>`;
+      const rarity = materialRarityLabelDom(mat.rarity);
+      const icon = materialIconDom(mat);
+      const useText = materialUseTextDom(mat);
+      const sourceText = materialSourceTextDom(mat);
+      return `<div class="mat-card grid-mat-card${empty}" style="--mat-color:${escapeHtml(mat.color || '#aaa')}" title="${escapeHtml(mat.name || mat.id)} x${count} · 来源：${escapeHtml(sourceText)}">
+        <span class="mat-rarity">${escapeHtml(rarity)}</span>
+        <span class="mat-dot">${escapeHtml(icon)}</span>
+        <b>${escapeHtml(mat.name || mat.id)}</b>
+        <em>${escapeHtml(useText)} · 来源：${escapeHtml(sourceText)}</em>
+        <strong>x${count}</strong>
+      </div>`;
     }).join('');
-    return cards || '<div class="empty-note">暂无材料</div>';
+    return inventoryMaterialHtmlCacheDom || '<div class="empty-note">暂无材料</div>';
   }
-  function refreshEquipmentPanelsDom() {
+  function refreshEquipmentPanelsDom(options = {}) {
+    const deferInventory = !!options.deferInventory;
     if (typeof updateUI === 'function') updateUI();
-    if (showInventory) renderInventoryDomPanel();
+    if (showInventory) {
+      if (deferInventory) scheduleInventoryRenderDom('equipment-change');
+      else scheduleInventoryRenderDom('materials-only');
+    }
     if (showCharacterPanel) {
       characterPanelLastHtml = '';
       renderCharacterDomPanel();
@@ -724,7 +949,7 @@ function escapeHtml(value) {
           showCharacterPanel = true;
           characterPanelLastHtml = '';
           characterEquipmentDetailSlot = null;
-          showMessage('已装备，切换到角色页查看整体效果', '#d4a0ff');
+          showMessage('已装备！前往角色页一览全身修为', '#d4a0ff');
           syncBodyPanelState();
         }
         refreshEquipmentPanelsDom();
@@ -740,12 +965,6 @@ function escapeHtml(value) {
         refreshEquipmentPanelsDom();
       });
     });
-    detailWrap.querySelectorAll('[data-sell-index]').forEach(btn => {
-      bindPanelActionDom(btn, () => { clearDetail(); sellInventoryItemDom(Number(btn.dataset.sellIndex)); });
-    });
-    detailWrap.querySelectorAll('[data-decompose-index]').forEach(btn => {
-      bindPanelActionDom(btn, () => { clearDetail(); decomposeInventoryItemDom(Number(btn.dataset.decomposeIndex)); });
-    });
   }
   function ensureInventoryDomPanel() {
     let panel = document.getElementById('inventory-dom-panel');
@@ -760,9 +979,9 @@ function escapeHtml(value) {
         <div class="inv-tabs" role="tablist"><button class="inv-tab" type="button" data-inv-tab="equipment">装备</button><button class="inv-tab" type="button" data-inv-tab="materials">材料</button><button class="inv-tab" type="button" data-inv-tab="process">处理</button></div>
       </div>
       <div class="inv-body">
-        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="section-title bag-title">装备库存 0/36</div><div class="bag-list"></div></section>
+        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="bag-toolbar"><div class="section-title bag-title">装备库存 0/36</div><div class="bag-sort-toggle" role="group" aria-label="装备排序"><button class="bag-sort-btn" type="button" data-bag-sort="power">战力</button><button class="bag-sort-btn" type="button" data-bag-sort="rarity">品质</button></div></div><div class="bag-list"></div></section>
         <section class="inv-section material-section" data-tab-panel="materials"><div class="section-title">材料库存</div><div class="material-list"></div></section>
-        <section class="inv-section process-section" data-tab-panel="process"><div class="section-title">售卖 / 分解</div><div class="bulk-panel"><div class="bulk-tabs"><button class="bulk-tab sell" type="button" data-bulk-mode="sell">售卖</button><button class="bulk-tab decompose" type="button" data-bulk-mode="decompose">分解</button></div><div class="bulk-tools"><select class="bulk-rarity" aria-label="选择品质"></select><button class="bulk-action sell" type="button" data-bulk-sell="1">一键售卖</button><button class="bulk-action decompose" type="button" data-bulk-decompose="1">一键分解</button></div><div class="bulk-summary"></div></div><div class="process-note">只处理背包库存，不影响角色页当前装备。高品质请先点装备卡片查看详情。</div></section>
+        <section class="inv-section process-section" data-tab-panel="process"><div class="section-title">处理 · 售卖/分解</div><div class="bulk-panel"><div class="bulk-tabs"><button class="bulk-tab sell" type="button" data-bulk-mode="sell">💰 售卖</button><button class="bulk-tab decompose" type="button" data-bulk-mode="decompose">🔧 分解</button></div><div class="bulk-quality-row"><span>品质</span><div class="bulk-rarity-chips"></div></div><select class="bulk-rarity" aria-label="选择品质"></select><div class="bulk-summary"></div></div></section>
       </div>
       <div class="inv-detail-layer"><div class="inv-detail-card"><div class="inv-detail-wrap"></div></div></div><div class="bulk-confirm-root"></div>
       <div class="inv-hint">背包只管理库存；穿上装备后到「角色」页查看属性、套装与战力</div>`;
@@ -811,9 +1030,10 @@ function escapeHtml(value) {
     }, { passive: true });
     return panel;
   }
-  function renderInventoryDomPanel() {
+  function renderInventoryDomPanel(reason = '') {
     const panel = ensureInventoryDomPanel();
     if (!showInventory || !player) return;
+    const renderMaterialsOnly = reason === 'materials-only';
     const bagList = panel.querySelector('.bag-list');
     const materialList = panel.querySelector('.material-list');
     const detailWrap = panel.querySelector('.inv-detail-wrap');
@@ -822,7 +1042,7 @@ function escapeHtml(value) {
     const bulkSummary = panel.querySelector('.bulk-summary');
     const inventoryCapacity = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
     const nextCapacityUnlock = typeof getNextInventoryCapacityUnlock === 'function' ? getNextInventoryCapacityUnlock(player) : null;
-    panel.querySelector('.bag-title').textContent = `装备库存 ${player.inventory.length}/${inventoryCapacity}`;
+    panel.querySelector('.bag-title').innerHTML = `装备库存 <span class="cap-num">${player.inventory.length}</span>/<span class="cap-max">${inventoryCapacity}</span><span class="cap-bar"><span class="cap-fill${player.inventory.length >= inventoryCapacity ? ' full' : ''}" style="width:${Math.min(100, (player.inventory.length / inventoryCapacity) * 100).toFixed(1)}%"></span></span>`;
     const invSub = panel.querySelector('.inv-sub');
     if (invSub) {
       invSub.textContent = nextCapacityUnlock
@@ -838,45 +1058,68 @@ function escapeHtml(value) {
     }
     const selectedEntries = inventoryItemsByRarityDom(inventoryBulkRarity);
     const selectedPreview = bulkPreviewDom(inventoryBulkRarity);
+    const rarityChips = panel.querySelector('.bulk-rarity-chips');
+    if (rarityChips) {
+      rarityChips.innerHTML = ITEM_RARITIES_DOM.map(rarity => {
+        const preview = bulkPreviewDom(rarity);
+        const active = rarity === inventoryBulkRarity ? ' active' : '';
+        const disabled = preview.count ? '' : ' disabled';
+        return `<button class="bulk-rarity-chip${active}${disabled}" type="button" data-bulk-rarity-chip="${escapeHtml(rarity)}" ${preview.count ? '' : 'disabled'}><b>${escapeHtml(rarityShortDom(rarity))}</b><span>${preview.count}</span></button>`;
+      }).join('');
+    }
     if (bulkSummary) bulkSummary.innerHTML = bulkPreviewHtmlDom(selectedPreview, inventoryBulkMode);
     panel.querySelectorAll('[data-bulk-mode]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.bulkMode === inventoryBulkMode);
     });
-    panel.querySelectorAll('.bulk-action').forEach(btn => {
-      btn.classList.toggle('active', (btn.classList.contains('sell') && inventoryBulkMode === 'sell') || (btn.classList.contains('decompose') && inventoryBulkMode === 'decompose'));
-      btn.disabled = !selectedPreview.count;
-    });
-    if (!player.inventory.length) {
-      bagList.innerHTML = '<div class="empty-note">暂无装备，击败怪物可掉落</div>';
-    } else {
-      bagList.innerHTML = player.inventory.map((item, index) => {
-        const targetIndex = Number(inventoryDetailTarget?.index);
-        const active = (inventoryDetailTarget?.type === 'bag' || inventoryDetailTarget?.type === 'compare') && targetIndex === index;
-        return drawBagItemCardDom(item, index, active);
-      }).join('');
+    if (!renderMaterialsOnly) {
+      if (!player.inventory.length) {
+        bagList.innerHTML = '<div class="empty-note">暂无装备，击败怪物可掉落</div>';
+      } else {
+        const nextBagHtml = inventoryListHtmlDom();
+        if (bagList.dataset.htmlKey !== inventoryListHtmlCacheKeyDom || bagList.innerHTML !== nextBagHtml) {
+          bagList.innerHTML = nextBagHtml;
+          bagList.dataset.htmlKey = inventoryListHtmlCacheKeyDom;
+        }
+      }
     }
     if (materialList) materialList.innerHTML = materialCardsHtmlDom();
     const detail = inventoryDetailItemDom();
-    detailWrap.innerHTML = itemDetailHtmlDom(detail);
-    if (detailLayer) detailLayer.classList.toggle('show', !!detail?.item);
-    const bulkRoot = panel.querySelector('.bulk-confirm-root');
-    if (bulkRoot) bulkRoot.innerHTML = bulkConfirmLayerHtmlDom();
-    const detailCard = panel.querySelector('.inv-detail-card');
-    const detailKey = detail?.item ? `${inventoryDetailTarget?.type || ''}:${inventoryDetailTarget?.index ?? ''}:${detail.item.name || ''}:${detail.item.enhanceLevel || 0}` : '';
-    if (detailCard && detailKey !== inventoryDetailScrollKey) detailCard.scrollTop = 0;
-    inventoryDetailScrollKey = detailKey;
-    bindInventoryDetailActionsDom(panel, detailWrap);
-    // 背包小图标：只响应真正点击；滑动超过阈值时不弹出详情，避免滚动时误触。
-    bagList.querySelectorAll('.bag-item-card[data-index]').forEach(card => {
-      bindInventoryTapDom(card, () => { inventoryDetailTarget = { type: 'bag', index: Number(card.dataset.index) }; renderInventoryDomPanel(); });
-    });
+    if (!renderMaterialsOnly) {
+      detailWrap.innerHTML = itemDetailHtmlDom(detail);
+      if (detailLayer) detailLayer.classList.toggle('show', !!detail?.item);
+      const bulkRoot = panel.querySelector('.bulk-confirm-root');
+      if (bulkRoot) bulkRoot.innerHTML = bulkConfirmLayerHtmlDom();
+      const detailCard = panel.querySelector('.inv-detail-card');
+      const detailKey = detail?.item ? `${inventoryDetailTarget?.type || ''}:${inventoryDetailTarget?.index ?? ''}:${detail.item.name || ''}:${detail.item.enhanceLevel || 0}` : '';
+      if (detailCard && detailKey !== inventoryDetailScrollKey) detailCard.scrollTop = 0;
+      inventoryDetailScrollKey = detailKey;
+      bindInventoryDetailActionsDom(panel, detailWrap);
+      // 背包小图标：只响应真正点击；滑动超过阈值时不弹出详情，避免滚动时误触。
+      bagList.querySelectorAll('.bag-item-card[data-index]').forEach(card => {
+        bindInventoryTapDom(card, () => { inventoryDetailTarget = { type: 'bag', index: Number(card.dataset.index) }; renderInventoryDomPanel(); });
+      });
+    }
     panel.querySelectorAll('[data-inv-tab]').forEach(btn => {
       bindPanelActionDom(btn, () => { inventoryTab = btn.dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
+    });
+    panel.querySelectorAll('[data-bag-sort]').forEach(btn => {
+      const mode = btn.dataset.bagSort || 'power';
+      btn.classList.toggle('active', mode === inventorySortMode);
+      btn.setAttribute('aria-pressed', mode === inventorySortMode ? 'true' : 'false');
+      bindPanelActionDom(btn, () => {
+        if (inventorySortMode === mode) return;
+        inventorySortMode = mode;
+        inventoryDetailTarget = null;
+        scheduleInventoryRenderDom('sort');
+      });
     });
     if (bulkSelect) {
       bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
       bulkSelect.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     }
+    panel.querySelectorAll('[data-bulk-rarity-chip]').forEach(btn => {
+      bindPanelActionDom(btn, () => { inventoryBulkRarity = btn.dataset.bulkRarityChip || inventoryBulkRarity; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
+    });
     panel.querySelectorAll('[data-bulk-mode]').forEach(btn => {
       bindPanelActionDom(btn, () => { inventoryBulkMode = btn.dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
     });
@@ -887,7 +1130,13 @@ function escapeHtml(value) {
       bindPanelActionDom(btn, () => bulkDecomposeInventoryByRarityDom(inventoryBulkRarity));
     });
   }
-  function closeAllPanels() {
+  function hideDomPanelById(id) {
+    const panel = typeof document !== 'undefined' ? document.getElementById(id) : null;
+    if (panel) panel.style.display = 'none';
+  }
+  function closeAllPanels(options = {}) {
+    const shouldSync = options.sync !== false;
+    showStageClearPanel = false;
     showInventory = false;
     showCharacterPanel = false;
     characterPanelLastHtml = '';
@@ -896,6 +1145,7 @@ function escapeHtml(value) {
     inventoryDetailTarget = null;
     inventoryBulkConfirm = null;
     inventoryDetailScrollKey = '';
+    invalidateInventoryListCacheDom();
     showSkillTreeUI = false;
     showArtifactUI = false;
     skillDetailModalOpen = false;
@@ -903,8 +1153,109 @@ function escapeHtml(value) {
     if (skillLayer) skillLayer.innerHTML = '';
     showAlchemyUI = false;
     showBreakthroughUI = false;
+    showSecretRealmUI = false;
+    showStageSelectUI = false;
+    showStageClearPanel = false;
+    showTribulationUI = false;
+    showAscensionUI = false;
+    lastStageClearSummary = null;
+    [
+      'inventory-dom-panel',
+      'character-dom-panel',
+      'stage-dom-panel',
+      'secretrealm-dom-panel',
+      'tribulation-dom-panel',
+      'ascension-dom-panel',
+      'artifact-dom-panel',
+      'alchemy-dom-panel',
+      'breakthrough-dom-panel',
+    ].forEach(hideDomPanelById);
     clearTouchMovementState();
-    syncBodyPanelState();
+    if (shouldSync) syncBodyPanelState();
+  }
+  const PANEL_TAP_MOVE_THRESHOLD = 12;
+  let suppressPanelSyntheticClickUntil = 0;
+  function getPanelEventPoint(e) {
+    const t = e?.changedTouches?.[0] || e?.touches?.[0] || e;
+    return { x: Number(t?.clientX || 0), y: Number(t?.clientY || 0) };
+  }
+  function findPanelScrollParent(el) {
+    let node = el?.parentElement || null;
+    while (node) {
+      if (
+        node.classList?.contains('stage-body') ||
+        node.classList?.contains('stage-chapter-strip') ||
+        node.classList?.contains('stage-card-grid') ||
+        node.classList?.contains('panel-body') ||
+        node.classList?.contains('inv-body')
+      ) return node;
+      const style = typeof window !== 'undefined' ? window.getComputedStyle(node) : null;
+      const canScrollY = style && /(auto|scroll)/.test(style.overflowY || '') && node.scrollHeight > node.clientHeight + 1;
+      const canScrollX = style && /(auto|scroll)/.test(style.overflowX || '') && node.scrollWidth > node.clientWidth + 1;
+      if (canScrollY || canScrollX) return node;
+      node = node.parentElement;
+    }
+    return el?.parentElement || null;
+  }
+  function bindPanelTap(el, fn) {
+    if (!el) return;
+    let start = null;
+    let moved = false;
+    let handledTouchUntil = 0;
+    const scrollSnapshot = () => {
+      const parent = findPanelScrollParent(el);
+      return { left: parent?.scrollLeft || 0, top: parent?.scrollTop || 0 };
+    };
+    const begin = e => {
+      const p = getPanelEventPoint(e);
+      const scroll = scrollSnapshot();
+      start = { x: p.x, y: p.y, scrollLeft: scroll.left, scrollTop: scroll.top };
+      moved = false;
+    };
+    const move = e => {
+      if (!start) return;
+      const p = getPanelEventPoint(e);
+      const scroll = scrollSnapshot();
+      if (
+        Math.hypot(p.x - start.x, p.y - start.y) > PANEL_TAP_MOVE_THRESHOLD ||
+        Math.abs(scroll.top - start.scrollTop) > 2 ||
+        Math.abs(scroll.left - start.scrollLeft) > 2
+      ) moved = true;
+    };
+    const finishTouch = e => {
+      const scroll = scrollSnapshot();
+      const shouldTap = start && !moved && Math.abs(scroll.top - start.scrollTop) <= 2 && Math.abs(scroll.left - start.scrollLeft) <= 2;
+      start = null;
+      moved = false;
+      if (!shouldTap) return;
+      handledTouchUntil = Date.now() + 500;
+      suppressPanelSyntheticClickUntil = Math.max(suppressPanelSyntheticClickUntil, handledTouchUntil);
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      fn(e);
+    };
+    const cancel = () => { start = null; moved = false; handledTouchUntil = Date.now() + 180; suppressPanelSyntheticClickUntil = Math.max(suppressPanelSyntheticClickUntil, handledTouchUntil); };
+    if (window.PointerEvent) {
+      el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') begin(e); }, { passive: true });
+      el.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse') move(e); }, { passive: true });
+      el.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') finishTouch(e); }, { passive: false });
+      el.addEventListener('pointercancel', cancel, { passive: true });
+    } else {
+      el.addEventListener('touchstart', begin, { passive: true });
+      el.addEventListener('touchmove', move, { passive: true });
+      el.addEventListener('touchend', finishTouch, { passive: false });
+      el.addEventListener('touchcancel', cancel, { passive: true });
+    }
+    el.addEventListener('click', e => {
+      if (Date.now() < handledTouchUntil || Date.now() < suppressPanelSyntheticClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      fn(e);
+    });
   }
   function openPanel(panel) {
     if (isInCombat()) return;
@@ -915,14 +1266,32 @@ function escapeHtml(value) {
       artifact: showArtifactUI,
       alchemy: showAlchemyUI,
       breakthrough: showBreakthroughUI,
+      secretRealm: showSecretRealmUI,
+      stages: showStageSelectUI || showStageClearPanel,
+      tribulation: showTribulationUI,
+      ascension: showAscensionUI,
     }[panel];
-    closeAllPanels();
-    if (wasOpen) return;
+    closeAllPanels({ sync: false });
+    if (wasOpen) {
+      closeAllPanels({ sync: true });
+      return;
+    }
     if (panel === 'inventory') showInventory = true;
     if (panel === 'character') showCharacterPanel = true;
     if (panel === 'skills') showSkillTreeUI = true;
     if (panel === 'artifact') showArtifactUI = true;
     if (panel === 'alchemy') showAlchemyUI = true;
+    if (panel === 'secretRealm') showSecretRealmUI = true;
+    if (panel === 'stages') {
+      const selectedStage = (typeof STAGES !== 'undefined' && STAGES) ? STAGES[selectedStageId] : null;
+      showStageSelectUI = true;
+      stageTab = 'stages';
+      stageDetailOpen = false;
+      stageSweepOpen = false;
+      selectedStageChapterId = selectedStage?.chapterId || selectedStageChapterId;
+    }
+    if (panel === 'tribulation') showTribulationUI = true;
+    if (panel === 'ascension') showAscensionUI = true;
     if (panel === 'breakthrough') {
       openBreakthroughPanel();
       return;
@@ -1167,6 +1536,58 @@ function escapeHtml(value) {
        e.preventDefault();
        if (isInCombat() && combatState === COMBAT_STATE.PLAYER_TURN) playerFlee();
      });
+     const quickClearBtn = document.getElementById('btn-stage-quick-clear');
+     let quickClearLastTouchAt = 0;
+     const onQuickClear = e => {
+       e.preventDefault();
+       e.stopPropagation();
+       if (e.type === 'touchstart') quickClearLastTouchAt = Date.now();
+       if (e.type === 'click' && Date.now() - quickClearLastTouchAt < 700) return;
+       if (typeof quickClearStageRoom === 'function') quickClearStageRoom();
+     };
+     if (quickClearBtn) {
+       quickClearBtn.addEventListener('touchstart', onQuickClear, { passive: false });
+       quickClearBtn.addEventListener('click', onQuickClear);
+     }
+     const stageExitBtn = document.getElementById('btn-stage-exit');
+     let stageExitLastTouchAt = 0;
+     const onStageExit = e => {
+       e.preventDefault();
+       e.stopPropagation();
+       if (e.type === 'touchstart') stageExitLastTouchAt = Date.now();
+       if (e.type === 'click' && Date.now() - stageExitLastTouchAt < 700) return;
+       if (typeof onStageFlee === 'function' && isInStageRun && !isInCombat() && !isAnyPanelOpen()) onStageFlee();
+     };
+     if (stageExitBtn) {
+       stageExitBtn.addEventListener('touchstart', onStageExit, { passive: false });
+       stageExitBtn.addEventListener('click', onStageExit);
+     }
+     const secretQuickBtn = document.getElementById('btn-secret-quick-challenge');
+     let secretQuickLastTouchAt = 0;
+     const onSecretQuick = e => {
+       e.preventDefault();
+       e.stopPropagation();
+       if (e.type === 'touchstart') secretQuickLastTouchAt = Date.now();
+       if (e.type === 'click' && Date.now() - secretQuickLastTouchAt < 700) return;
+       if (typeof quickChallengeSecretRealm === 'function') quickChallengeSecretRealm();
+     };
+     if (secretQuickBtn) {
+       secretQuickBtn.addEventListener('touchstart', onSecretQuick, { passive: false });
+       secretQuickBtn.addEventListener('click', onSecretQuick);
+     }
+     const secretExitBtn = document.getElementById('btn-secret-exit');
+     let secretExitLastTouchAt = 0;
+     const onSecretExit = e => {
+       e.preventDefault();
+       e.stopPropagation();
+       if (e.type === 'touchstart') secretExitLastTouchAt = Date.now();
+       if (e.type === 'click' && Date.now() - secretExitLastTouchAt < 700) return;
+       if (typeof onSecretRealmFlee === 'function' && isInSecretRealm && !isInCombat() && !isAnyPanelOpen()) onSecretRealmFlee();
+     };
+     if (secretExitBtn) {
+       secretExitBtn.addEventListener('touchstart', onSecretExit, { passive: false });
+       secretExitBtn.addEventListener('click', onSecretExit);
+     }
    }
    function setupMenuButtons() {
      // Menu buttons — always active (touch + mouse click)
@@ -1175,14 +1596,18 @@ function escapeHtml(value) {
       if (!moreMenu) return;
       moreMenu.classList.remove('open');
       moreMenu.setAttribute('aria-hidden', 'true');
+      moreMenu.setAttribute('inert', '');
       syncMainNavState();
     }
     function toggleMoreMenu(e) {
       if (e) e.preventDefault();
+      if (e) e.stopPropagation();
+      if (Date.now() < suppressPanelSyntheticClickUntil) return;
       if (isInCombat() || isAnyPanelOpen() || !moreMenu) return;
       const open = !moreMenu.classList.contains('open');
       moreMenu.classList.toggle('open', open);
       moreMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+      moreMenu.toggleAttribute('inert', !open);
       syncMainNavState();
     }
     let menuLastTouchActionAt = 0;
@@ -1210,18 +1635,35 @@ function escapeHtml(value) {
     function onBag() { closeMoreMenu(); openPanel('inventory'); }
     function onCharacter() { closeMoreMenu(); openPanel('character'); }
     function onSkills() { closeMoreMenu(); openPanel('skills'); }
+    function onStages() { closeMoreMenu(); openPanel('stages'); }
     function onArtifact() { closeMoreMenu(); openPanel('artifact'); }
     function onAlchemy() { closeMoreMenu(); openPanel('alchemy'); }
     function onBreakthrough() { closeMoreMenu(); openPanel('breakthrough'); }
-    function onSave() { closeMoreMenu(); saveGame(); showMessage('💾 存档已保存！', '#88cc88'); }
+    function onSecretRealm() {
+      closeMoreMenu();
+      openPanel('secretRealm');
+    }
+    function onTribulation() {
+      closeMoreMenu();
+      openPanel('tribulation');
+    }
+    function onAscension() {
+      closeMoreMenu();
+      openPanel('ascension');
+    }
+    function onSave() { closeMoreMenu(); saveGame(); showMessage('💾 道基已封！存档一片安宁。', '#88cc88'); }
     bindTap(document.getElementById('btn-bag'), onBag);
     bindTap(document.getElementById('btn-character'), onCharacter);
     bindTap(document.getElementById('btn-skills'), onSkills);
+    bindTap(document.getElementById('btn-stages'), onStages);
     bindTap(document.getElementById('btn-more'), toggleMoreMenu);
     bindTap(document.getElementById('btn-artifact'), onArtifact);
     bindTap(document.getElementById('hud-artifact'), onArtifact);
     bindTap(document.getElementById('btn-alchemy'), onAlchemy);
     bindTap(document.getElementById('btn-break'), onBreakthrough);
+    bindTap(document.getElementById('btn-secret-realm'), onSecretRealm);
+    bindTap(document.getElementById('btn-tribulation'), onTribulation);
+    bindTap(document.getElementById('btn-ascension'), onAscension);
     bindTap(document.getElementById('btn-save'), onSave);
     document.addEventListener('click', e => {
       if (!moreMenu?.classList.contains('open')) return;
@@ -1382,8 +1824,108 @@ function escapeHtml(value) {
   canvas.addEventListener('click', handleClick);
   canvas.addEventListener('touchstart', handleClick, { passive: false });
 }
-function generateNewFloor() {
-     dungeon = generateDungeon(DUNGEON_WIDTH, DUNGEON_HEIGHT, MAX_DEPTH, dungeonLevel);
+function getActiveStage() {
+  return player?.stageProgress?.currentRun?.stageId ? STAGES?.[player.stageProgress.currentRun.stageId] : null;
+}
+function getStageLevel(stageId = null, roomIndex = null) {
+  const stage = stageId ? STAGES?.[stageId] : getActiveStage();
+  const idx = roomIndex ?? player?.stageProgress?.currentRun?.roomIndex ?? 0;
+  return Math.max(1, Number(stage?.level || dungeonLevel || 1) + Number(idx || 0));
+}
+function pickStageMonsterTemplate(stage, roomIndex) {
+  const level = getStageLevel(stage.id, roomIndex);
+  const biome = (typeof getStageTheme === 'function' ? getStageTheme(stage) : null) || (typeof getBiomeForLevel === 'function' ? getBiomeForLevel(level) : null);
+  const pool = biome?.monsters || MONSTERS;
+  const total = pool.reduce((s, m) => s + (m.weight || 1), 0);
+  let roll = Math.random() * total;
+  for (const mon of pool) { roll -= (mon.weight || 1); if (roll <= 0) return mon; }
+  return pool[0];
+}
+function spawnStageMonsters(dungeonObj, stage, roomIndex = 0) {
+  if (!dungeonObj || !stage) return;
+  const event = getStageRoomEvent(stage, roomIndex);
+  if (['treasure', 'rest', 'trap', 'fortune'].includes(event.type)) return;
+  const level = getStageLevel(stage.id, roomIndex);
+  const biome = dungeonObj.biome || (typeof getBiomeForLevel === 'function' ? getBiomeForLevel(level) : null);
+  const biomeMult = biome?.monsterMult || { hp: 1, atk: 1, def: 1, xp: 1, stones: 1 };
+  const rooms = dungeonObj.rooms || [];
+  const isBossRoom = event.type === 'boss';
+  if (isBossRoom && rooms.length > 1) {
+    const room = rooms[rooms.length - 1];
+    const bx = Math.floor(room.x + room.w / 2), by = Math.floor(room.y + room.h / 2);
+    const base = pickStageMonsterTemplate(stage, roomIndex) || MONSTERS[0];
+    const bossDef = stage.boss;
+    const boss = createScaledEnemy({ ...base, name: bossDef.name, title: bossDef.name, symbol: bossDef.symbol || '首', color: bossDef.color || stage.color, isBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null, skillIds: bossDef.skillIds || ['bossEnrage'], hp: Math.floor((base.hp || 40) * (bossDef.hpMult || 1.8)), atk: Math.floor((base.atk || 10) * (bossDef.atkMult || 1.3)), def: Math.floor((base.def || 3) * (bossDef.defMult || 1.15)), xp: Math.floor((base.xp || 20) * 3), stones: Math.floor((base.stones || 5) * 3) }, level, biomeMult, bx, by, { isBoss: true, isStageBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null });
+    dungeonObj._monsters.set(`${bx},${by}`, boss);
+    return;
+  }
+  const targetRooms = rooms.slice(1, -1).length ? rooms.slice(1, -1) : rooms.slice(1);
+  const count = Math.min(10, Math.max(3, 3 + roomIndex + Math.floor((stage.level || 1) / 4)));
+  const eliteRoom = targetRooms[Math.min(targetRooms.length - 1, Math.max(0, Math.floor(targetRooms.length / 2)))] || rooms[1];
+  if (eliteRoom && roomIndex >= Math.max(1, (stage.roomCount || 3) - 2)) {
+    const ex = Math.floor(eliteRoom.x + eliteRoom.w / 2), ey = Math.floor(eliteRoom.y + eliteRoom.h / 2);
+    const tmpl = pickStageMonsterTemplate(stage, roomIndex);
+    dungeonObj._monsters.set(`${ex},${ey}`, createScaledEnemy(tmpl, level, biomeMult, ex, ey, { isElite: true, eliteRewardMult: 2.0 }));
+  }
+  for (let i = 0; i < count; i++) {
+    const room = targetRooms[Math.floor(Math.random() * targetRooms.length)] || rooms[0];
+    if (!room) continue;
+    const mx = room.x + 1 + Math.floor(Math.random() * Math.max(1, room.w - 2));
+    const my = room.y + 1 + Math.floor(Math.random() * Math.max(1, room.h - 2));
+    if (dungeonObj.grid?.[my]?.[mx] !== TILE.FLOOR || dungeonObj._monsters.has(`${mx},${my}`)) continue;
+    dungeonObj._monsters.set(`${mx},${my}`, createScaledEnemy(pickStageMonsterTemplate(stage, roomIndex), level, biomeMult, mx, my));
+  }
+}
+function getDungeonStairsCell(dungeonObj = dungeon) {
+     if (!dungeonObj?.grid) return null;
+     for (let y = 0; y < dungeonObj.grid.length; y++) {
+       const row = dungeonObj.grid[y] || [];
+       for (let x = 0; x < row.length; x++) {
+         if (row[x] === TILE.STAIRS_DOWN) return { x, y };
+       }
+     }
+     return dungeonObj._stageExit || null;
+   }
+function countStageAliveMonsters(dungeonObj = dungeon) {
+     if (!dungeonObj?._monsters) return 0;
+     let count = 0;
+     for (const enemy of dungeonObj._monsters.values()) {
+       if (enemy && Number(enemy.hp || 0) > 0) count++;
+     }
+     return count;
+   }
+function setStageRoomExitLocked(dungeonObj = dungeon, locked = true) {
+     if (!dungeonObj?.grid) return;
+     const exit = dungeonObj._stageExit || getDungeonStairsCell(dungeonObj);
+     if (!exit || dungeonObj.grid?.[exit.y]?.[exit.x] === undefined) return;
+     dungeonObj._stageExit = { x: exit.x, y: exit.y };
+     dungeonObj.grid[exit.y][exit.x] = locked ? TILE.FLOOR : TILE.STAIRS_DOWN;
+     if (!locked) {
+       const key = `${exit.x},${exit.y}`;
+       discoveredMap.add(key);
+       visibleMap.add(key);
+     }
+     if (typeof resetDomMapCache === 'function') resetDomMapCache();
+   }
+function configureStageRoomExit(stage, roomIndex, dungeonObj = dungeon) {
+     if (!stage || !dungeonObj) return;
+     const event = getStageRoomEvent(stage, roomIndex);
+     const combatRoom = ['normal', 'elite', 'boss'].includes(event?.type);
+     const hasMonsters = countStageAliveMonsters(dungeonObj) > 0;
+     setStageRoomExitLocked(dungeonObj, combatRoom && hasMonsters);
+   }
+function revealStageRoomExitIfCleared(dungeonObj = dungeon) {
+     if (!dungeonObj || countStageAliveMonsters(dungeonObj) > 0) return false;
+     setStageRoomExitLocked(dungeonObj, false);
+     return true;
+   }
+function generateHomeMap(options = {}) {
+     if (typeof normalizeStageProgress === 'function') player.stageProgress = normalizeStageProgress(player.stageProgress);
+     if (player.stageProgress) player.stageProgress.currentRun = null;
+     isInStageRun = false;
+     stageRoomIndex = 0;
+     stageRoomCount = 0;
+     dungeon = generateDungeon(DUNGEON_WIDTH, DUNGEON_HEIGHT, MAX_DEPTH, 1);
      dungeon._monsters = new Map();
      dungeon._materials = [];
      dungeon._chests = [];
@@ -1391,15 +1933,43 @@ function generateNewFloor() {
      visibleMap = new Set();
      resetDomMapCache();
      window.dungeon = dungeon;
-     spawnMonsters(dungeon, dungeonLevel);
-     scatterMaterials(dungeon, dungeonLevel);
-     spawnTreasureChests(dungeon, dungeonLevel);
+     const r = dungeon.spawnRoom;
+     player.x = Math.floor(r.x + r.w / 2);
+     player.y = Math.floor(r.y + r.h / 2);
+     camera = { x: player.x * CELL_SIZE - canvasW / 2, y: player.y * CELL_SIZE - canvasH / 2 };
+     if (options.welcome) showMessage('点击底部「副本」选择关卡', '#d4a0ff', { ttl: 90, quiet: true });
+   }
+function generateNewFloor() {
+     const activeStage = getActiveStage();
+     const activeRoomIndex = player?.stageProgress?.currentRun?.roomIndex || 0;
+     if (activeStage) dungeonLevel = getStageLevel(activeStage.id, activeRoomIndex);
+     dungeon = generateDungeon(DUNGEON_WIDTH, DUNGEON_HEIGHT, MAX_DEPTH, dungeonLevel);
+     if (activeStage && typeof getStageTheme === 'function') dungeon.biome = getStageTheme(activeStage) || dungeon.biome;
+     dungeon._monsters = new Map();
+     dungeon._materials = [];
+     dungeon._chests = [];
+     discoveredMap = new Set();
+     visibleMap = new Set();
+     resetDomMapCache();
+     window.dungeon = dungeon;
+     if (activeStage) {
+       spawnStageMonsters(dungeon, activeStage, activeRoomIndex);
+       configureStageRoomExit(activeStage, activeRoomIndex, dungeon);
+     }
+     else spawnMonsters(dungeon, dungeonLevel);
+     if (!activeStage) {
+       scatterMaterials(dungeon, dungeonLevel);
+       spawnTreasureChests(dungeon, dungeonLevel);
+     }
      // Boss floor notification
-     if (isBossFloor(dungeonLevel)) {
+     if (!activeStage && isBossFloor(dungeonLevel)) {
        const boss = typeof getBossForLevel === 'function' ? getBossForLevel(dungeonLevel) : BOSSES.find(b => b.floor === dungeonLevel);
        if (boss) {
          showMessage(`⚠️ Boss层！${boss.name} 在此镇守！`, '#ff2200');
        }
+     } else if (activeStage) {
+       const event = getStageRoomEvent(activeStage, activeRoomIndex);
+       showMessage(`🗺️ ${activeStage.name} · ${getStageRoomLabel(activeStage, activeRoomIndex)}（${activeRoomIndex + 1}/${activeStage.roomCount}）${event.desc ? '：' + event.desc : ''}`, activeStage.color || '#d4a0ff');
      }
      // Place player at spawn room center
      const r = dungeon.spawnRoom;
@@ -1411,9 +1981,9 @@ function generateNewFloor() {
        y: player.y * CELL_SIZE - canvasH / 2,
      };
    }
-   function handleInput() {
-     if (isInCombat() || isAnyPanelOpen() || combatState === COMBAT_STATE.DEFEAT) return;
-     let dx = 0, dy = 0;
+  function handleInput() {
+    if (isInCombat() || isAnyPanelOpen() || combatState === COMBAT_STATE.DEFEAT) return;
+    let dx = 0, dy = 0;
      // Keyboard input
      if (keys['ArrowUp'] || keys['w']) dy = -1;
      if (keys['ArrowDown'] || keys['s']) dy = 1;
@@ -1455,10 +2025,11 @@ function generateNewFloor() {
        if (canSlideY) newY = player.y + stepY; else newY = player.y;
        if (!canSlideX && !canSlideY) return;
      }
-     player.prevX = player.x;
-     player.prevY = player.y;
-     player.x = newX;
-     player.y = newY;
+    player.prevX = player.x;
+    player.prevY = player.y;
+    player.x = newX;
+    player.y = newY;
+    if (isInStageRun && player?.stageProgress?.currentRun) player.stageProgress.currentRun.turns = Number(player.stageProgress.currentRun.turns || 0) + 1;
      // Snap to cell center when idle
      const snapThreshold = 0.07;
      if (Math.abs(dx) < 0.01 && Math.abs(player.x - Math.round(player.x)) < snapThreshold) {
@@ -1565,6 +2136,7 @@ function generateNewFloor() {
        const item = generateEquipment(Math.max(1, rewardLevel + 1));
        if (item) {
          player.inventory.push(item);
+         invalidateInventoryListCacheDom();
          msgParts.push(`🎁${item.name}`);
        }
      }
@@ -1675,9 +2247,12 @@ function generateNewFloor() {
      if (tile === TILE.STAIRS_DOWN) inner += '<b class="tile-stairs-icon">▽</b>';
      else if (type === 'treasure' && (x + y) % 9 === 0) inner += '<b class="tile-deco deco-treasure">✦</b>';
      else if (type === 'boss' && (x * 3 + y) % 10 === 0) inner += '<b class="tile-deco deco-boss">◆</b>';
-     else if (biome?.id === 'jungle' && (x * 5 + y) % 13 === 0) inner += '<b class="tile-deco deco-jungle">⌁</b>';
+     else if (biome?.decor === 'thunder' && (x * 7 + y) % 11 === 0) inner += '<b class="tile-deco deco-snow">ϟ</b>';
+     else if (biome?.decor === 'cloud' && (x * 5 + y) % 12 === 0) inner += '<b class="tile-deco deco-snow">☁</b>';
+     else if (biome?.decor === 'void' && (x * 3 + y) % 13 === 0) inner += '<b class="tile-deco deco-snow">✧</b>';
+     else if ((biome?.decor === 'vine' || biome?.id === 'jungle') && (x * 5 + y) % 13 === 0) inner += '<b class="tile-deco deco-jungle">⌁</b>';
      else if (biome?.id === 'snow' && (x * 7 + y) % 10 === 0) inner += '<b class="tile-deco deco-snow">✧</b>';
-     else if (biome?.id === 'lava' && (x + y * 2) % 9 === 0) inner += '<i class="tile-lava-crack"></i>';
+     else if ((biome?.decor === 'blood' || biome?.id === 'lava') && (x + y * 2) % 9 === 0) inner += '<i class="tile-lava-crack"></i>';
      return `<div class="map-tile ${floorCls} ${fog}" style="transform:translate3d(${left}px,${top}px,0)">${inner}</div>`;
    }
 
@@ -1744,8 +2319,11 @@ function generateNewFloor() {
          if (!visibleMap.has(key)) continue;
          const [mx, my] = key.split(',').map(Number);
          if (mx < startCol || mx >= endCol || my < startRow || my >= endRow) continue;
-         const mobCls = mon.isBoss ? ' boss' : (mon.isElite ? ' elite' : '');
-         parts.push(`<div class="map-monster${mobCls}" style="--mob-color:${escapeHtml(mon.color || '#c05060')};transform:translate3d(${mx * CELL_SIZE}px,${my * CELL_SIZE}px,0)"><span>${escapeHtml(mon.symbol || '妖')}</span></div>`);
+        const dist = Math.hypot(mx - px, my - py);
+        const reveal = dist > 6 ? ' far' : (dist > 4 ? ' dim' : (dist > 2.5 ? ' near' : ' close'));
+        const mobCls = mon.isBoss ? ' boss' : (mon.isElite ? ' elite' : '');
+        const label = dist <= 4 || mon.isBoss || mon.isElite ? escapeHtml(mon.symbol || '妖') : '';
+        parts.push(`<div class="map-monster${mobCls}${reveal}" style="--mob-color:${escapeHtml(mon.color || '#45525d')};transform:translate3d(${mx * CELL_SIZE}px,${my * CELL_SIZE}px,0)"><span>${label}</span></div>`);
        }
      }
      parts.push(`<div id="map-player"><i class="map-player-glow"></i><i class="map-player-body"></i><i class="map-player-head"></i><i class="map-player-eyes"><b></b><b></b></i></div>`);
@@ -1772,9 +2350,10 @@ function generateNewFloor() {
      if (dungeon._monsters) {
        let nearest = null;
        for (const [key, mon] of dungeon._monsters.entries()) {
-         if (!visibleMap.has(key)) continue;
-         const [x, y] = key.split(',').map(Number);
-         const dist = Math.hypot(x - px, y - py);
+        if (!visibleMap.has(key)) continue;
+        const [x, y] = key.split(',').map(Number);
+        const dist = Math.hypot(x - px, y - py);
+        if (!mon.isBoss && !mon.isElite && dist > 4.5) continue;
          const label = mon.isBoss ? 'Boss' : (mon.isElite ? '精英' : '妖物');
          const cls = mon.isBoss ? 'boss' : (mon.isElite ? 'elite' : 'mob');
          if (!nearest || dist < nearest.dist) nearest = { x, y, dist, label, cls };
@@ -1813,9 +2392,11 @@ function generateNewFloor() {
      }
      if (dungeon._monsters) {
        for (const [key, mon] of dungeon._monsters.entries()) {
-         if (!visibleMap.has(key)) continue;
-         const [mx, my] = key.split(',').map(Number);
-         cells.push(`<b class="${mon.isBoss ? 'mm-bossmark' : 'mm-mobmark'}" style="left:${mx * scale - 1}px;top:${my * scale - 1}px;width:${scale + 2}px;height:${scale + 2}px"></b>`);
+        if (!visibleMap.has(key)) continue;
+        const [mx, my] = key.split(',').map(Number);
+        const dist = Math.hypot(mx - px, my - py);
+        if (!mon.isBoss && !mon.isElite && dist > 6) continue;
+        cells.push(`<b class="${mon.isBoss ? 'mm-bossmark' : 'mm-mobmark'}" style="left:${mx * scale - 1}px;top:${my * scale - 1}px;width:${scale + 2}px;height:${scale + 2}px"></b>`);
        }
      }
      cells.push(`<em class="mm-player" style="left:${px * scale - 2}px;top:${py * scale - 2}px;width:${scale + 4}px;height:${scale + 4}px"></em>`);
@@ -1868,15 +2449,15 @@ function generateNewFloor() {
      ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
      const tint = roomTint(type);
      if (tint) { ctx.fillStyle = tint; ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE); }
-     ctx.fillStyle = 'rgba(255,255,255,0.07)';
+     ctx.fillStyle = 'rgba(255,255,255,0.045)';
      ctx.fillRect(sx + 1, sy + 1, CELL_SIZE - 2, 1);
-     ctx.fillStyle = 'rgba(0,0,0,0.12)';
+     ctx.fillStyle = 'rgba(0,0,0,0.075)';
      ctx.fillRect(sx + 1, sy + CELL_SIZE - 3, CELL_SIZE - 2, 2);
      ctx.strokeStyle = biome.border || 'rgba(245,225,255,0.12)';
      ctx.strokeRect(sx + 0.5, sy + 0.5, CELL_SIZE - 1, CELL_SIZE - 1);
      drawRoomEdge(sx, sy, x, y, type);
      if ((x + y * 3) % 11 === 0) {
-       ctx.fillStyle = biome.speck || 'rgba(255,255,255,0.25)';
+       ctx.fillStyle = biome.speck || 'rgba(255,255,255,0.20)';
        ctx.fillRect(sx + 3, sy + 3, 2, 2);
      }
      if (type === 'treasure' && (x + y) % 9 === 0) {
@@ -1886,14 +2467,20 @@ function generateNewFloor() {
        ctx.fillStyle = 'rgba(220,90,255,0.42)';
        ctx.fillText('◆', sx + 4, sy + CELL_SIZE - 5);
      }
-     if (biome.id === 'jungle' && (x * 5 + y) % 13 === 0) {
+     if ((biome.decor === 'vine' || biome.id === 'jungle') && (x * 5 + y) % 13 === 0) {
        ctx.fillStyle = 'rgba(40,120,35,0.55)';
        ctx.fillText('⌁', sx + 3, sy + CELL_SIZE - 4);
-     } else if (biome.id === 'lava' && (x + y * 2) % 9 === 0) {
+     } else if ((biome.decor === 'blood' || biome.id === 'lava') && (x + y * 2) % 9 === 0) {
        ctx.fillStyle = 'rgba(255,110,20,0.45)';
        ctx.fillRect(sx + 2, sy + CELL_SIZE - 5, CELL_SIZE - 4, 2);
-     } else if (biome.id === 'snow' && (x * 7 + y) % 10 === 0) {
-       ctx.fillStyle = 'rgba(235,250,255,0.45)';
+     } else if (biome.decor === 'thunder' && (x * 7 + y) % 11 === 0) {
+       ctx.fillStyle = 'rgba(255,240,80,0.55)';
+       ctx.fillText('ϟ', sx + CELL_SIZE - 9, sy + 9);
+     } else if (biome.decor === 'cloud' && (x * 5 + y) % 12 === 0) {
+       ctx.fillStyle = 'rgba(255,255,255,0.45)';
+       ctx.fillText('☁', sx + 2, sy + CELL_SIZE - 5);
+     } else if ((biome.decor === 'void' || biome.id === 'snow') && (x * 7 + y) % 10 === 0) {
+       ctx.fillStyle = 'rgba(235,250,255,0.30)';
        ctx.fillText('✧', sx + CELL_SIZE - 9, sy + 8);
      }
    }
@@ -1929,7 +2516,7 @@ function generateNewFloor() {
            const alt = ((x * 11 + y * 7) % 5) < 2;
            ctx.fillStyle = alt ? (biome.wall || '#514065') : (biome.wall2 || '#342a45');
            ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
-           ctx.fillStyle = 'rgba(255,255,255,0.07)';
+           ctx.fillStyle = 'rgba(255,255,255,0.045)';
            ctx.fillRect(sx + 1, sy + 1, CELL_SIZE - 2, 2);
            ctx.fillStyle = 'rgba(0,0,0,0.18)';
            ctx.fillRect(sx + 1, sy + CELL_SIZE - 4, CELL_SIZE - 2, 3);
@@ -2276,6 +2863,20 @@ function generateNewFloor() {
         showCharacterDetailPopupDom();
       });
     });
+    p.querySelectorAll('[data-equip-title]').forEach(btn => {
+      // 称号卡片位于可滚动列表内：使用移动阈值 tap 绑定，避免 touchstart preventDefault 抢走纵向滑动。
+      bindInventoryTapDom(btn, () => {
+        const titleId = btn.dataset.equipTitle;
+        player.titles = typeof normalizeTitleState === 'function' ? normalizeTitleState(player.titles) : (player.titles || { unlocked: {}, equipped: null });
+        if (!player.titles.unlocked?.[titleId]) return;
+        player.titles.equipped = player.titles.equipped === titleId ? null : titleId;
+        if (typeof player.recalcStats === 'function') player.recalcStats();
+        autoSave();
+        characterPanelLastHtml = '';
+        renderCharacterDomPanel();
+        showMessage(player.titles.equipped ? `🏷️ 已佩戴称号：${PLAYER_TITLES[titleId]?.name || '称号'}` : '已卸下称号', '#ffd36e');
+      });
+    });
   }
   function formatCharStatValue(v, suffix = '') {
     const n = Number(v || 0);
@@ -2284,14 +2885,31 @@ function generateNewFloor() {
   }
   function getCharacterStatMeta(key) {
     const meta = {
-      atk: ['攻击', ''], def: ['防御', ''], hp: ['生命', ''], maxHp: ['生命上限', ''],
-      mp: ['灵力', ''], maxMp: ['灵力上限', ''], speed: ['速度', ''],
+      atk: ['攻击', ''], def: ['防御', ''], hp: ['生命', ''], maxHp: ['生命上限', ''], maxHpPct: ['生命上限', '%'],
+      atkPct: ['攻击', '%'], defPct: ['防御', '%'], mp: ['灵力', ''], maxMp: ['灵力上限', ''], maxMpPct: ['灵力上限', '%'], speed: ['速度', ''],
       crit: ['暴击', '%'], critRate: ['暴击', '%'], dodge: ['闪避', '%'], dodgeRate: ['闪避', '%'],
       fireDmg: ['火焰伤害', ''], iceDmg: ['寒冰伤害', ''], poisonDmg: ['毒素伤害', ''], lightningDmg: ['雷电伤害', ''],
       lifesteal: ['吸血', '%'], armorPen: ['破甲', ''], goldFind: ['灵石获取', '%'], xpBonus: ['经验获取', '%'],
       hpRegen: ['生命恢复', ''], mpRegen: ['灵力恢复', ''], allRes: ['全元素抗性', ''],
     };
     return meta[key] || [STAT_NAMES[key] || key, ''];
+  }
+  function getTitleRowsDom() {
+    if (typeof PLAYER_TITLES === 'undefined') return '<span class="muted">暂无称号</span>';
+    player.titles = typeof normalizeTitleState === 'function' ? normalizeTitleState(player.titles) : (player.titles || { unlocked: {}, equipped: null });
+    const rows = Object.values(PLAYER_TITLES).map(title => {
+      const unlocked = !!player.titles.unlocked?.[title.id];
+      const equipped = player.titles.equipped === title.id;
+      const stats = Object.entries(title.stats || {}).map(([k, v]) => {
+        const [label, suffix] = getCharacterStatMeta(k);
+        const value = String(k).endsWith('Pct') ? Math.round(Number(v || 0) * 100) : Number(v || 0);
+        return `${label}${formatCharStatValue(value, suffix || (String(k).endsWith('Pct') ? '%' : ''))}`;
+      }).join('、');
+      return `<button class="title-card ${unlocked ? 'unlocked' : 'locked'} ${equipped ? 'equipped' : ''}" type="button" ${unlocked ? `data-equip-title="${escapeHtml(title.id)}"` : ''} style="--title-color:${escapeHtml(title.color || '#d4a0ff')}">
+        <b>${escapeHtml(title.icon || '🏷️')} ${escapeHtml(title.name)}</b><small>${unlocked ? (equipped ? '佩戴中' : '点击佩戴') : '未解锁'}</small><span>${escapeHtml(stats || title.desc || '')}</span>
+      </button>`;
+    }).join('');
+    return `<div class="title-grid">${rows}</div>`;
   }
   function getEquipmentBonusRows() {
     const totals = {};
@@ -2351,12 +2969,13 @@ function generateNewFloor() {
       </button>`;
     }).join('');
     const detailItem = characterDetailDom()?.item || null;
-    const tabKeys = ['equipment', 'attributes', 'bonus', 'sets'];
+    const equippedTitle = typeof getEquippedTitle === 'function' ? getEquippedTitle(player) : null;
+    const tabKeys = ['equipment', 'attributes', 'bonus', 'sets', 'titles'];
     if (!tabKeys.includes(characterTab)) characterTab = 'attributes';
     const equipmentPanel = `<section class="char-tab-panel char-equipment-section top-equipment" data-char-tab-panel="equipment"><h3>当前装备 <small>点击已装备槽位，直接弹出详情卡片</small></h3><div class="char-equip-grid">${slots}</div></section>`;
     const attributesPanel = `<section class="char-tab-panel" data-char-tab-panel="attributes">
       <div class="char-section char-realm">
-        <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">第 ${dungeonLevel} 层 · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
+        <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">${equippedTitle ? `${equippedTitle.icon} ${equippedTitle.name}` : '未佩戴称号'} · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
         <div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div>
       </div>
       <div class="char-stats-grid">
@@ -2373,14 +2992,16 @@ function generateNewFloor() {
     </section>`;
     const bonusPanel = `<section class="char-tab-panel" data-char-tab-panel="bonus"><div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div></section>`;
     const setsPanel = `<section class="char-tab-panel" data-char-tab-panel="sets"><div class="char-section"><h3>套装效果</h3><div class="char-set-list">${getEquipmentSetRowsDom()}</div></div></section>`;
+    const titlesPanel = `<section class="char-tab-panel" data-char-tab-panel="titles"><div class="char-section"><h3>称号 <small>章节全通后解锁，可佩戴一个</small></h3>${getTitleRowsDom()}</div></section>`;
     const html = `
-      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 加成 · 套装</div></div><button class="char-close">×</button></div>
-      <div class="char-tabs" role="tablist"><button class="char-tab" type="button" data-char-tab="equipment">装备</button><button class="char-tab" type="button" data-char-tab="attributes">属性</button><button class="char-tab" type="button" data-char-tab="bonus">加成</button><button class="char-tab" type="button" data-char-tab="sets">套装</button></div>
+      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 加成 · 套装 · 称号</div></div><button class="char-close">×</button></div>
+      <div class="char-tabs" role="tablist"><button class="char-tab" type="button" data-char-tab="equipment">装备</button><button class="char-tab" type="button" data-char-tab="attributes">属性</button><button class="char-tab" type="button" data-char-tab="bonus">加成</button><button class="char-tab" type="button" data-char-tab="sets">套装</button><button class="char-tab" type="button" data-char-tab="titles">称号</button></div>
       <div class="char-body" data-active-char-tab="${escapeHtml(characterTab)}">
         ${equipmentPanel}
         ${attributesPanel}
         ${bonusPanel}
         ${setsPanel}
+        ${titlesPanel}
       </div>`;
     if (html !== characterPanelLastHtml) {
       const body = p.querySelector('.char-body');
@@ -2549,26 +3170,43 @@ function generateNewFloor() {
   }
 
   // ─── DOM HD: Skills Panel ───
+  function closeSkillsPanelDom(e) {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    showSkillTreeUI = false;
+    selectedSkillTreeNode = null;
+    skillDetailModalOpen = false;
+    const layer = document.getElementById('skill-detail-layer');
+    if (layer) layer.innerHTML = '';
+    syncBodyPanelState();
+  }
+  function closeSkillDetailModalDom(e) {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+    skillDetailModalOpen = false;
+    renderSkillsDomPanel();
+  }
   function ensureSkillsDomPanel() {
     let p = document.getElementById('skills-dom-panel');
     if (p) return p;
     p = document.createElement('div');
     p.id = 'skills-dom-panel';
     p.addEventListener('click', e => {
-      if (e.target.closest('.pclose')) {
-        showSkillTreeUI = false;
-        selectedSkillTreeNode = null;
-        skillDetailModalOpen = false;
-        const layer = document.getElementById('skill-detail-layer');
-        if (layer) layer.innerHTML = '';
-        syncBodyPanelState();
-      }
+      if (e.target.closest('.pclose')) closeSkillsPanelDom(e);
     });
     p.addEventListener('touchstart', e => {
-      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn, .pclose')) {
+      if (e.target.closest('.pclose')) {
+        closeSkillsPanelDom(e);
+        return;
+      }
+      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn')) {
         e.stopPropagation();
       }
-    }, { passive: true });
+    }, { passive: false });
     document.body.appendChild(p);
     return p;
   }
@@ -2700,12 +3338,12 @@ function generateNewFloor() {
         </div>
         <div class="skill-value-grid">${skillValueChipsHtmlDom(selectedSkill, currentEnemy)}</div>
         <div class="skill-action-row">
-          <button class="skill-learn-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 点技能点学习' : '暂不可学习'}</button>
-          <button class="skill-forget-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并返还 1 点' : '有后续技能，不能遗忘') : '未学习'}</button>
+          <button class="skill-learn-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canLearn ? '' : 'disabled'}>${selectedState.learned ? '已点亮' : selectedState.canLearn ? '消耗 1 悟道点领悟' : '暂不可学习'}</button>
+          <button class="skill-forget-btn" data-tree="${escapeHtml(selectedTree)}" data-index="${selectedIndex}" ${selectedState.canForget ? '' : 'disabled'}>${selectedState.learned ? (selectedState.canForget ? '遗忘并归还悟道点' : '具有后续技能，不能遗忘') : '未学习'}</button>
         </div>`;
     let html = `<div class="panel-head skill-panel-head">
       <span class="ptitle" style="color:#d4a0ff">📜 星盘技能树</span>
-      <span class="psub">技能点 ${availableSkillPoints} · 已悟 ${learnedCount}/${totalCount}</span>
+      <span class="psub">悟道点 ${availableSkillPoints} · 已悟 ${learnedCount}/${totalCount}</span>
       <button class="pclose">×</button>
     </div>
     <div class="panel-body skills-panel-body">
@@ -2745,11 +3383,14 @@ function generateNewFloor() {
         ${detailHtml}
       </aside>
       <div class="attr-bar skill-attr-bar">
-        <span class="attr-title">属性加点</span>`;
+        <span class="attr-title">悟道加点</span>`;
     const attrBtns = [['atk','攻+3','#ff6644'],['def','防+2','#4488ff'],['hp','命+20','#55ff55'],['mp','灵+10','#aaddff']];
-    for (const [k,label,clr] of attrBtns) {
+    const attrValues = [`⚔️${player.atk}`,`🛡️${player.def}`,`❤️${player.maxHp}`,`✨${player.maxMp}`];
+    for (let i = 0; i < attrBtns.length; i++) {
+      const [k,label,clr] = attrBtns[i];
+      const valText = attrValues[i];
       const dis = availableSkillPoints <= 0 ? ' disabled' : '';
-      html += `<button class="attr-btn${dis}" data-attr="${k}" style="--attr-color:${safeCssColor(clr)};border-color:${safeCssColor(clr)};color:${safeCssColor(clr)}">${escapeHtml(label)}</button>`;
+      html += `<button class="attr-btn${dis}" data-attr="${k}" style="--attr-color:${safeCssColor(clr)};border-color:${safeCssColor(clr)};color:${safeCssColor(clr)}">${escapeHtml(label)} <small>${escapeHtml(valText)}</small></button>`;
     }
     html += `</div></div>`;
     p.innerHTML = html;
@@ -2758,15 +3399,16 @@ function generateNewFloor() {
         <button class="skill-modal-close" aria-label="关闭技能详情">×</button>
         ${detailHtml}
       </aside></div>` : '';
-    // Click backdrop or close button to dismiss modal
+    // Click backdrop or close button to dismiss modal. Do not use once:true here:
+    // tapping learn/forget inside the modal bubbles to the backdrop after re-render on mobile,
+    // which would consume the one-shot listener and make the next ❌ appear dead.
     const backdropEl = detailLayer.querySelector('.skill-modal-backdrop');
     if (backdropEl) {
-      backdropEl.addEventListener('click', e => {
-        if (e.target === backdropEl || e.target.closest('.skill-modal-close')) {
-          skillDetailModalOpen = false;
-          renderSkillsDomPanel();
-        }
-      }, { once: true });
+      const onModalCloseIntent = e => {
+        if (e.target === backdropEl || e.target.closest('.skill-modal-close')) closeSkillDetailModalDom(e);
+      };
+      backdropEl.addEventListener('click', onModalCloseIntent);
+      backdropEl.addEventListener('touchstart', onModalCloseIntent, { passive: false });
     }
     p.querySelectorAll('.skill-node').forEach(el => {
       const openSkillDetail = () => {
@@ -2778,10 +3420,12 @@ function generateNewFloor() {
       bindInventoryTapDom(el, openSkillDetail);
     });
     document.querySelectorAll('#skills-dom-panel .skill-learn-btn:not([disabled]), #skill-detail-layer .skill-learn-btn:not([disabled])').forEach(el => {
-      const fn = () => {
+      const fn = e => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
         const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
         if (learnSkill(t, idx)) {
-          showMessage(`习得技能: 【${SKILL_TREES[t].skills[idx].name}】！`, '#ffdd44');
+          showMessage(`✨ 领悟技能: 【${SKILL_TREES[t].skills[idx].name}】！道法渐明。`, '#ffdd44');
           selectedSkillTreeNode = { tree: t, index: idx };
           skillDetailModalOpen = true;
           renderSkillsDomPanel();
@@ -2790,10 +3434,12 @@ function generateNewFloor() {
       bindInventoryTapDom(el, fn);
     });
     document.querySelectorAll('#skills-dom-panel .skill-forget-btn:not([disabled]), #skill-detail-layer .skill-forget-btn:not([disabled])').forEach(el => {
-      const fn = () => {
+      const fn = e => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
         const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
         if (typeof unlearnSkill === 'function' && unlearnSkill(t, idx)) {
-          showMessage(`遗忘技能: 【${SKILL_TREES[t].skills[idx].name}】，返还 1 点技能点`, '#aaddff');
+          showMessage(`化道归虚: 【${SKILL_TREES[t].skills[idx].name}】，悟道点已归还`, '#aaddff');
           selectedSkillTreeNode = { tree: t, index: idx };
           skillDetailModalOpen = true;
           renderSkillsDomPanel();
@@ -2805,6 +3451,10 @@ function generateNewFloor() {
       const fn = () => { allocateAttr(el.dataset.attr); renderSkillsDomPanel(); };
       bindInventoryTapDom(el, fn);
     });
+    // ── Scroll reset: ensure panel body starts at top when opened ──
+    const panelBody = p.querySelector('.panel-body, .skills-panel-body');
+    if (panelBody) panelBody.scrollTop = 0;
+    p.scrollTop = 0;
   }
 
   function ensureAlchemyDomPanel() {
@@ -2874,61 +3524,210 @@ function generateNewFloor() {
     }
     return Object.entries(stats).map(([k, v]) => `<span><em>${escapeHtml(statLabelDom(k))}</em><b>${escapeHtml(formatStatValueDom(k, v))}</b></span>`).join('');
   }
+  function artifactShortNameDom(artifact) {
+    return String(artifact?.name || '').replace(/[神器印镜壶塔剑]+$/g, '') || artifact?.name || '神器';
+  }
+  function artifactMaterialMetaDom(id) {
+    return (typeof ARTIFACT_MATERIALS !== 'undefined' ? ARTIFACT_MATERIALS : []).find(m => m.id === id)
+      || (typeof MATERIALS !== 'undefined' ? MATERIALS : []).find(m => m.id === id)
+      || { id, name: id, color: '#d4c8b0' };
+  }
+  function artifactCostHtmlDom(cost) {
+    if (!cost) return '<div class="artifact-cost muted">已达当前最高阶</div>';
+    const stoneNeed = Number(cost.spiritStones || 0);
+    const stoneOwn = Number(player?.spiritStones || 0);
+    const stoneClass = stoneOwn < stoneNeed ? ' lack' : '';
+    const mats = Object.entries(cost.materials || {}).map(([id, need]) => {
+      const mat = artifactMaterialMetaDom(id);
+      const own = Number(playerMaterials?.[id] || 0);
+      const lack = own < Number(need || 0) ? ' lack' : '';
+      return `<span class="mat-cost${lack}" style="--mat-color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} ${escapeHtml(own)}/${escapeHtml(need)}</span>`;
+    }).join('');
+    return `<div class="artifact-cost"><b>升阶消耗</b><span class="mat-cost${stoneClass}">灵石 ${escapeHtml(stoneOwn)}/${escapeHtml(stoneNeed)}</span>${mats}</div>`;
+  }
+  function artifactAwakeningCheckDom(artifact, progress, cost) {
+    if (!artifact || !progress) return { ok: false, label: '未获得', reason: 'not_owned' };
+    if (progress.awakened) return { ok: false, label: '已觉醒', reason: 'awakened' };
+    if (Number(progress.level || 0) < Number(artifact.maxLevel || 12)) return { ok: false, label: '满级后可觉醒', reason: 'level_cap' };
+    if (!cost) return { ok: false, label: '暂不可觉醒', reason: 'no_cost' };
+    if (Number(player?.spiritStones || 0) < Number(cost.spiritStones || 0)) return { ok: false, label: '灵石不足', reason: 'stones' };
+    for (const [id, need] of Object.entries(cost.materials || {})) {
+      if (Number(playerMaterials?.[id] || 0) < Number(need || 0)) return { ok: false, label: '材料不足', reason: 'materials', missing: id };
+    }
+    return { ok: true, label: '觉醒', reason: 'ready' };
+  }
+  function artifactAwakeningCardHtmlDom(artifact, progress, cost) {
+    if (!artifact || !progress) return '';
+    const check = artifactAwakeningCheckDom(artifact, progress, cost);
+    const copy = typeof ARTIFACT_AWAKENING_COPY !== 'undefined' ? ARTIFACT_AWAKENING_COPY?.[artifact.id] : null;
+    if (progress.awakened) {
+      return `<section class="artifact-awakening-card done"><b>神器觉醒</b><p>${escapeHtml(progress.awakenName || copy?.name || '神器已觉醒')} · 终极效果已生效。</p></section>`;
+    }
+    if (check.reason === 'level_cap') {
+      return `<section class="artifact-awakening-card blocked"><b>神器觉醒</b><p>满级后可觉醒：当前 Lv.${escapeHtml(progress.level || 1)}/${escapeHtml(artifact.maxLevel || 12)}。</p></section>`;
+    }
+    const stoneNeed = Number(cost?.spiritStones || 0);
+    const stoneOwn = Number(player?.spiritStones || 0);
+    const stoneClass = stoneOwn < stoneNeed ? ' lack' : '';
+    const mats = Object.entries(cost?.materials || {}).map(([id, need]) => {
+      const mat = artifactMaterialMetaDom(id);
+      const own = Number(playerMaterials?.[id] || 0);
+      const lack = own < Number(need || 0) ? ' lack' : '';
+      return `<span class="mat-cost${lack}" style="--mat-color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} ${escapeHtml(own)}/${escapeHtml(need)}</span>`;
+    }).join('');
+    const effectText = copy ? `${copy.name} · ${copy.effectKey} +${copy.value}` : '解锁终极觉醒效果';
+    return `<section class="artifact-awakening-card ${check.ok ? 'ready' : 'blocked'}"><b>神器觉醒</b><p>${escapeHtml(effectText)}</p><div class="artifact-cost awakening"><b>觉醒消耗</b><span class="mat-cost${stoneClass}">灵石 ${escapeHtml(stoneOwn)}/${escapeHtml(stoneNeed)}</span>${mats}</div></section>`;
+  }
+  function artifactEffectTextDom(artifact, progress = {}) {
+    const effects = artifact?.effects || {};
+    const awakened = !!progress?.awakened;
+    const parts = [];
+    if (effects.swordQiChance) parts.push(`剑气 ${effects.swordQiChance}% · 追加${Math.round(Number(effects.swordQiRatio || 0) * 100)}%伤害`);
+    if (effects.deathSave) parts.push(`濒死护体 · 每层保命${effects.deathSave}次`);
+    if (effects.killRecoverPct) parts.push(`击杀恢复 ${Math.round(Number(effects.killRecoverPct || 0) * 100)}%生命`);
+    if (effects.treasureEchoChance) parts.push(`机缘回响 ${effects.treasureEchoChance}%`);
+    if (effects.thunderSealChain) parts.push(`雷印连锁 ${effects.thunderSealChain}%`);
+    if (!parts.length) parts.push('战斗中触发神器被动效果');
+    if (awakened) parts.push('已觉醒');
+    return parts.join(' · ');
+  }
+  function artifactTagsHtmlDom(artifact) {
+    const tags = Array.isArray(artifact?.tags) ? artifact.tags : [];
+    return tags.map(tag => `<span class="artifact-tag">${escapeHtml(tag)}</span>`).join('');
+  }
+  function artifactNextGainHtmlDom(artifact, progress) {
+    if (!artifact || !progress) return '';
+    const level = Number(progress.level || 1);
+    if (level >= Number(artifact.maxLevel || 0)) return '<span class="artifact-next-muted">已达神器最高等级</span>';
+    return Object.entries(artifact.perLevelStats || {}).map(([k, v]) => `<span><em>${escapeHtml(statLabelDom(k))}</em><b>${escapeHtml(formatStatValueDom(k, v))}</b></span>`).join('') || '<span class="artifact-next-muted">下阶提升神器效果</span>';
+  }
+  function artifactMissingEntriesDom(cost) {
+    const missing = [];
+    if (!cost) return missing;
+    const stoneNeed = Number(cost.spiritStones || 0);
+    const stoneOwn = Number(player?.spiritStones || 0);
+    if (stoneOwn < stoneNeed) missing.push({ id: 'spiritStones', name: '灵石', color: '#8fd3ff', own: stoneOwn, need: stoneNeed, source: '副本 / 扫荡 / 宝箱' });
+    for (const [id, needRaw] of Object.entries(cost.materials || {})) {
+      const need = Number(needRaw || 0);
+      const own = Number(playerMaterials?.[id] || 0);
+      if (own >= need) continue;
+      const mat = artifactMaterialMetaDom(id);
+      missing.push({ id, name: mat.name || id, color: mat.color || '#d4c8b0', own, need, source: mat.source || '精英怪 / Boss / 秘境' });
+    }
+    return missing;
+  }
+  function artifactNextGoalHtmlDom(artifact, progress, cost, realmCap) {
+    if (!artifact) return '';
+    if (!progress) {
+      const shard = artifactMaterialMetaDom(artifactShardId(artifact.id));
+      return `<section class="artifact-next-card"><b>下一步</b><p>激活 ${escapeHtml(artifact.name)} 后开启升阶养成。</p><div class="artifact-source-list"><span style="--mat-color:${safeCssColor(shard.color, '#d4c8b0')}"><em>${escapeHtml(shard.name)}</em><strong>${escapeHtml(shard.source || '精英怪 / Boss / 神器秘境')}</strong></span></div></section>`;
+    }
+    const level = Number(progress.level || 1);
+    if (level >= Number(artifact.maxLevel || 0)) return `<section class="artifact-next-card done"><b>下一步</b><p>已达当前神器最高等级。</p></section>`;
+    if (level >= Number(realmCap || 0)) return `<section class="artifact-next-card blocked"><b>下一步</b><p>升至 Lv.${escapeHtml(level + 1)} 需要更高境界，当前上限 Lv.${escapeHtml(realmCap)}。</p></section>`;
+    const missing = artifactMissingEntriesDom(cost);
+    const missingHtml = missing.length
+      ? `<div class="artifact-missing"><em>缺少</em>${missing.map(m => `<span style="--mat-color:${safeCssColor(m.color, '#d4c8b0')}">${escapeHtml(m.name)} ${escapeHtml(m.own)}/${escapeHtml(m.need)}</span>`).join('')}</div>`
+      : '<div class="artifact-missing ready"><em>材料已齐</em><span>可以升阶</span></div>';
+    const sourceItems = (missing.length ? missing : Object.entries(cost?.materials || {}).map(([id]) => {
+      const mat = artifactMaterialMetaDom(id); return { ...mat, source: mat.source || '精英怪 / Boss / 秘境' };
+    })).slice(0, 3);
+    const sourceHtml = sourceItems.length ? `<div class="artifact-source-list">${sourceItems.map(m => `<span style="--mat-color:${safeCssColor(m.color, '#d4c8b0')}"><em>${escapeHtml(m.name)}</em><strong>${escapeHtml(m.source)}</strong></span>`).join('')}</div>` : '';
+    return `<section class="artifact-next-card"><b>下一步：升至 Lv.${escapeHtml(level + 1)}</b><div class="artifact-next-gain">${artifactNextGainHtmlDom(artifact, progress)}</div>${missingHtml}${sourceHtml}</section>`;
+  }
+  function artifactActionStateDom(artifact, progress, isActive, canUse, upgradeCheck, realmCap) {
+    const activateLabel = isActive ? '卸下' : (canUse ? '激活神器' : '金丹解锁');
+    const activateAttr = isActive ? 'data-artifact-off="1"' : `data-artifact-id="${escapeHtml(artifact.id)}"${canUse ? '' : ' disabled'}`;
+    let upgradeLabel = '升阶';
+    let upgradeDisabled = true;
+    if (!progress) upgradeLabel = '未获得';
+    else if (upgradeCheck?.reason === 'realm_cap') upgradeLabel = `境界上限 Lv.${realmCap}`;
+    else if (upgradeCheck?.reason === 'max_level') upgradeLabel = '已满级';
+    else {
+      upgradeDisabled = !upgradeCheck?.ok;
+      upgradeLabel = '升阶';
+    }
+    return { activateLabel, activateAttr, upgradeLabel, upgradeDisabled };
+  }
   function renderArtifactDomPanel() {
     const p = ensureArtifactDomPanel();
+    const artifacts = Object.values(typeof ARTIFACTS !== 'undefined' ? ARTIFACTS : {});
     const realmCap = typeof getArtifactLevelCap === 'function' ? getArtifactLevelCap(player?.realmIndex || 0) : 0;
     const unlockRealm = typeof getArtifactUnlockRealm === 'function' ? getArtifactUnlockRealm() : 2;
     const unlocked = (player?.realmIndex || 0) >= unlockRealm;
     const state = typeof getArtifactState === 'function' ? getArtifactState(player) : { activeId: null, owned: {} };
     const active = state.activeId && ARTIFACTS?.[state.activeId] ? ARTIFACTS[state.activeId] : null;
     const activeProgress = active ? state.owned?.[active.id] : null;
-    const listHtml = Object.values(typeof ARTIFACTS !== 'undefined' ? ARTIFACTS : {}).map(artifact => {
+    if (!selectedArtifactId || !ARTIFACTS?.[selectedArtifactId]) selectedArtifactId = state.activeId || artifacts[0]?.id || null;
+    const selected = selectedArtifactId && ARTIFACTS?.[selectedArtifactId] ? ARTIFACTS[selectedArtifactId] : artifacts[0];
+    const selectedProgress = selected ? (state.owned?.[selected.id] || null) : null;
+    const selectedIsActive = !!selected && state.activeId === selected.id;
+    const selectedCanUse = selected && typeof canUseArtifact === 'function' ? canUseArtifact(selected.id, player).ok : unlocked;
+    const selectedUpgradeCheck = selectedProgress && typeof hasArtifactUpgradeMaterials === 'function' ? hasArtifactUpgradeMaterials(player, playerMaterials, selected.id) : null;
+    const selectedCost = selectedProgress && typeof getArtifactUpgradeCost === 'function' ? getArtifactUpgradeCost(selected.id, selectedProgress.level) : null;
+    const selectedAwakenCost = selectedProgress && typeof getArtifactAwakeningCost === 'function' ? getArtifactAwakeningCost(selected.id) : null;
+    const selectedAwakenCheck = selectedProgress ? artifactAwakeningCheckDom(selected, selectedProgress, selectedAwakenCost) : { ok: false, label: '未获得', reason: 'not_owned' };
+    const action = selected ? artifactActionStateDom(selected, selectedProgress, selectedIsActive, selectedCanUse, selectedUpgradeCheck, realmCap) : null;
+    const stripHtml = artifacts.map(artifact => {
       const progress = state.owned?.[artifact.id] || null;
       const isActive = state.activeId === artifact.id;
-      const levelText = progress ? `Lv.${progress.level}${progress.awakened ? ' · 已觉醒' : ''}` : '未获得';
+      const isSelected = selected?.id === artifact.id;
       const canUse = typeof canUseArtifact === 'function' ? canUseArtifact(artifact.id, player).ok : unlocked;
       const upgradeCheck = progress && typeof hasArtifactUpgradeMaterials === 'function' ? hasArtifactUpgradeMaterials(player, playerMaterials, artifact.id) : null;
-      const cost = progress && typeof getArtifactUpgradeCost === 'function' ? getArtifactUpgradeCost(artifact.id, progress.level) : null;
-      const costHtml = progress && cost
-        ? `<div class="artifact-cost"><b>升阶消耗</b><span>灵石 ${escapeHtml(player?.spiritStones || 0)}/${escapeHtml(cost.spiritStones)}</span>${materialTextDom(cost.materials, { withOwned: true, asHtml: true })}</div>`
-        : `<div class="artifact-cost muted">${progress ? '已达当前最高阶' : '激活后可查看升阶消耗'}</div>`;
-      const activateHtml = isActive
-        ? `<button class="artifact-action" type="button" data-artifact-off="1">卸下</button>`
-        : `<button class="artifact-action" type="button" data-artifact-id="${escapeHtml(artifact.id)}"${canUse ? '' : ' disabled'}>${canUse ? (progress ? '激活' : '解锁并激活') : '未解锁'}</button>`;
-      const upgradeText = upgradeCheck?.reason === 'realm_cap' ? `境界上限 Lv.${realmCap}` : (upgradeCheck?.reason === 'max_level' ? '已满级' : '升阶');
-      const upgradeHtml = progress ? `<button class="artifact-action upgrade" type="button" data-artifact-upgrade="${escapeHtml(artifact.id)}"${upgradeCheck?.ok ? '' : ' disabled'}>${escapeHtml(upgradeText)}</button>` : '';
-      return `<div class="artifact-card${isActive ? ' active' : ''}${progress ? '' : ' locked'}" style="--artifact-color:${escapeHtml(artifact.color)}">
-        <div class="artifact-top"><i>${escapeHtml(artifact.icon)}</i><div><b>${escapeHtml(artifact.name)}</b><em>${escapeHtml(levelText)}</em></div></div>
-        <p>${escapeHtml(artifact.desc)}</p>
-        <div class="artifact-stats">${artifactStatsHtmlDom(artifact, progress || { level: 1 })}</div>
-        ${costHtml}
-        <div class="artifact-actions">${activateHtml}${upgradeHtml}</div>
-      </div>`;
+      const classes = ['artifact-orb'];
+      if (isSelected) classes.push('selected');
+      if (isActive) classes.push('active');
+      if (!progress) classes.push('locked');
+      if (!canUse) classes.push('sealed');
+      if (upgradeCheck?.ok) classes.push('upgradable');
+      return `<button class="${classes.join(' ')}" type="button" data-artifact-select="${escapeHtml(artifact.id)}" style="--artifact-color:${escapeHtml(artifact.color)}">
+        <span class="artifact-orb-icon">${escapeHtml(artifact.icon)}</span>
+        <span class="artifact-orb-name">${escapeHtml(artifactShortNameDom(artifact))}</span>
+        <span class="artifact-orb-level">${progress ? `Lv.${escapeHtml(progress.level)}` : (canUse ? '未得' : '锁')} · ${escapeHtml(artifact.role || artifact.tags?.[0] || '')}</span>
+        ${isActive ? '<span class="artifact-orb-tag">已用</span>' : ''}
+      </button>`;
     }).join('');
+    const activeHero = active
+      ? `<div class="artifact-hero active" style="--artifact-color:${escapeHtml(active.color)}"><div class="artifact-hero-icon">${escapeHtml(active.icon)}</div><div class="artifact-hero-main"><span>当前激活</span><b>${escapeHtml(active.name)} ${escapeHtml(activeProgress ? `Lv.${activeProgress.level}` : '')}</b><em>${escapeHtml(artifactEffectTextDom(active, activeProgress))}</em></div></div>`
+      : `<div class="artifact-hero empty" style="--artifact-color:#777"><div class="artifact-hero-icon">○</div><div class="artifact-hero-main"><span>${unlocked ? '当前未激活' : '神器未解锁'}</span><b>${unlocked ? '选择下方神器激活' : '金丹期开放神器'}</b><em>${unlocked ? '同一时间只生效一件神器' : '筑基期可先收集碎片'}</em></div></div>`;
+    const detailHtml = selected ? `<section class="artifact-detail-card" style="--artifact-color:${escapeHtml(selected.color)}">
+      <div class="artifact-detail-head"><div class="artifact-detail-icon">${escapeHtml(selected.icon)}</div><div><span>选中神器</span><b>${escapeHtml(selected.name)}</b><em>${selectedProgress ? `Lv.${escapeHtml(selectedProgress.level)}${selectedProgress.awakened ? ' · 已觉醒' : ''}` : '未获得'}</em></div></div>
+      <p>${escapeHtml(selected.desc)}</p>
+      <div class="artifact-tags">${artifactTagsHtmlDom(selected)}</div>
+      <div class="artifact-stats">${artifactStatsHtmlDom(selected, selectedProgress || { level: 1 })}</div>
+      <div class="artifact-effect"><b>战斗效果</b><span>${escapeHtml(artifactEffectTextDom(selected, selectedProgress || {}))}</span></div>
+      ${artifactNextGoalHtmlDom(selected, selectedProgress, selectedCost, realmCap)}
+      ${selectedProgress ? artifactCostHtmlDom(selectedCost) : `<div class="artifact-cost muted">激活后显示升阶消耗</div>`}
+      ${artifactAwakeningCardHtmlDom(selected, selectedProgress, selectedAwakenCost)}
+    </section>` : '<section class="artifact-detail-card empty">暂无神器</section>';
     const matHtml = (typeof ARTIFACT_MATERIALS !== 'undefined' ? ARTIFACT_MATERIALS : []).map(mat => {
       const count = Number(playerMaterials?.[mat.id] || 0);
-      return `<div class="mat-row" style="color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} x${escapeHtml(count)}</div>`;
-    }).join('') || '<div class="mat-row" style="color:#666">暂无神器材料</div>';
-    p.innerHTML = `<div class="panel-head">
+      return `<span class="artifact-mat-chip" style="--mat-color:${safeCssColor(mat.color, '#d4c8b0')}">${escapeHtml(mat.name)} x${escapeHtml(count)}</span>`;
+    }).join('') || '<span class="artifact-mat-chip empty">暂无神器材料</span>';
+    p.innerHTML = `<div class="panel-head artifact-head">
       <span class="ptitle" style="color:#ffdd66">🗡️ 神器</span>
-      <span class="psub">${unlocked ? `当前境界上限 Lv.${realmCap}` : `金丹期解锁，筑基期开始收集碎片`}</span>
+      <span class="psub">${unlocked ? `境界上限 Lv.${realmCap}` : `金丹期解锁 · 筑基期掉碎片`}</span>
       <button class="pclose" type="button">×</button>
-    </div><div class="panel-body">
-      <section class="bt-section">
-        <div class="bt-section-title">当前激活</div>
-        ${active ? `<div class="dao-current" style="--dao-color:${escapeHtml(active.color)}"><i>${escapeHtml(active.icon)}</i><b>${escapeHtml(active.name)} ${escapeHtml(activeProgress ? `Lv.${activeProgress.level}` : '')}</b><span>${escapeHtml(active.desc)}</span></div>` : `<div class="dao-current" style="--dao-color:#777"><i>○</i><b>${unlocked ? '尚未激活神器' : '神器未解锁'}</b><span>${unlocked ? '选择一件神器激活；同一时间只生效一件' : '到达金丹期后开放神器激活与升阶'}</span></div>`}
-      </section>
-      <section class="bt-section">
-        <div class="bt-section-title">神器列表 <small>激活 / 升阶 / 战斗触发</small></div>
-        <div class="artifact-list">${listHtml}</div>
-      </section>
-      <section class="bt-section">
-        <div class="bt-section-title">神器材料</div>
-        <div class="mat-list">${matHtml}</div>
-      </section>
-    </div>`;
+    </div><div class="panel-body artifact-body">
+      ${activeHero}
+      <section class="artifact-section"><div class="bt-section-title">神器选择 <small>横滑选择</small></div><div class="artifact-strip">${stripHtml}</div></section>
+      ${detailHtml}
+      <details class="artifact-materials"><summary>神器材料总览</summary><div class="artifact-material-grid">${matHtml}</div></details>
+    </div>
+    ${selected ? `<div class="artifact-sticky-actions" style="--artifact-color:${escapeHtml(selected.color)}">
+      <button class="artifact-action primary" type="button" ${action.activateAttr}>${escapeHtml(action.activateLabel)}</button>
+      <button class="artifact-action upgrade" type="button" data-artifact-upgrade="${escapeHtml(selected.id)}"${action.upgradeDisabled ? ' disabled aria-disabled="true"' : ''}>${escapeHtml(action.upgradeLabel)}</button>
+      <button class="artifact-action awaken" type="button" data-artifact-awaken="${escapeHtml(selected.id)}"${selectedAwakenCheck.ok ? '' : ' disabled aria-disabled="true"'}>${escapeHtml(selectedAwakenCheck.label)}</button>
+    </div>` : ''}`;
+    p.querySelectorAll('[data-artifact-select]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        selectedArtifactId = btn.dataset.artifactSelect;
+        renderArtifactDomPanel();
+      });
+    });
     p.querySelectorAll('[data-artifact-id]').forEach(btn => {
       bindInventoryTapDom(btn, () => {
+        selectedArtifactId = btn.dataset.artifactId;
         const result = typeof activateArtifact === 'function' ? activateArtifact(player, btn.dataset.artifactId) : { ok: false };
         if (result.ok) showMessage(`🗡️ 已激活神器：${result.artifact.name}`, result.artifact.color || '#ffdd66');
         else showMessage('神器尚未解锁', '#ff7777');
@@ -2948,11 +3747,26 @@ function generateNewFloor() {
     });
     p.querySelectorAll('[data-artifact-upgrade]').forEach(btn => {
       bindInventoryTapDom(btn, () => {
+        selectedArtifactId = btn.dataset.artifactUpgrade;
         const result = typeof upgradeArtifact === 'function' ? upgradeArtifact(player, playerMaterials, btn.dataset.artifactUpgrade) : { ok: false };
         if (result.ok) showMessage(`🗡️ ${result.artifact.name} 升至 Lv.${result.progress.level}`, result.artifact.color || '#ffdd66');
         else {
           const reasonText = result.reason === 'realm_cap' ? '当前境界上限不足' : (result.reason === 'stones' ? '灵石不足' : (result.reason === 'materials' ? '神器材料不足' : '暂时无法升阶'));
           showMessage(reasonText, '#ff7777');
+        }
+        renderArtifactDomPanel();
+        if (typeof updateUI === 'function') updateUI();
+        if (typeof autoSave === 'function') autoSave();
+      });
+    });
+    p.querySelectorAll('[data-artifact-awaken]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        selectedArtifactId = btn.dataset.artifactAwaken;
+        const result = typeof awakenArtifact === 'function' ? awakenArtifact(player, playerMaterials, btn.dataset.artifactAwaken) : { ok: false };
+        if (result.ok) showMessage(`✨ 神器觉醒：${result.awaken?.name || result.artifact.name}`, result.artifact.color || '#ffdd66');
+        else {
+          const reasonText = result.reason === 'level_cap' ? '满级后可觉醒' : (result.reason === 'stones' ? '灵石不足' : (result.reason === 'materials' ? '觉醒材料不足' : (result.reason === 'awakened' ? '神器已觉醒' : '暂时无法觉醒')));
+          showMessage(reasonText, '#ff8844');
         }
         renderArtifactDomPanel();
         if (typeof updateUI === 'function') updateUI();
@@ -3090,7 +3904,8 @@ function generateNewFloor() {
     const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
     const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
     const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
-    const enemyAtkText = Number(currentEnemy.atk || 0);
+    const enemyBuffAtk = typeof getEnemyAttackBuffMultiplier === 'function' ? getEnemyAttackBuffMultiplier() : 1;
+    const enemyAtkText = Math.floor(Number(currentEnemy.atk || 0) * enemyBuffAtk);
     const enemyDefText = Math.floor(currentEnemy.def * enemyBuffDef);
     const playerHpPct = player.maxHp ? Math.max(0, Math.min(100, player.hp / player.maxHp * 100)) : 100;
     const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
@@ -3196,10 +4011,29 @@ function generateNewFloor() {
      const py = Math.floor(player.y);
      if (px >= 0 && px < dungeon.width && py >= 0 && py < dungeon.height) {
        if (dungeon.grid[py][px] === TILE.STAIRS_DOWN) {
-         dungeonLevel++;
-         generateNewFloor();
-         showMessage(`你进入了${dungeon.biome?.icon || ''}${dungeon.biome?.name || '深渊'}第 ${dungeonLevel} 层...`, '#ff9944');
-        autoSave();
+         const activeStage = getActiveStage();
+         if (activeStage) {
+           const nextIdx = (player.stageProgress.currentRun.roomIndex || 0) + 1;
+           player.stageProgress.currentRun.roomIndex = nextIdx;
+           stageRoomIndex = nextIdx;
+           if (nextIdx >= activeStage.roomCount) {
+             if (typeof onStageComplete === 'function') onStageComplete();
+             return;
+           }
+           generateNewFloor();
+           const eventText = typeof applyStageRoomEvent === 'function' ? applyStageRoomEvent(activeStage, nextIdx) : '';
+           showMessage(eventText || `进入${activeStage.name} · ${getStageRoomLabel(activeStage, nextIdx)}...`, activeStage.color || '#ff9944');
+           autoSave();
+         } else {
+           showStageSelectUI = true;
+           stageTab = 'stages';
+           stageDetailOpen = false;
+           stageSweepOpen = false;
+           selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
+           showMessage('此地为副本入口，请选关深入。', '#d4a0ff');
+           syncBodyPanelState();
+           autoSave();
+         }
        }
      }
    }
@@ -3214,7 +4048,11 @@ function generateNewFloor() {
      if (!isInCombat()) checkStairs();
      updateCamera();
      tickMessages();
-     if (typeof document !== 'undefined') document.body.classList.toggle('combat-active', isInCombat());
+     if (typeof document !== 'undefined') {
+      document.body.classList.toggle('combat-active', isInCombat());
+      document.body.classList.toggle('stage-run-active', !!isInStageRun);
+      document.body.classList.toggle('secret-realm-run-active', !!isInSecretRealm);
+    }
      clearCanvas();
      drawDungeon();
      drawPlayer();
@@ -3222,14 +4060,1614 @@ function generateNewFloor() {
      drawInventory();
      drawCharacterPanel();
      drawSkillTreeUI();
-     drawBreakthroughUI();
-     drawAlchemyUI();
-     drawDeathScreen();
-     drawParticlesDom(camera);
-     renderMessageLog();
-     updateHUD(player, dungeonLevel);
-     ctx.restore();
-   }
+    drawBreakthroughUI();
+    drawAlchemyUI();
+    drawDeathScreen();
+    drawSecretRealmUI();
+    drawTribulationUI();
+    drawParticlesDom(camera);
+    renderMessageLog();
+    updateHUD(player, dungeonLevel);
+    ctx.restore();
+  }
+
+  function drawSecretRealmUI() {
+    if (!showSecretRealmUI) return;
+    // DOM panel handles rendering — synced in syncBodyPanelState()
+    return;
+  }
+  function drawTribulationUI() {
+    if (!showTribulationUI) return;
+    return;
+  }
+
+  // ─── Secret Realm System ───
+  let secretRealmSelectedId = null;
+  let secretRealmSelectedDifficulty = 'normal';
+  let secretRealmResultPanel = null;
+
+  function getSecretRealmKeyCount(keyId) {
+    return Number(playerMaterials?.[keyId] || 0);
+  }
+  function getSecretRealmClearCount(realmId, difficulty = secretRealmSelectedDifficulty) {
+    return Number(player?.secretRealmClears?.[realmId]?.[difficulty] || 0);
+  }
+  function getSecretRealmTotalClears(realmId) {
+    return Object.values(player?.secretRealmClears?.[realmId] || {}).reduce((sum, n) => sum + Number(n || 0), 0);
+  }
+  function getSecretRealmPreviewSafe(realmId, difficulty = secretRealmSelectedDifficulty) {
+    if (typeof getSecretRealmPreview === 'function') return getSecretRealmPreview(player, realmId, difficulty, playerMaterials);
+    const realm = SECRET_REALMS?.[realmId];
+    const check = realm ? hasSecretRealmEntry(player, realmId, difficulty, playerMaterials) : null;
+    return realm ? { entry: check, rooms: realm.rooms, featured: realm.materialRewards?.join('、') || '奖励', danger: '', xp: 0, spiritStones: 0, materialLines: [] } : null;
+  }
+  function formatSecretRealmLastRun() {
+    const r = player?.lastSecretRealmRun;
+    if (!r) return '';
+    const state = r.result === 'complete' ? '上次通关' : (r.result === 'defeat' ? '上次失败' : '上次逃离');
+    return `${state}：${r.realmName || '秘境'} · ${r.difficultyName || ''}${r.rewardText ? ' · ' + r.rewardText : ''}`;
+  }
+
+  function formatSecretRealmRunRewards(run) {
+    if (!run) return [];
+    const lines = [];
+    const totalXp = Number(run.totalXp ?? ((run.nodeXp || 0) + (run.clearXp || 0))) || 0;
+    const totalStones = Number(run.totalStones ?? ((run.nodeStones || 0) + (run.clearStones || 0))) || 0;
+    if (totalXp || totalStones) lines.push(`修为 ${totalXp} · 💎${totalStones}`);
+    if (run.materialText) lines.push(run.materialText);
+    if (Array.isArray(run.loot) && run.loot.length) {
+      lines.push(`装备 ${run.loot.slice(0, 4).join('、')}${run.loot.length > 4 ? `等${run.loot.length}件` : ''}`);
+    }
+    if (run.skipped) lines.push(`背包满，跳过${run.skipped}件`);
+    if (run.eventCount) lines.push(`触发事件 ${run.eventCount} 个`);
+    if (run.isFirstClear) lines.push('首通奖励已领取');
+    return lines.length ? lines : [run.rewardText || '未获得通关奖励'];
+  }
+
+  function renderSecretRealmResultPanel(p) {
+    const r = secretRealmResultPanel || player?.lastSecretRealmRun;
+    if (!r) return false;
+    const isComplete = r.result === 'complete';
+    const title = isComplete ? '秘境结算' : (r.result === 'defeat' ? '挑战失败' : '挑战中断');
+    const rewardLines = formatSecretRealmRunRewards(r);
+    p.innerHTML = `<div class="sr-result" style="--sr-color:${escapeHtml(r.color || '#d4a0ff')}">
+      <div class="sr-result-head"><b>${isComplete ? '🏆' : '🏞️'} ${escapeHtml(title)}</b><span class="pclose">×</span></div>
+      <div class="sr-result-card">
+        <div class="sr-result-title"><span>${escapeHtml(r.realmName || '秘境')}</span><em>${escapeHtml(r.difficultyName || '')}</em></div>
+        <div class="sr-result-sub">${isComplete ? `已结算 ${escapeHtml(r.nodes || r.nodeCount || 0)} 个节点${r.quick ? ' · 速挑完成' : ''}` : escapeHtml(r.rewardText || '本次未通关')}</div>
+        <div class="sr-result-grid">
+          <span><b>${escapeHtml(Number(r.totalXp ?? ((r.nodeXp || 0) + (r.clearXp || 0))) || 0)}</b><em>修为</em></span>
+          <span><b>${escapeHtml(Number(r.totalStones ?? ((r.nodeStones || 0) + (r.clearStones || 0))) || 0)}</b><em>灵石</em></span>
+          <span><b>${escapeHtml((r.materialCount || 0) + (Array.isArray(r.loot) ? r.loot.length : 0))}</b><em>物品</em></span>
+        </div>
+        <div class="sr-result-lines">${rewardLines.map(line => `<div>${escapeHtml(line)}</div>`).join('')}</div>
+      </div>
+      <div class="sr-result-actions">
+        <button class="sr-result-more">继续刷取</button>
+        <button class="sr-result-close sr-close">关闭</button>
+      </div>
+    </div>`;
+    const moreBtn = p.querySelector('.sr-result-more');
+    if (moreBtn) bindPanelTap(moreBtn, () => { secretRealmResultPanel = null; showSecretRealmUI = true; renderSecretRealmDomPanel(); });
+    const closeBtn = p.querySelector('.sr-result-close');
+    if (closeBtn) bindPanelTap(closeBtn, closeSecretRealmPanel);
+    return true;
+  }
+
+  function closeSecretRealmPanel(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    secretRealmResultPanel = null;
+    showSecretRealmUI = false;
+    const p = document.getElementById('secretrealm-dom-panel');
+    if (p) p.style.display = 'none'; // hide immediately before any broader state sync
+    clearTouchMovementState();
+    if (typeof document !== 'undefined') {
+      document.body.classList.toggle('secretrealm-open', false);
+      document.body.classList.toggle('panel-open', isAnyPanelOpen());
+      syncMainNavState();
+    }
+  }
+
+  function ensureSecretRealmDomPanel() {
+    let p = document.getElementById('secretrealm-dom-panel');
+    if (p) return p;
+    p = document.createElement('div'); p.id = 'secretrealm-dom-panel';
+    const onCloseHit = e => {
+      if (e.target.closest('.pclose') || e.target.closest('.sr-close')) closeSecretRealmPanel(e);
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false });
+    p.addEventListener('touchstart', onCloseHit, { passive: false });
+    p.addEventListener('click', onCloseHit);
+    document.body.appendChild(p);
+    return p;
+  }
+
+  function renderSecretRealmDomPanel() {
+    const p = ensureSecretRealmDomPanel();
+    if (!showSecretRealmUI) { p.style.display = 'none'; return; }
+    p.style.display = '';
+
+    if (secretRealmResultPanel) {
+      renderSecretRealmResultPanel(p);
+      return;
+    }
+
+    // Safety: check SECRET_REALMS loaded
+    if (typeof SECRET_REALMS === 'undefined' || !SECRET_REALMS) {
+      p.innerHTML = `<div class="sr-head"><b>🏞️ 秘境</b><span class="pclose">×</span></div><div class="sr-body"><div class="sr-empty">秘境数据未加载，请刷新页面重试</div></div>`;
+      return;
+    }
+
+    // If we have active progress, show the battle view
+    if (isInSecretRealm) {
+      // Combat panel will handle it; show a mini-progress overlay
+      const realm = Object.values(SECRET_REALMS).find(r => r.id === (player?.secretRealmProgress?.realmId || ''));
+      const realmName = realm?.name || '秘境';
+      const canQuick = !isInCombat();
+      p.innerHTML = `<div class="sr-progress">
+        <div class="sr-progress-head"><b>🏞️ ${escapeHtml(realmName)}</b><span class="pclose">×</span></div>
+        <div class="sr-progress-bar">节点 ${secretRealmNodeIndex + 1}/${secretRealmNodeCount}</div>
+        <div class="sr-progress-actions">
+          <button class="sr-run-quick" ${canQuick ? '' : 'disabled'}>⚡ 快速挑战</button>
+          <button class="sr-run-exit">🚪 离开秘境</button>
+        </div>
+        <div class="sr-progress-hint">${canQuick ? '一键结算剩余节点；也可用右下角“速挑”' : '战斗中请先完成当前回合'}</div>
+      </div>`;
+      const quickBtn = p.querySelector('.sr-run-quick');
+      if (quickBtn) bindPanelTap(quickBtn, () => { if (!quickBtn.disabled && typeof quickChallengeSecretRealm === 'function') quickChallengeSecretRealm(); });
+      const exitBtn = p.querySelector('.sr-run-exit');
+      if (exitBtn) bindPanelTap(exitBtn, () => { if (typeof onSecretRealmFlee === 'function') onSecretRealmFlee(); });
+      return;
+    }
+
+    if (!player) { p.innerHTML = '<div class="sr-head"><b>🏞️ 秘境</b><span class="pclose">×</span></div><div class="sr-empty">数据未加载</div>'; return; }
+
+    const realmList = Object.values(SECRET_REALMS);
+    const firstOpenRealm = realmList.find(r => (player.realmIndex || 0) >= r.unlockRealm);
+    if ((!secretRealmSelectedId || !SECRET_REALMS[secretRealmSelectedId] || (player.realmIndex || 0) < (SECRET_REALMS[secretRealmSelectedId]?.unlockRealm || 0)) && firstOpenRealm) {
+      secretRealmSelectedId = firstOpenRealm.id;
+    }
+    const selectedRealm = secretRealmSelectedId ? SECRET_REALMS[secretRealmSelectedId] : null;
+    const selectedPreview = selectedRealm ? getSecretRealmPreviewSafe(selectedRealm.id, secretRealmSelectedDifficulty) : null;
+    const selectedEntryCheck = selectedPreview?.entry || (selectedRealm ? hasSecretRealmEntry(player, selectedRealm.id, secretRealmSelectedDifficulty, playerMaterials) : null);
+    const canEnterSelected = !!(selectedRealm && selectedEntryCheck?.ok);
+    const hasAny = !!firstOpenRealm;
+    const lastRunText = formatSecretRealmLastRun();
+
+    let html = `<div class="sr-head">
+      <b>🏞️ 秘境</b>
+      <span class="sr-sub">短副本 · 材料定向刷取</span>
+      <span class="pclose">×</span>
+    </div>
+    ${lastRunText ? `<div class="sr-last-run">${escapeHtml(lastRunText)}</div>` : ''}
+    <div class="sr-layout">
+      <div class="sr-body">`;
+
+    for (const realm of realmList) {
+      const locked = (player.realmIndex || 0) < realm.unlockRealm;
+      const unlockRealmName = REALMS[realm.unlockRealm]?.name || '';
+      const keyCount = getSecretRealmKeyCount(realm.keyId);
+      const preview = getSecretRealmPreviewSafe(realm.id, secretRealmSelectedDifficulty);
+      const clearCount = getSecretRealmClearCount(realm.id, secretRealmSelectedDifficulty);
+      const totalClears = getSecretRealmTotalClears(realm.id);
+      const selectedRealmId = !locked && secretRealmSelectedId === realm.id;
+      html += `<div class="sr-card ${locked ? 'locked' : ''} ${selectedRealmId ? 'selected' : ''}" style="--sr-color:${escapeHtml(realm.color)}" data-sr-id="${escapeHtml(realm.id)}" data-sr-selected="${selectedRealmId ? 'true' : 'false'}">
+        <div class="sr-card-icon">${locked ? '🔒' : realm.icon}</div>
+        <div class="sr-card-main">
+          <div class="sr-card-name"><span>${escapeHtml(realm.name)}</span><small>${escapeHtml(realm.rooms)}关</small></div>
+          <div class="sr-card-desc">${escapeHtml(realm.desc)}</div>
+          <div class="sr-card-meta">${locked ? `🔒 ${unlockRealmName}后开放` : `令牌 ${escapeHtml(keyCount)} · 本难度 ${clearCount} 次 · 总计 ${totalClears} 次`}</div>
+          <div class="sr-card-drops">${escapeHtml(preview?.featured || realm.tip || '材料奖励')}</div>
+        </div>
+        <div class="sr-card-check">${locked ? '未开' : (selectedRealmId ? '已选' : '选择')}</div>
+      </div>`;
+    }
+
+    const enterLabel = !hasAny
+      ? '暂无可用秘境'
+      : !selectedRealm
+        ? '请先选择秘境'
+        : canEnterSelected
+          ? `进入${selectedRealm.name}`
+          : (selectedEntryCheck?.reason || '无法进入');
+    const quickEnterLabel = !hasAny
+      ? '暂无可速挑秘境'
+      : !selectedRealm
+        ? '请先选择秘境'
+        : canEnterSelected
+          ? `速挑${selectedRealm.name}`
+          : (selectedEntryCheck?.reason || '无法速挑');
+    const selectedCostHint = selectedRealm
+      ? (selectedEntryCheck?.ok
+        ? `消耗：${selectedEntryCheck.costText || '无'}`
+        : (selectedEntryCheck?.hint || selectedEntryCheck?.reason || '条件不足'))
+      : '普通可用灵石进入；困难/炼狱需要对应秘境令';
+    const previewMaterials = selectedPreview?.materialLines?.length ? selectedPreview.materialLines.join(' · ') : (selectedPreview?.featured || '经验、灵石');
+    const selectedClearCount = selectedRealm ? getSecretRealmClearCount(selectedRealm.id, secretRealmSelectedDifficulty) : 0;
+
+    html += `</div>
+      <aside class="sr-preview" style="--sr-color:${escapeHtml(selectedRealm?.color || '#d4a0ff')}">
+        ${selectedRealm ? `<div class="sr-preview-title"><span>${selectedRealm.icon}</span><b>${escapeHtml(selectedRealm.name)}</b><em>${escapeHtml(selectedPreview?.difficultyName || '')}</em></div>
+        <p>${escapeHtml(selectedRealm.flavor || selectedRealm.desc || '')}</p>
+        <div class="sr-preview-stats">
+          <span><b>${escapeHtml(selectedPreview?.rooms || selectedRealm.rooms)}</b><em>节点</em></span>
+          <span><b>${escapeHtml(selectedClearCount)}</b><em>本难度</em></span>
+          <span><b>${escapeHtml(`×${Number(selectedPreview?.rewardMult || 1).toFixed(1)}`)}</b><em>奖励</em></span>
+        </div>
+        <div class="sr-preview-line"><b>风险</b><span>${escapeHtml(selectedPreview?.danger || '随境界缩放')}</span></div>
+        <div class="sr-preview-line"><b>奖励</b><span>${escapeHtml(`${selectedPreview?.xp || 0}经验 · 💎${selectedPreview?.spiritStones || 0} · ${previewMaterials}`)}</span></div>
+        <div class="sr-preview-line"><b>提示</b><span>${escapeHtml(selectedRealm.tip || '首通会提高材料数量。')}</span></div>` : `<div class="sr-empty">提升境界后开放秘境</div>`}
+      </aside>
+    </div>
+    <div class="sr-foot">
+      <div class="sr-diff-select">
+        <span>难度:</span>
+        ${Object.entries(SECRET_REALM_DIFFICULTIES).map(([key, d]) =>
+          `<button class="sr-diff-btn${key === secretRealmSelectedDifficulty ? ' active' : ''}" data-sr-diff="${escapeHtml(key)}">${escapeHtml(d.name)}</button>`
+        ).join('')}
+      </div>
+      <div class="sr-enter-wrap">
+        <div class="sr-cost-hint">${escapeHtml(selectedCostHint)}</div>
+        <div class="sr-enter-actions">
+          <button class="sr-enter-btn ${canEnterSelected ? '' : 'disabled'}" ${canEnterSelected ? '' : 'disabled'}>${escapeHtml(enterLabel)}</button>
+          <button class="sr-quick-enter-btn ${canEnterSelected ? '' : 'disabled'}" ${canEnterSelected ? '' : 'disabled'}>${escapeHtml(quickEnterLabel)}</button>
+        </div>
+      </div>
+    </div>`;
+
+    p.innerHTML = html;
+
+    // Bind difficulty buttons
+    p.querySelectorAll('[data-sr-diff]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        secretRealmSelectedDifficulty = btn.dataset.srDiff;
+        renderSecretRealmDomPanel();
+      });
+      btn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    });
+
+    function selectSecretRealm(realmId) {
+      if (!realmId || !SECRET_REALMS[realmId]) return;
+      secretRealmSelectedId = realmId;
+      renderSecretRealmDomPanel();
+    }
+
+    // Bind card clicks: select first, then footer button enters. Use move-threshold tap so swiping the list is not hijacked.
+    p.querySelectorAll('.sr-card:not(.locked)').forEach(card => {
+      bindPanelTap(card, () => selectSecretRealm(card.dataset.srId));
+    });
+
+    const enterBtn = p.querySelector('.sr-enter-btn');
+    if (enterBtn) {
+      bindPanelTap(enterBtn, () => {
+        if (!secretRealmSelectedId || enterBtn.disabled) return;
+        enterSecretRealm(secretRealmSelectedId, secretRealmSelectedDifficulty);
+      });
+    }
+    const quickEnterBtn = p.querySelector('.sr-quick-enter-btn');
+    if (quickEnterBtn) {
+      bindPanelTap(quickEnterBtn, () => {
+        if (!secretRealmSelectedId || quickEnterBtn.disabled) return;
+        enterSecretRealm(secretRealmSelectedId, secretRealmSelectedDifficulty, true);
+      });
+    }
+
+    // Close binding — pointerdown/touchstart closes immediately on mobile; click is fallback.
+    const closeBtn = p.querySelector('.pclose');
+    closeBtn?.addEventListener('pointerdown', closeSecretRealmPanel, { passive: false });
+    closeBtn?.addEventListener('touchstart', closeSecretRealmPanel, { passive: false });
+    closeBtn?.addEventListener('click', closeSecretRealmPanel);
+  }
+
+  function enterSecretRealm(realmId, difficulty, quickMode = false) {
+    if (isInCombat() || isInSecretRealm) return;
+    const realm = SECRET_REALMS[realmId];
+    if (!realm) { showMessage('未知秘境', '#ff4444'); return; }
+    // Check entry
+    const check = hasSecretRealmEntry(player, realmId, difficulty, playerMaterials);
+    if (!check.ok) {
+      showMessage(check.reason || '无法进入', '#ff8844');
+      return;
+    }
+    // Pay cost
+    if (!paySecretRealmEntry(player, realmId, difficulty, playerMaterials)) {
+      showMessage('消耗品不足', '#ff4444');
+      return;
+    }
+    // Start secret realm
+    const nodeCount = realm.rooms;
+    isInSecretRealm = true;
+    secretRealmNodeIndex = 0;
+    secretRealmNodeCount = nodeCount;
+    player.secretRealmProgress = { realmId, difficulty, nodeCount, nodeSummary: createSecretRealmNodeSummary(), quickMode: !!quickMode };
+
+    // Save real dungeon so we can restore after realm ends
+    if (dungeon) {
+      window._savedDungeonBeforeSecretRealm = dungeon;
+      window._savedDungeonLevelBeforeSecretRealm = dungeonLevel;
+    }
+
+    // Close selector for normal runs. Quick mode settles synchronously and renders the final result once;
+    // rendering an intermediate “结算中” state still produces a visible one-frame flash on mobile.
+    if (quickMode) {
+      showSecretRealmUI = true;
+      const srp = document.getElementById('secretrealm-dom-panel');
+      if (srp) srp.style.display = '';
+      clearTouchMovementState();
+      if (typeof quickChallengeSecretRealm === 'function') quickChallengeSecretRealm();
+      return;
+    }
+
+    showSecretRealmUI = false;
+    const srp = document.getElementById('secretrealm-dom-panel');
+    if (srp) srp.style.display = 'none';
+    clearTouchMovementState();
+    syncBodyPanelState();
+
+    // Start first node for normal challenge.
+    setTimeout(() => {
+      advanceSecretRealmNode();
+    }, 300);
+  }
+
+  function buildSecretRealmEnemy(realm, difficulty, nodeIndex, nodeCount) {
+    const diff = SECRET_REALM_DIFFICULTIES[difficulty] || SECRET_REALM_DIFFICULTIES.normal;
+    const isBoss = nodeIndex >= nodeCount - 1;
+    const level = Math.max(1, (player.realmIndex || 0) * 3 + nodeIndex * 2 + 1);
+    const pool = (typeof BIOMES !== 'undefined' && BIOMES[0]?.monsters) ? BIOMES[0].monsters : MONSTERS;
+    const template = pool[Math.floor(Math.random() * pool.length)] || {};
+    const enemy = {
+      name: isBoss ? `${realm.name}守护者` : `${realm.name}妖物`,
+      title: isBoss ? `${realm.name}守护者` : `${realm.name}妖物`,
+      symbol: isBoss ? '首' : '妖',
+      hp: Math.floor((template.hp || 30) * diff.mult.hp * (isBoss ? 1.8 : 1) * (1 + level * 0.15)),
+      atk: Math.floor((template.atk || 8) * diff.mult.atk * (isBoss ? 1.35 : 1) * (1 + level * 0.12)),
+      def: Math.floor((template.def || 2) * diff.mult.def * (isBoss ? 1.25 : 1) * (1 + level * 0.10)),
+      xp: Math.floor((template.xp || 20) * diff.mult.reward * (isBoss ? 3 : 1.5)),
+      stones: Math.floor((template.stones || 5) * diff.mult.reward * (isBoss ? 3 : 1.5)),
+      maxHp: 0,
+      isBoss,
+      isElite: isBoss,
+      color: realm.color || '#c05060',
+      skillIds: [ ...(realm.monsterPool || []) ],
+    };
+    if (isBoss) {
+      enemy.skillIds.push('bossEnrage');
+      if (realm.bossSkillExtra) enemy.skillIds.push(...realm.bossSkillExtra);
+    }
+    enemy.maxHp = enemy.hp;
+    return enemy;
+  }
+
+  function applySecretRealmEventForNode(realm, nodeIndex, options = {}) {
+    const isBoss = nodeIndex >= secretRealmNodeCount - 1;
+    if (isBoss || typeof generateSecretRealmRoomEvents !== 'function') return '';
+    const event = generateSecretRealmRoomEvents(realm.id);
+    if (!event || typeof event.apply !== 'function') return '';
+    const result = event.apply(player) || {};
+    if (typeof player.recalcStats === 'function') player.recalcStats();
+    const text = `${event.icon || '✦'} ${event.name}：${result.msg || event.desc || '秘境异动'}`;
+    if (!options.silent) showMessage(text, realm.color || '#d4a0ff');
+    return text;
+  }
+
+  function createSecretRealmNodeSummary() {
+    return { nodes: 0, boss: 0, xp: 0, stones: 0, loot: [], skipped: 0, events: [] };
+  }
+  window.createSecretRealmNodeSummary = createSecretRealmNodeSummary;
+
+  function grantSecretRealmNodeRewards(enemy, summary = null) {
+    const xpReward = Math.ceil((enemy.xp || 20) * 1.35);
+    const stonesReward = Math.ceil((enemy.stones || 5) * 1.45);
+    player.gainXp(xpReward);
+    player.addSpiritStones(stonesReward);
+    if (summary) {
+      summary.xp += xpReward;
+      summary.stones += stonesReward;
+      summary.nodes += 1;
+      if (enemy.isBoss) summary.boss += 1;
+    }
+    const loot = generateLootDrop(dungeonLevel, enemy);
+    if (loot) {
+      const maxInv = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+      if (player.inventory.length < maxInv) {
+        player.inventory.push(loot);
+        if (summary) summary.loot.push(loot.name || '装备');
+        if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      } else if (summary) {
+        summary.skipped += 1;
+      }
+    }
+  }
+  window.grantSecretRealmNodeRewards = grantSecretRealmNodeRewards;
+
+  // Expose to combat.js
+  window.advanceSecretRealmNode = function advanceSecretRealmNode() {
+    if (!isInSecretRealm) return;
+    const progress = player?.secretRealmProgress;
+    if (!progress) { isInSecretRealm = false; return; }
+    const realm = SECRET_REALMS[progress.realmId];
+    if (!realm) { isInSecretRealm = false; return; }
+    const difficulty = progress.difficulty || 'normal';
+    const isBoss = secretRealmNodeIndex >= secretRealmNodeCount - 1;
+
+    applySecretRealmEventForNode(realm, secretRealmNodeIndex);
+    const enemy = buildSecretRealmEnemy(realm, difficulty, secretRealmNodeIndex, secretRealmNodeCount);
+
+    // Save real dungeon before overwriting with combat placeholder
+    if (!window._savedDungeonBeforeSecretRealm && dungeon) {
+      window._savedDungeonBeforeSecretRealm = dungeon;
+      window._savedDungeonLevelBeforeSecretRealm = dungeonLevel;
+    }
+    const combatPlaceholder = { _monsters: new Map(), grid: [[1]], width: 1, height: 1, rooms: [], roomTypeByCell: new Map(), biome: null };
+    dungeon = combatPlaceholder;
+
+    startCombat(enemy);
+
+    const nodeLabel = isBoss ? '🏆 Boss战' : `⚔️ 第${secretRealmNodeIndex + 1}/${secretRealmNodeCount}关`;
+    showMessage(`🏞️ ${realm.name} · ${nodeLabel}`, realm.color);
+  };
+
+  window.quickChallengeSecretRealm = function quickChallengeSecretRealm() {
+    if (!isInSecretRealm || isInCombat()) return;
+    const progress = player?.secretRealmProgress;
+    if (!progress) { isInSecretRealm = false; syncBodyPanelState(); return; }
+    const realm = SECRET_REALMS?.[progress.realmId];
+    if (!realm) { isInSecretRealm = false; syncBodyPanelState(); return; }
+    const difficulty = progress.difficulty || 'normal';
+    const nodeCount = Number(secretRealmNodeCount || progress.nodeCount || realm.rooms || 1);
+    const startNode = Math.max(0, Number(secretRealmNodeIndex || 0));
+    const summary = progress.nodeSummary || createSecretRealmNodeSummary();
+    progress.nodeSummary = summary;
+    progress.quickMode = true;
+    for (let idx = startNode; idx < nodeCount; idx++) {
+      const eventText = applySecretRealmEventForNode(realm, idx, { silent: true });
+      if (eventText) summary.events.push(eventText.split('：')[0]);
+      const enemy = buildSecretRealmEnemy(realm, difficulty, idx, nodeCount);
+      grantSecretRealmNodeRewards(enemy, summary);
+    }
+    secretRealmNodeIndex = nodeCount;
+    currentEnemy = null;
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    if (typeof document !== 'undefined') document.body.classList.remove('combat-active');
+    resetTemporaryCombatBuffs();
+    const lootText = summary.loot.length ? ` · 🎁${summary.loot.slice(0, 3).join('、')}${summary.loot.length > 3 ? '等' + summary.loot.length + '件' : ''}` : '';
+    const eventText = summary.events.length ? ` · 事件${summary.events.length}个` : '';
+    const fullText = summary.skipped ? ` · 背包满，跳过${summary.skipped}件` : '';
+    if (!showSecretRealmUI) showMessage(`⚡ 快速挑战 ${realm.name}：结算${summary.nodes}关，${summary.xp}经验，💎${summary.stones}${lootText}${eventText}${fullText}`, realm.color || '#d4a0ff');
+    isInSecretRealm = false;
+    if (typeof onSecretRealmComplete === 'function') onSecretRealmComplete();
+  };
+
+  window.onSecretRealmComplete = function onSecretRealmComplete() {
+    const progress = player?.secretRealmProgress;
+    if (!progress) return;
+    const realm = SECRET_REALMS[progress.realmId];
+    const difficulty = progress.difficulty || 'normal';
+    const diffName = SECRET_REALM_DIFFICULTIES[difficulty]?.name || difficulty;
+    const isFirstClear = !player.secretRealmClears?.[realm.id]?.[difficulty];
+
+    // Record clear
+    if (!player.secretRealmClears) player.secretRealmClears = {};
+    if (!player.secretRealmClears[realm.id]) player.secretRealmClears[realm.id] = {};
+    player.secretRealmClears[realm.id][difficulty] = (player.secretRealmClears[realm.id][difficulty] || 0) + 1;
+
+    // Bonus rewards
+    const rewards = getSecretRealmRewards(player, realm.id, difficulty, isFirstClear);
+    let msg = `🏞️ ${realm.name} 通关！获得 ${rewards.xp} 经验，💎 ${rewards.spiritStones} 灵石`;
+    for (const mat of rewards.materials) {
+      playerMaterials[mat.id] = (playerMaterials[mat.id] || 0) + mat.count;
+      const matName = typeof getSecretRealmMaterialName === 'function' ? getSecretRealmMaterialName(mat.id) : (MATERIALS?.find(m => m.id === mat.id)?.name || mat.id);
+      msg += ` | 🔹 ${matName}x${mat.count}`;
+    }
+    if (isFirstClear) msg += ' | 🏆 首通奖励！';
+    const rewardText = msg.replace(/^🏞️ .*? 通关！获得\s*/, '');
+    const nodeSummary = progress.nodeSummary || createSecretRealmNodeSummary();
+    const materialText = rewards.materials.map(mat => {
+      const matName = typeof getSecretRealmMaterialName === 'function' ? getSecretRealmMaterialName(mat.id) : (MATERIALS?.find(m => m.id === mat.id)?.name || mat.id);
+      return `${matName}x${mat.count}`;
+    }).join('、');
+    const runSummary = {
+      result: 'complete',
+      realmId: realm.id,
+      realmName: realm.name,
+      difficulty,
+      difficultyName: diffName,
+      color: realm.color || '#d4a0ff',
+      rewardText,
+      nodes: nodeSummary.nodes || progress.nodeCount || secretRealmNodeCount || realm.rooms,
+      nodeXp: nodeSummary.xp || 0,
+      nodeStones: nodeSummary.stones || 0,
+      clearXp: rewards.xp || 0,
+      clearStones: rewards.spiritStones || 0,
+      totalXp: (nodeSummary.xp || 0) + (rewards.xp || 0),
+      totalStones: (nodeSummary.stones || 0) + (rewards.spiritStones || 0),
+      loot: Array.isArray(nodeSummary.loot) ? [...nodeSummary.loot] : [],
+      skipped: nodeSummary.skipped || 0,
+      eventCount: Array.isArray(nodeSummary.events) ? nodeSummary.events.length : 0,
+      materialText,
+      materialCount: rewards.materials.reduce((sum, mat) => sum + (mat.count || 0), 0),
+      isFirstClear,
+      quick: !!progress.quickMode,
+      at: Date.now(),
+    };
+    player.lastSecretRealmRun = runSummary;
+    secretRealmResultPanel = runSummary;
+    player.gainXp(rewards.xp);
+    player.addSpiritStones(rewards.spiritStones);
+    player.secretRealmProgress = null;
+    player._secretRealmBuff = null;
+    player._secretRealmDebuffs = null;
+    isInSecretRealm = false;
+    secretRealmNodeIndex = 0;
+    secretRealmNodeCount = 0;
+    resetTemporaryCombatBuffs();
+
+    // Restore real dungeon
+    if (window._savedDungeonBeforeSecretRealm) {
+      dungeon = window._savedDungeonBeforeSecretRealm;
+      dungeonLevel = window._savedDungeonLevelBeforeSecretRealm || dungeonLevel;
+      window._savedDungeonBeforeSecretRealm = null;
+      window._savedDungeonLevelBeforeSecretRealm = null;
+    }
+
+    showMessage(msg, '#ffdd55');
+    showSecretRealmUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+
+  window.onSecretRealmDefeat = function onSecretRealmDefeat() {
+    // Secret realm failed — no completion rewards
+    const progress = player?.secretRealmProgress;
+    const realm = progress ? SECRET_REALMS?.[progress.realmId] : null;
+    const difficulty = progress?.difficulty || 'normal';
+    player.lastSecretRealmRun = {
+      result: 'defeat',
+      realmId: realm?.id || progress?.realmId || '',
+      realmName: realm?.name || '秘境',
+      difficulty,
+      difficultyName: SECRET_REALM_DIFFICULTIES?.[difficulty]?.name || difficulty,
+      rewardText: '未获得通关奖励',
+      at: Date.now(),
+    };
+    player.secretRealmProgress = null;
+    player._secretRealmBuff = null;
+    player._secretRealmDebuffs = null;
+    isInSecretRealm = false;
+    secretRealmNodeIndex = 0;
+    secretRealmNodeCount = 0;
+    resetTemporaryCombatBuffs();
+
+    // Restore HP to at least 30% so player isn't stuck at 0 HP
+    if (player.hp <= 0 || player.hp < Math.floor(player.maxHp * 0.3)) {
+      player.hp = Math.floor(player.maxHp * 0.3);
+    }
+
+    // Restore real dungeon
+    if (window._savedDungeonBeforeSecretRealm) {
+      dungeon = window._savedDungeonBeforeSecretRealm;
+      dungeonLevel = window._savedDungeonLevelBeforeSecretRealm || dungeonLevel;
+      window._savedDungeonBeforeSecretRealm = null;
+      window._savedDungeonLevelBeforeSecretRealm = null;
+    }
+
+    showMessage('🏞️ 秘境挑战失败，失去进入消耗但修为尚在。', '#ffdd44');
+    showSecretRealmUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+
+  window.onSecretRealmFlee = function onSecretRealmFlee() {
+    // Escaped from secret realm combat — end the run, no rewards
+    const progress = player?.secretRealmProgress;
+    const realm = progress ? SECRET_REALMS?.[progress.realmId] : null;
+    const difficulty = progress?.difficulty || 'normal';
+    player.lastSecretRealmRun = {
+      result: 'flee',
+      realmId: realm?.id || progress?.realmId || '',
+      realmName: realm?.name || '秘境',
+      difficulty,
+      difficultyName: SECRET_REALM_DIFFICULTIES?.[difficulty]?.name || difficulty,
+      rewardText: '挑战中断',
+      at: Date.now(),
+    };
+    player.secretRealmProgress = null;
+    player._secretRealmBuff = null;
+    player._secretRealmDebuffs = null;
+    isInSecretRealm = false;
+    secretRealmNodeIndex = 0;
+    secretRealmNodeCount = 0;
+    resetTemporaryCombatBuffs();
+
+    // Restore real dungeon
+    if (window._savedDungeonBeforeSecretRealm) {
+      dungeon = window._savedDungeonBeforeSecretRealm;
+      dungeonLevel = window._savedDungeonLevelBeforeSecretRealm || dungeonLevel;
+      window._savedDungeonBeforeSecretRealm = null;
+      window._savedDungeonLevelBeforeSecretRealm = null;
+    }
+
+    showMessage('🏃 逃离秘境，挑战中断。', '#88ccff');
+    showSecretRealmUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+
+
+  // ─── Stage Dungeon System ───
+  function closeStagePanel(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    showStageSelectUI = false;
+    showStageClearPanel = false;
+    lastStageClearSummary = null;
+    const p = document.getElementById('stage-dom-panel');
+    if (p) p.style.display = 'none';
+    clearTouchMovementState();
+    syncBodyPanelState();
+    if (!isInStageRun && typeof generateHomeMap === 'function') generateHomeMap();
+  }
+  function ensureStageDomPanel() {
+    let p = document.getElementById('stage-dom-panel');
+    if (p) return p;
+    p = document.createElement('div');
+    p.id = 'stage-dom-panel';
+    const onCloseHit = e => {
+      if (e.target.closest('.pclose') || e.target.closest('[data-stage-close]')) closeStagePanel(e);
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false });
+    p.addEventListener('touchstart', onCloseHit, { passive: false });
+    p.addEventListener('click', onCloseHit);
+    document.body.appendChild(p);
+    return p;
+  }
+  function addStageEquipmentReward(eq = {}) {
+    if (Math.random() > Number(eq.chance ?? 1)) return null;
+    const maxInv = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+    if (player.inventory.length >= maxInv) return { full: true };
+    const slot = eq.slot || (typeof SLOTS !== 'undefined' ? SLOTS[Math.floor(Math.random() * SLOTS.length)] : null);
+    const item = generateEquipment(Math.max(1, Number(eq.level || eq.floorLevel || dungeonLevel || 1)), { setId: eq.setId, rarityName: eq.rarity, slot });
+    if (!item) return null;
+    player.inventory.push(item);
+    invalidateInventoryListCacheDom();
+    return item;
+  }
+  function applyConfiguredRewards(rewards = {}) {
+    const gained = { items: [], full: false };
+    if (rewards.xp) player.gainXp(Number(rewards.xp) || 0);
+    if (rewards.spiritStones) player.addSpiritStones(Number(rewards.spiritStones) || 0);
+    (rewards.materials || []).forEach(mat => {
+      if (!mat?.id) return;
+      playerMaterials[mat.id] = (playerMaterials[mat.id] || 0) + (Number(mat.count) || 1);
+    });
+    (rewards.equipment || []).forEach(eq => {
+      const got = addStageEquipmentReward(eq);
+      if (got?.full) gained.full = true;
+      else if (got) gained.items.push(got);
+    });
+    return gained;
+  }
+  function formatConfiguredRewards(rewards = {}) {
+    const parts = [];
+    if (rewards.xp) parts.push(`${rewards.xp}经验`);
+    if (rewards.spiritStones) parts.push(`💎${rewards.spiritStones}`);
+    (rewards.materials || []).forEach(mat => parts.push(`${getStageMaterialName(mat.id)}x${mat.count || 1}`));
+    (rewards.equipment || []).forEach(eq => {
+      const set = typeof getEquipmentSet === 'function' ? getEquipmentSet(eq.setId) : null;
+      const chance = eq.chance >= 1 ? '必得' : `${Math.round((eq.chance || 0) * 100)}%`;
+      parts.push(`${chance}${set ? (set.icon || '') + set.name + '套' : '套装'}${eq.rarity ? `·${eq.rarity}` : ''}`);
+    });
+    return parts.join(' · ') || '装备掉落';
+  }
+  function getImmortalStageBossMechanic(stage) {
+    if (!stage?.boss || typeof getImmortalBossMechanic !== 'function') return null;
+    return getImmortalBossMechanic(stage.boss?.mechanicId || stage.id);
+  }
+  function formatImmortalBossTriggerText(trigger) {
+    if (!trigger) return '触发未知';
+    const effect = trigger.effect || {};
+    const effectParts = [];
+    if (effect.damagePct) effectParts.push(`伤害${Math.round(effect.damagePct * 100)}%`);
+    if (effect.drainPct) effectParts.push(`汲取${Math.round(effect.drainPct * 100)}%`);
+    if (effect.shieldPct) effectParts.push(`护盾${Math.round(effect.shieldPct * 100)}%`);
+    if (effect.atkBuff) effectParts.push(`攻击+${Math.round(effect.atkBuff * 100)}%`);
+    if (effect.defBuff) effectParts.push(`防御+${Math.round(effect.defBuff * 100)}%`);
+    if (effect.status) effectParts.push(`状态:${effect.status}`);
+    const effectText = effectParts.join('、') || '特殊压制';
+    if (trigger.type === 'turnInterval') return `每${trigger.every || '?'}回合 · ${effectText}`;
+    if (trigger.type === 'hpBelow') return `血量低于${Math.round((trigger.threshold || 0) * 100)}% · ${effectText}`;
+    return `${trigger.type || '机制'} · ${effectText}`;
+  }
+  function renderImmortalBossMechanicCard(stage) {
+    const mechanic = getImmortalStageBossMechanic(stage);
+    if (!mechanic) return '';
+    const triggerHtml = (mechanic.triggers || []).map(t => `<li>${escapeHtml(formatImmortalBossTriggerText(t))}</li>`).join('');
+    return `<div class="stage-immortal-mechanic-card"><strong>${escapeHtml(mechanic.icon || '🌌')} 仙界机制：${escapeHtml(mechanic.name)}</strong><ul>${triggerHtml}</ul><small>进入战斗后按回合/血量阈值自动触发，已接入真实 Boss 机制。</small></div>`;
+  }
+  function renderStageMaterialSourcePanel(stage) {
+    const ids = [];
+    for (const bucket of [stage?.firstClearRewards, stage?.clearRewards]) {
+      for (const mat of (bucket?.materials || [])) if (mat.id && !ids.includes(mat.id)) ids.push(mat.id);
+    }
+    if (!ids.length) return '';
+    const rows = ids.slice(0, 6).map(id => {
+      const sources = getStageMaterialSources(id).slice(0, 4);
+      const buttons = sources.map(source => `<button type="button" data-stage-material-source="${escapeHtml(source.stageId)}"><span>${escapeHtml(source.chapterName)} · ${escapeHtml(source.stageName)}</span><em>战力${escapeHtml(source.recommendedPower || 0)}</em></button>`).join('');
+      const stageMaterialSourceHint = getStageMaterialSourceText(id, 2);
+      return `<span class="stage-material-source"><b>${escapeHtml(getStageMaterialName(id))}</b><em>${escapeHtml(stageMaterialSourceHint)}</em>${buttons ? `<i>${buttons}</i>` : ''}</span>`;
+    }).join('');
+    return `<section class="stage-material-source-panel"><h4>材料来源</h4><div>${rows}</div></section>`;
+  }
+  function getStageCodexDom() {
+    if (typeof getStageCodexSummary !== 'function') return '';
+    const codex = getStageCodexSummary(player);
+    const progress = normalizeStageProgress(player?.stageProgress);
+    const next = STAGES?.[codex.nextStageId];
+    const nextChapter = next ? STAGE_CHAPTERS?.[next.chapterId] : null;
+    const recSweep = getRecommendedSweepStage(player);
+    const claimChapter = (codex.chapters || []).find(ch => ch.claimable);
+    const nextStars = next ? Number(progress.stageStars?.[next.id] || 0) : 0;
+    const nextText = next ? `${next.icon || ''}${next.name}` : '暂无';
+    const nextReward = next ? formatConfiguredRewards(progress.clearedStages?.[next.id] ? next.clearRewards : next.firstClearRewards) : '所有已解锁副本已查看';
+    const guideCards = [
+      next ? `<button class="codex-guide-card primary" type="button" data-codex-stage="${escapeHtml(next.id)}" style="--stage-color:${escapeHtml(nextChapter?.color || next.color || '#d4a0ff')}"><b>下一步挑战</b><strong>${escapeHtml(nextText)}</strong><small>${escapeHtml(nextChapter?.name || '副本')} · ${escapeHtml(REALMS?.[next.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(next.recommendedPower)}</small><em>奖励：${escapeHtml(nextReward)}</em></button>` : '',
+      claimChapter ? `<button class="codex-guide-card claim" type="button" data-codex-chapter="${escapeHtml(claimChapter.id)}" style="--stage-color:${escapeHtml(claimChapter.color || '#ffdf8a')}"><b>可领取章节奖</b><strong>${escapeHtml(claimChapter.icon || '')} ${escapeHtml(claimChapter.name)}</strong><small>${escapeHtml(claimChapter.stars)}/${escapeHtml(claimChapter.maxStars)}★ · 已全通</small><em>点此跳到章节领奖</em></button>` : '',
+      recSweep ? `<button class="codex-guide-card sweep" type="button" data-codex-stage="${escapeHtml(recSweep.id)}" data-codex-open-sweep="1" style="--stage-color:${escapeHtml((STAGE_CHAPTERS?.[recSweep.chapterId]?.color) || recSweep.color || '#d4a0ff')}"><b>推荐扫荡</b><strong>${escapeHtml(recSweep.icon || '')}${escapeHtml(recSweep.name)}</strong><small>已三星 · 每次💎${escapeHtml(getStageSweepCost(recSweep, 1))}</small><em>${escapeHtml(getStageSetDropText(recSweep) || getStageDropText(recSweep))}</em></button>` : ''
+    ].filter(Boolean).join('') || `<div class="codex-guide-empty">暂无推荐事项，继续推进已解锁副本。</div>`;
+    const chapterRows = (codex.chapters || []).map(ch => {
+      const pct = ch.maxStars ? Math.round((ch.stars / ch.maxStars) * 100) : 0;
+      const status = ch.claimable ? '🔔可领奖' : (ch.bonusClaimed ? '已领奖' : `${ch.cleared}/${ch.total}`);
+      const title = ch.title ? `称号：${ch.title.name}` : '称号：未配置';
+      const theme = ch.theme ? `${ch.theme.icon || ''}${ch.theme.name}` : '默认地图';
+      return `<button class="stage-codex-row ${ch.claimable ? 'claimable' : ''}" type="button" data-codex-chapter="${escapeHtml(ch.id)}" style="--stage-color:${escapeHtml(ch.color || '#d4a0ff')}"><b>${escapeHtml(ch.icon || '')} ${escapeHtml(ch.name)}</b><span>${escapeHtml(status)}</span><small>${escapeHtml(ch.stars)}/${escapeHtml(ch.maxStars)}★ · ${escapeHtml(theme)} · ${escapeHtml(title)}</small><i style="width:${pct}%"></i></button>`;
+    }).join('');
+    const nextStarText = next ? getStageStarText(progress.stageStars?.[next.id] || 0) : '';
+    return `<section class="stage-codex"><div class="codex-head"><b>📖 副本图鉴</b><small>推荐下一关：${escapeHtml(nextText)} ${nextStarText}</small></div><div class="codex-guide-grid">${guideCards}</div><div class="codex-stats"><span><b>${codex.clearedStages}/${codex.totalStages}</b><em>关卡</em></span><span><b>${codex.earnedStars}/${codex.totalStars}</b><em>星级</em></span><span><b>${codex.claimable}</b><em>可领奖</em></span><span><b>${codex.sweepable}</b><em>可扫荡</em></span></div><div class="stage-codex-list">${chapterRows}</div></section>`;
+  }
+  function renderStageDomPanel() {
+    const p = ensureStageDomPanel();
+    if (!showStageSelectUI && !showStageClearPanel) { p.style.display = 'none'; return; }
+    p.style.display = '';
+    const prevChapterScrollLeft = p.querySelector('.stage-chapter-strip')?.scrollLeft || 0;
+    player.stageProgress = normalizeStageProgress(player.stageProgress);
+    const stageStarText = stageId => getStageStarText(player.stageProgress.stageStars?.[stageId] || 0);
+    if (showStageClearPanel && lastStageClearSummary) {
+      const s = lastStageClearSummary;
+      p.innerHTML = `<div class="stage-clear"><button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×</button><div class="stage-clear-icon">${s.success ? '🏆' : '💀'}</div><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.desc)}</p><div class="stage-reward-line">${escapeHtml(s.rewards || '')}</div><div class="stage-clear-actions"><button class="stage-detail-btn" type="button" data-stage-close="1">关闭</button><button class="stage-enter-btn" type="button" data-stage-back="1">返回副本</button></div></div>`;
+    } else {
+      const selected = STAGES[selectedStageId] || STAGES[player.stageProgress.selectedStageId] || STAGES[FIRST_STAGE_ID];
+      selectedStageId = selected.id;
+      if (!selectedStageChapterId || !STAGE_CHAPTERS[selectedStageChapterId]) selectedStageChapterId = selected.chapterId || Object.keys(STAGE_CHAPTERS)[0];
+      const selectedChapter = STAGE_CHAPTERS[selectedStageChapterId] || STAGE_CHAPTERS[selected.chapterId] || Object.values(STAGE_CHAPTERS)[0];
+      const chapterProgress = getChapterProgress(player, selectedChapter.id);
+      const chapterTabs = Object.values(STAGE_CHAPTERS).map(ch => {
+        const cp = getChapterProgress(player, ch.id);
+        const active = ch.id === selectedStageChapterId;
+        const claimCheck = canClaimChapterBonus(player, ch.id);
+        return `<button class="stage-chapter-tab ${active ? 'active' : ''} ${claimCheck.ok ? 'claimable' : ''}" type="button" data-stage-chapter="${escapeHtml(ch.id)}" style="--stage-color:${ch.color}"><span>${ch.icon}</span><b>${escapeHtml(ch.name)}</b><em>${cp.stars}/${cp.total * 3}★</em></button>`;
+      }).join('');
+      const cards = selectedChapter.stages.map((stageId, idx) => {
+        const stage = STAGES[stageId];
+        const unlocked = isStageUnlocked(player, stageId);
+        const cleared = !!player.stageProgress.clearedStages[stageId];
+        const active = selectedStageId === stageId;
+        const theme = typeof getStageTheme === 'function' ? getStageTheme(stage) : null;
+        const status = active ? '已选' : (cleared ? '已通' : (unlocked ? '新' : '锁'));
+        const stars = stageStarText(stageId);
+        const immortalMechanic = typeof getImmortalBossMechanic === 'function' ? getImmortalBossMechanic(stage.boss?.mechanicId || stage.id) : null;
+        const mechanicBadge = immortalMechanic ? `<span class="stage-card-mechanic">${escapeHtml(immortalMechanic.icon || '🌌')} ${escapeHtml(immortalMechanic.name)}</span>` : '';
+        return `<button class="stage-card ${active ? 'selected' : ''} ${unlocked ? '' : 'locked'}" style="--stage-color:${theme?.stairs || stage.color || selectedChapter.color}" type="button" data-stage-id="${escapeHtml(stage.id)}">
+          <span class="stage-card-icon">${stage.icon || selectedChapter.icon}</span><div class="stage-card-main"><b>${idx + 1}. ${escapeHtml(stage.name)}</b><em>${cleared ? stars : (unlocked ? '☆☆☆' : '未解锁')}</em><small>${escapeHtml(REALMS?.[stage.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(stage.recommendedPower)} · ${escapeHtml(stage.roomCount)}房</small>${mechanicBadge}</div><strong>${status}</strong>
+        </button>`;
+      }).join('');
+      const unlocked = isStageUnlocked(player, selected.id);
+      const sweepCheck = canSweepStage(player, selected.id);
+      const rewardText = formatConfiguredRewards(selected.clearRewards);
+      const firstText = selected.firstClearSkillPoints ? `首通：技能点+${selected.firstClearSkillPoints} · ${formatConfiguredRewards(selected.firstClearRewards)}` : `首通：${formatConfiguredRewards(selected.firstClearRewards)}`;
+      const setText = getStageSetDropText(selected);
+      const materialSourcePanel = renderStageMaterialSourcePanel(selected);
+      const chId = selected.chapterId;
+      const chClaim = canClaimChapterBonus(player, chId);
+      const chBonus = STAGE_CHAPTERS[chId]?.chapterBonus;
+      const chBonusText = chBonus ? `${chBonus.desc}：${formatConfiguredRewards(chBonus)}` : '';
+      const starCond = getStageStarConditionText(selected);
+      const selectedTheme = typeof getStageTheme === 'function' ? getStageTheme(selected) : null;
+      const recSweep = getRecommendedSweepStage(player);
+      const recText = recSweep ? `${recSweep.icon || ''}${recSweep.name} · ${getStageSetDropText(recSweep) || getStageDropText(recSweep)}` : '暂无可扫荡副本';
+      const codexSummary = typeof getStageCodexSummary === 'function' ? getStageCodexSummary(player) : null;
+      const nextGuideStage = codexSummary?.nextStageId ? STAGES[codexSummary.nextStageId] : null;
+      const nextGuideText = nextGuideStage
+        ? `${nextGuideStage.icon || ''}${nextGuideStage.name} · ${REALMS?.[nextGuideStage.recommendedRealm]?.name || '练气期'} · 战力${nextGuideStage.recommendedPower}`
+        : (recSweep ? `扫荡 ${recSweep.icon || ''}${recSweep.name} 补材料/套装` : '继续挑战已解锁副本，积累经验、灵石与装备');
+      const sweepCost1 = getStageSweepCost(selected, 1);
+      const bossText = selected.boss?.name ? `${selected.boss.name} · ${getStageBossMechanicText(selected)}` : '普通房间清剿，无首领机制';
+      const immortalMechanicCard = renderImmortalBossMechanicCard(selected);
+      const detailHtml = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-detail-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><div class="stage-detail-title"><span>${selected.icon || '🗺️'}</span><div><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><em>${escapeHtml(selected.desc || '副本详情')}</em></div></div><section class="stage-detail-section"><h4>基础</h4><div class="stage-detail-chip-grid"><span><b>推荐</b><em>${escapeHtml(REALMS?.[selected.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(selected.recommendedPower)}</em></span><span><b>房间</b><em>${escapeHtml(selected.roomCount)}间</em></span><span><b>地图</b><em>${escapeHtml(selectedTheme ? `${selectedTheme.icon || ''} ${selectedTheme.name}` : '默认秘境')}</em></span><span><b>三星</b><em>${escapeHtml(starCond)}</em></span></div></section><section class="stage-detail-section"><h4>战斗</h4><div class="stage-detail-line compact"><b>首领机制</b><span>${escapeHtml(bossText)}</span></div>${immortalMechanicCard}</section><section class="stage-detail-section"><h4>奖励</h4><div class="stage-detail-line compact"><b>掉落</b><span>${escapeHtml(getStageDropText(selected))}</span></div>${setText ? `<div class="stage-detail-line compact"><b>套装目标</b><span>${escapeHtml(setText)}</span></div>` : ''}<div class="stage-detail-line compact"><b>首通</b><span>${escapeHtml(firstText)}</span></div><div class="stage-detail-line compact"><b>重复</b><span>${escapeHtml(rewardText)}</span></div></section><section class="stage-detail-section"><h4>扫荡</h4><div class="stage-detail-line compact"><b>成本</b><span>每次💎${escapeHtml(sweepCost1)} · 推荐：${escapeHtml(recText)}</span></div></section>${materialSourcePanel}${chClaim.ok ? `<div class="stage-detail-alert">🔔 章节全通奖励可领：${escapeHtml(chBonusText)}</div>` : ''}<div class="stage-sheet-actions"><button class="stage-detail-btn" type="button" data-stage-sheet-close="1">关闭</button><button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入副本' : getStageLockedReason(player, selected.id)}</button></div></aside>`;
+      const sweepPreview = getStageSweepPreview(selected, 1);
+      const sweepSheet = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-sweep-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><b>扫荡 ${escapeHtml(selected.name)}</b><small>${sweepCheck.ok ? `每次消耗 💎${escapeHtml(sweepPreview.perCost)}，快速领取重复通关奖励` : escapeHtml(sweepCheck.reason)}</small><div class="stage-sweep-preview"><span><b>当前灵石</b><em class="${sweepPreview.maxRuns <= 0 ? 'lack' : ''}">💎${escapeHtml(sweepPreview.owned)}</em></span><span><b>最多可扫</b><em>${escapeHtml(sweepPreview.maxRuns)}次</em></span><span><b>基础收益</b><em>${escapeHtml(sweepPreview.rewardText)}</em></span><span><b>可能掉落</b><em>${escapeHtml(sweepPreview.dropText)}</em></span></div>${sweepCheck.ok ? `<div class="stage-sweep-options">${[1, 5, 10].map(n => { const pv = getStageSweepPreview(selected, n); return `<button class="stage-sweep-btn ${pv.enough ? '' : 'disabled'}" type="button" data-stage-sweep="${escapeHtml(selected.id)}" data-stage-sweep-count="${n}" ${pv.enough ? '' : 'disabled'}>扫荡${n}次<br><em>💎${pv.cost}</em></button>`; }).join('')}</div>${sweepPreview.maxRuns <= 0 ? `<span class="stage-sweep-hint warn">灵石不足，至少需要💎${escapeHtml(sweepPreview.perCost)}</span>` : ''}` : `<span class="stage-sweep-hint">${escapeHtml(sweepCheck.reason)}</span>`}</aside>`;
+p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-tabs"><button class="stage-tab${stageTab === 'stages' ? ' active' : ''}" type="button" data-stage-tab="stages">选关</button><button class="stage-tab${stageTab === 'codex' ? ' active' : ''}" type="button" data-stage-tab="codex">图鉴</button></div><button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×</button></div><div class="stage-body"${stageTab === 'stages' ? '' : ' style="display:none"'}><div class="stage-chapter-strip">${chapterTabs}</div><div class="stage-chapter-summary" style="--stage-color:${selectedChapter.color}"><b>${selectedChapter.icon} ${escapeHtml(selectedChapter.name)}</b><span>${chapterProgress.cleared}/${chapterProgress.total}关 · ${chapterProgress.stars}/${chapterProgress.total * 3}★</span><small>${escapeHtml(selectedChapter.desc || '')}</small></div><div class="stage-guide-strip"><b>下一步：</b><span>${escapeHtml(nextGuideText)}</span></div><div class="stage-card-grid">${cards}</div></div><div class="stage-body stage-codex-body"${stageTab === 'codex' ? '' : ' style="display:none"'}>${getStageCodexDom()}</div><div class="stage-foot">${stageTab === 'stages' ? `<div class="stage-foot-info" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><small>${escapeHtml(unlocked ? `${REALMS?.[selected.recommendedRealm]?.name || '练气期'} · 战力${selected.recommendedPower} · ${selected.roomCount}房` : getStageLockedReason(player, selected.id))}</small><em>${escapeHtml(setText || getStageDropText(selected) || '通关可获得经验、灵石与装备')}</em></div><div class="stage-foot-actions"><button class="stage-detail-btn ${stageDetailOpen ? 'active' : ''}" type="button" data-stage-detail-toggle="1">详情</button><button class="stage-detail-btn ${stageSweepOpen ? 'active' : ''}" type="button" data-stage-sweep-toggle="1" ${sweepCheck.ok ? '' : 'disabled'}>${sweepCheck.ok ? '扫荡' : sweepCheck.reason}</button>${chClaim.ok ? `<button class="stage-enter-btn" type="button" data-claim-chapter="${escapeHtml(chId)}">领奖</button>` : `<button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入' : '未解锁'}</button>`}</div>` : `<div class="stage-foot-info"><b>副本图鉴</b><small>查看全章节进度</small><em>点击推荐卡可跳转到对应章节与关卡</em></div>`}</div>${stageDetailOpen ? detailHtml : ''}${stageSweepOpen ? sweepSheet : ''}`;
+    }
+    const restoreChapterScroll = () => {
+      const chapterStrip = p.querySelector('.stage-chapter-strip');
+      if (!chapterStrip) return;
+      const cssEscape = window.CSS?.escape || (v => String(v).replace(/[^a-zA-Z0-9_-]/g, '\\$&'));
+      const activeChapterBtn = chapterStrip.querySelector(`.stage-chapter-tab[data-stage-chapter="${cssEscape(selectedStageChapterId || '')}"]`);
+      if (activeChapterBtn) {
+        const targetLeft = Math.max(0, activeChapterBtn.offsetLeft - Math.max(0, (chapterStrip.clientWidth - activeChapterBtn.offsetWidth) / 2));
+        chapterStrip.scrollLeft = targetLeft;
+      } else {
+        chapterStrip.scrollLeft = prevChapterScrollLeft;
+      }
+    };
+    restoreChapterScroll();
+    requestAnimationFrame(restoreChapterScroll);
+    setTimeout(restoreChapterScroll, 80);
+    p.querySelectorAll('.pclose, [data-stage-close]').forEach(btn => bindPanelTap(btn, closeStagePanel));
+    p.querySelectorAll('[data-stage-tab]').forEach(btn => bindPanelTap(btn, e => { e.stopPropagation(); stageTab = btn.dataset.stageTab; stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); }));
+    p.querySelectorAll('[data-stage-chapter]').forEach(btn => bindPanelTap(btn, () => {
+      selectedStageChapterId = btn.dataset.stageChapter;
+      const ch = STAGE_CHAPTERS[selectedStageChapterId];
+      if (ch?.stages?.length && !ch.stages.includes(selectedStageId)) {
+        const firstUnlocked = ch.stages.find(sid => isStageUnlocked(player, sid));
+        selectedStageId = firstUnlocked || ch.stages[0];
+        player.stageProgress.selectedStageId = selectedStageId;
+      }
+      stageDetailOpen = false;
+      stageSweepOpen = false;
+      renderStageDomPanel();
+    }));
+    p.querySelectorAll('[data-codex-chapter]').forEach(btn => bindPanelTap(btn, () => {
+      selectedStageChapterId = btn.dataset.codexChapter;
+      const ch = STAGE_CHAPTERS[selectedStageChapterId];
+      if (ch?.stages?.length && !ch.stages.includes(selectedStageId)) {
+        const firstUnlocked = ch.stages.find(sid => isStageUnlocked(player, sid));
+        selectedStageId = firstUnlocked || ch.stages[0];
+        player.stageProgress.selectedStageId = selectedStageId;
+      }
+      stageTab = 'stages';
+      stageDetailOpen = false;
+      stageSweepOpen = false;
+      renderStageDomPanel();
+    }));
+    p.querySelectorAll('[data-stage-id]').forEach(btn => {
+      bindPanelTap(btn, e => {
+        if (e?.currentTarget && e.currentTarget !== btn) return;
+        selectedStageId = btn.dataset.stageId;
+        player.stageProgress.selectedStageId = selectedStageId;
+        selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
+        stageTab = 'stages';
+        stageDetailOpen = false;
+        stageSweepOpen = false;
+        renderStageDomPanel();
+      });
+    });
+    p.querySelectorAll('[data-codex-stage]').forEach(btn => bindPanelTap(btn, () => {
+      selectedStageId = btn.dataset.codexStage;
+      player.stageProgress.selectedStageId = selectedStageId;
+      selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
+      stageTab = 'stages';
+      stageDetailOpen = false;
+      stageSweepOpen = !!btn.dataset.codexOpenSweep;
+      renderStageDomPanel();
+    }));
+    p.querySelectorAll('[data-stage-detail-toggle]').forEach(btn => bindPanelTap(btn, () => { stageDetailOpen = !stageDetailOpen; stageSweepOpen = false; renderStageDomPanel(); }));
+    p.querySelectorAll('[data-stage-sweep-toggle]').forEach(btn => bindPanelTap(btn, () => { stageSweepOpen = !stageSweepOpen; stageDetailOpen = false; renderStageDomPanel(); }));
+    p.querySelectorAll('[data-stage-sheet-close]').forEach(btn => bindPanelTap(btn, () => { stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); }));
+    p.querySelectorAll('[data-stage-enter]').forEach(btn => bindPanelTap(btn, e => { suppressPanelSyntheticClickUntil = Math.max(suppressPanelSyntheticClickUntil, Date.now() + 900); if (e?.stopPropagation) e.stopPropagation(); enterStage(btn.dataset.stageEnter); }));
+    p.querySelectorAll('[data-stage-sweep]').forEach(btn => bindPanelTap(btn, () => { stageSweepOpen = false; sweepStage(btn.dataset.stageSweep, btn.dataset.stageSweepCount || 1); }));
+    p.querySelectorAll('[data-stage-material-source]').forEach(btn => bindPanelTap(btn, e => {
+      if (e?.stopPropagation) e.stopPropagation();
+      selectedStageId = btn.dataset.stageMaterialSource;
+      player.stageProgress.selectedStageId = selectedStageId;
+      selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
+      stageTab = 'stages';
+      stageDetailOpen = true;
+      stageSweepOpen = false;
+      renderStageDomPanel();
+    }));
+    p.querySelectorAll('[data-claim-chapter]').forEach(btn => bindPanelTap(btn, () => claimChapterBonus(btn.dataset.claimChapter)));
+    p.querySelectorAll('[data-stage-back]').forEach(btn => bindPanelTap(btn, () => { showStageClearPanel = false; showStageSelectUI = true; stageTab = 'stages'; stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); syncBodyPanelState(); }));
+  }
+  function pushStageEventLog(text) {
+    if (!player?.stageProgress?.currentRun || !text) return;
+    const list = Array.isArray(player.stageProgress.currentRun.events) ? player.stageProgress.currentRun.events : [];
+    list.push(text);
+    player.stageProgress.currentRun.events = list.slice(-8);
+  }
+  function applyStageRoomEvent(stage, roomIndex) {
+    const event = getStageRoomEvent(stage, roomIndex);
+    if (!event || ['normal', 'elite', 'boss'].includes(event.type)) return '';
+    const rewards = event.rewards ? JSON.parse(JSON.stringify(event.rewards)) : {};
+    if (event.type === 'rest') {
+      const hp = Math.max(1, Math.floor(player.maxHp * (event.healHpRatio || 0.25)));
+      const mp = Math.max(1, Math.floor(player.maxMp * (event.healMpRatio || 0.25)));
+      player.hp = Math.min(player.maxHp, player.hp + hp);
+      player.mp = Math.min(player.maxMp, player.mp + mp);
+      const text = `${event.icon}${event.name}：恢复生命${hp}、法力${mp}`;
+      pushStageEventLog(text);
+      return text;
+    }
+    if (event.type === 'trap') {
+      const dmg = Math.max(1, Math.floor(player.maxHp * (event.damageHpRatio || 0.1)));
+      player.hp = Math.max(1, player.hp - dmg);
+      const gain = applyConfiguredRewards(rewards);
+      const text = `${event.icon}${event.name}：损失生命${dmg}，获得${formatConfiguredRewards(rewards)}${gain.full ? '（背包已满）' : ''}`;
+      pushStageEventLog(text);
+      return text;
+    }
+    const gain = applyConfiguredRewards(rewards);
+    const itemText = (gain.items || []).map(i => i.name).join('、');
+    const text = `${event.icon}${event.name}：获得${formatConfiguredRewards(rewards)}${itemText ? ' · 装备：' + itemText : ''}${gain.full ? '（背包已满）' : ''}`;
+    pushStageEventLog(text);
+    return text;
+  }
+  function getStageSweepCost(stage, count = 1) {
+    const base = Math.max(8, Math.floor(Number(stage?.recommendedPower || 100) / 120));
+    return base * Math.max(1, Number(count) || 1);
+  }
+  function getStageSweepPreview(stage, count = 1) {
+    const runs = Math.max(1, Math.min(10, Number(count) || 1));
+    const cost = getStageSweepCost(stage, runs);
+    const owned = Number(player?.spiritStones || 0);
+    const perCost = getStageSweepCost(stage, 1);
+    const affordable = perCost > 0 ? Math.floor(owned / perCost) : runs;
+    const maxRuns = Math.max(0, Math.min(10, affordable));
+    const rewards = stage?.clearRewards || {};
+    const rewardParts = [];
+    if (rewards.xp) rewardParts.push(`${Number(rewards.xp || 0) * runs}经验`);
+    if (rewards.spiritStones) rewardParts.push(`💎${Number(rewards.spiritStones || 0) * runs}`);
+    (rewards.materials || []).forEach(mat => rewardParts.push(`${getStageMaterialName(mat.id)}x${Number(mat.count || 1) * runs}`));
+    const dropText = getStageSetDropText(stage) || getStageDropText(stage) || '装备/材料';
+    return { runs, cost, owned, perCost, maxRuns, enough: owned >= cost, rewardText: rewardParts.join(' · ') || '经验、灵石', dropText };
+  }
+  function getRecommendedSweepStage(player) {
+    const progress = normalizeStageProgress(player.stageProgress);
+    const realm = Number(player.realmIndex || 0);
+    const candidates = Object.values(STAGES).filter(s => canSweepStage(player, s.id).ok);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      const ar = Math.abs(Number(a.recommendedRealm || 0) - realm);
+      const br = Math.abs(Number(b.recommendedRealm || 0) - realm);
+      if (ar !== br) return ar - br;
+      const ac = Number(progress.clearedStages[a.id] || 0);
+      const bc = Number(progress.clearedStages[b.id] || 0);
+      if (ac !== bc) return ac - bc;
+      return Number(b.recommendedPower || 0) - Number(a.recommendedPower || 0);
+    });
+    return candidates[0];
+  }
+  function summarizeSweepRewards(summary, rewards = {}, gain = {}) {
+    summary.xp += Number(rewards.xp || 0);
+    summary.spiritStones += Number(rewards.spiritStones || 0);
+    (rewards.materials || []).forEach(mat => {
+      if (!mat?.id) return;
+      summary.materials[mat.id] = (summary.materials[mat.id] || 0) + Number(mat.count || 1);
+    });
+    (gain.items || []).forEach(item => summary.items.push(item.name || '装备'));
+    if (gain.full) summary.full = true;
+  }
+  function formatSweepSummary(summary) {
+    const parts = [];
+    if (summary.cost) parts.push(`消耗💎${summary.cost}`);
+    if (summary.xp) parts.push(`${summary.xp}经验`);
+    if (summary.spiritStones) parts.push(`💎${summary.spiritStones}`);
+    Object.entries(summary.materials || {}).forEach(([id, count]) => parts.push(`${getStageMaterialName(id)}x${count}`));
+    if (summary.items.length) parts.push(`装备：${summary.items.join('、')}`);
+    if (summary.full) parts.push('背包已满，已停止或跳过部分装备');
+    return parts.join(' · ') || '无奖励';
+  }
+  function sweepStage(stageId, count = 1) {
+    const stage = STAGES[stageId];
+    const check = canSweepStage(player, stageId);
+    if (!stage || !check.ok) { showMessage(check.reason || '暂不可扫荡', '#ff8844'); return; }
+    const target = Math.max(1, Math.min(10, Number(count) || 1));
+    const summary = { runs: 0, cost: 0, xp: 0, spiritStones: 0, materials: {}, items: [], full: false };
+    for (let i = 0; i < target; i++) {
+      const cost = getStageSweepCost(stage, 1);
+      if (Number(player.spiritStones || 0) < cost) {
+        if (summary.runs === 0) { showMessage(`灵石不足，扫荡需要💎${cost}`, '#ff8844'); return; }
+        break;
+      }
+      const maxInv = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+      const beforeFull = player.inventory.length >= maxInv;
+      if (beforeFull && (stage.clearRewards?.equipment || []).length) { summary.full = true; break; }
+      player.spiritStones -= cost;
+      summary.cost += cost;
+      const gain = applyConfiguredRewards(stage.clearRewards || {});
+      summarizeSweepRewards(summary, stage.clearRewards || {}, gain);
+      summary.runs++;
+      if (gain.full) break;
+    }
+    lastStageClearSummary = { success: true, title: `${stage.name} 扫荡${summary.runs}次完成`, desc: summary.runs < target ? '资源不足或背包已满，已自动停止。' : '批量扫荡奖励已汇总发放。', rewards: formatSweepSummary(summary) };
+    showStageClearPanel = true;
+    showStageSelectUI = false;
+    syncBodyPanelState();
+    autoSave();
+  }
+  function claimChapterBonus(chapterId) {
+    const check = canClaimChapterBonus(player, chapterId);
+    const chapter = STAGE_CHAPTERS[chapterId];
+    if (!chapter?.chapterBonus || !check.ok) { showMessage(check.reason || '暂不可领取', '#ff8844'); return; }
+    player.stageProgress = normalizeStageProgress(player.stageProgress);
+    applyConfiguredRewards(chapter.chapterBonus);
+    const titleId = typeof getChapterTitleId === 'function' ? getChapterTitleId(chapterId) : null;
+    const title = titleId && typeof unlockPlayerTitle === 'function' ? unlockPlayerTitle(player, titleId) : null;
+    if (typeof player.recalcStats === 'function') player.recalcStats();
+    player.stageProgress.chapterBonusClaimed[chapterId] = true;
+    const chBonusText = `${chapter.chapterBonus.desc}：${formatConfiguredRewards(chapter.chapterBonus)}${title ? ` · 解锁称号「${title.name}」` : ''}`;
+    lastStageClearSummary = { success: true, title: `🏆 ${chapter.name} 全通奖励！`, desc: chBonusText, rewards: '' };
+    showStageClearPanel = true;
+    showStageSelectUI = false;
+    syncBodyPanelState();
+    autoSave();
+    renderStageDomPanel();
+  }
+  function enterStage(stageId) {
+    if (isInCombat() || isInSecretRealm || isInStageRun || isInTribulation) return;
+    player.stageProgress = normalizeStageProgress(player.stageProgress);
+    const stage = STAGES[stageId];
+    if (!stage) { showMessage('未知副本', '#ff4444'); return; }
+    if (!isStageUnlocked(player, stageId)) { showMessage(getStageLockedReason(player, stageId), '#ff8844'); return; }
+    isInStageRun = true;
+    if (typeof document !== 'undefined') document.body.classList.add('stage-run-active');
+    stageRoomIndex = 0;
+    stageRoomCount = stage.roomCount || 1;
+    player.stageProgress.currentRun = { stageId, roomIndex: 0, startedAt: Date.now(), turns: 0, events: [] };
+    selectedStageId = stageId;
+    player.stageProgress.selectedStageId = stageId;
+    showStageSelectUI = false;
+    showStageClearPanel = false;
+    const sp = document.getElementById('stage-dom-panel');
+    if (sp) sp.style.display = 'none';
+    clearTouchMovementState();
+    syncBodyPanelState();
+    generateNewFloor();
+    showMessage(`🗺️ 进入副本：${stage.name}`, stage.color || '#d4a0ff');
+    autoSave();
+  }
+  window.advanceStageRoom = function advanceStageRoom() {
+    if (!isInStageRun) return;
+    const stage = getActiveStage();
+    if (!stage) { isInStageRun = false; return; }
+    player.stageProgress.currentRun.roomIndex = stageRoomIndex;
+    generateNewFloor();
+  };
+  window.quickClearStageRoom = function quickClearStageRoom() {
+    if (!isInStageRun || isInCombat() || isAnyPanelOpen()) return;
+    const stage = getActiveStage();
+    const monsters = dungeon?._monsters ? Array.from(dungeon._monsters.values()).filter(enemy => enemy && Number(enemy.hp || 0) > 0) : [];
+    if (!stage) return;
+    const currentRoomIndex = Number(player?.stageProgress?.currentRun?.roomIndex || 0);
+    const roomEvent = typeof getStageRoomEvent === 'function' ? getStageRoomEvent(stage, currentRoomIndex) : null;
+    if (monsters.length === 0) {
+      if (roomEvent && !['normal', 'elite', 'boss'].includes(roomEvent.type)) {
+        const eventText = typeof applyStageRoomEvent === 'function' ? applyStageRoomEvent(stage, currentRoomIndex) : `${roomEvent.icon || ''}${roomEvent.name || '事件房'}`;
+        if (player?.stageProgress?.currentRun) player.stageProgress.currentRun.turns = Number(player.stageProgress.currentRun.turns || 0) + 1;
+        showMessage(`⚡ 速战跳过${eventText ? '：' + eventText : '事件房'} · 自动前往下一房`, '#ffdd66');
+        if (typeof revealStageRoomExitIfCleared === 'function') revealStageRoomExitIfCleared(dungeon);
+        autoSave();
+        setTimeout(() => {
+          if (!isInStageRun || isInCombat()) return;
+          const exit = dungeon?._stageExit || (typeof getDungeonStairsCell === 'function' ? getDungeonStairsCell(dungeon) : null);
+          if (exit) { player.x = exit.x; player.y = exit.y; }
+          checkStairs();
+        }, 160);
+        return;
+      }
+      showMessage('本房已无妖怪，出口已开启。', '#ffdd66');
+      if (typeof revealStageRoomExitIfCleared === 'function') revealStageRoomExitIfCleared(dungeon);
+      return;
+    }
+    if (player?.stageProgress?.currentRun) player.stageProgress.currentRun.turns = Number(player.stageProgress.currentRun.turns || 0) + monsters.length;
+    const maxInv = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+    const summary = { xp: 0, stones: 0, loot: [], skipped: 0 };
+    monsters.forEach(enemy => {
+      const xpReward = Math.ceil((enemy.xp || 20) * (enemy.isBoss ? 1.55 : 1.25));
+      const stonesReward = Math.ceil((enemy.stones || 5) * (enemy.isBoss ? 1.7 : 1.3));
+      summary.xp += xpReward;
+      summary.stones += stonesReward;
+      player.gainXp(xpReward);
+      player.addSpiritStones(stonesReward);
+      const lootRolls = enemy.isBoss ? 2 : (enemy.isElite ? 1 : (Math.random() < 0.45 ? 1 : 0));
+      for (let i = 0; i < lootRolls; i++) {
+        const loot = generateLootDrop(dungeonLevel, enemy);
+        if (!loot) continue;
+        if (player.inventory.length < maxInv) {
+          player.inventory.push(loot);
+          invalidateInventoryListCacheDom();
+          summary.loot.push(loot.name || '装备');
+        } else {
+          summary.skipped++;
+          break;
+        }
+      }
+    });
+    dungeon._monsters.clear();
+    if (dungeon.grid) {
+      for (let y = 0; y < dungeon.grid.length; y++) {
+        for (let x = 0; x < dungeon.grid[y].length; x++) {
+          if (dungeon.grid[y][x] !== TILE.STAIRS_DOWN && dungeon.grid[y][x] !== TILE.WALL) dungeon.grid[y][x] = dungeon.grid[y][x];
+        }
+      }
+    }
+    if (typeof revealStageRoomExitIfCleared === 'function') revealStageRoomExitIfCleared(dungeon);
+    if (typeof resetTemporaryCombatBuffs === 'function') resetTemporaryCombatBuffs();
+    if (typeof resetDomMapCache === 'function') resetDomMapCache();
+    const lootText = summary.loot.length ? ` · 🎁${summary.loot.slice(0, 3).join('、')}${summary.loot.length > 3 ? '等' + summary.loot.length + '件' : ''}` : '';
+    const fullText = summary.skipped ? ` · 背包满，跳过${summary.skipped}件` : '';
+    showMessage(`⚡ 速战清场 ${monsters.length} 只妖怪：${summary.xp}经验，💎${summary.stones}${lootText}${fullText} · 自动前往下一房`, '#ffdd66');
+    autoSave();
+    setTimeout(() => {
+      if (!isInStageRun || isInCombat()) return;
+      const exit = dungeon?._stageExit || (typeof getDungeonStairsCell === 'function' ? getDungeonStairsCell(dungeon) : null);
+      if (exit) { player.x = exit.x; player.y = exit.y; }
+      checkStairs();
+    }, 160);
+  };
+  window.onStageComplete = function onStageComplete() {
+    const progress = normalizeStageProgress(player.stageProgress);
+    const stageId = progress.currentRun?.stageId || selectedStageId;
+    const stage = STAGES[stageId];
+    if (!stage) return;
+    const isFirst = !progress.firstClearClaimed[stageId];
+    const run = progress.currentRun || {};
+    const stars = calculateStageStars(stage, run, player);
+    const eventLog = Array.isArray(run.events) ? run.events.slice(-5) : [];
+    const clearGain = applyConfiguredRewards(stage.clearRewards || {});
+    let firstGain = { items: [], full: false };
+    if (isFirst) {
+      firstGain = applyConfiguredRewards(stage.firstClearRewards || {});
+      if (stage.firstClearSkillPoints) availableSkillPoints += Number(stage.firstClearSkillPoints || 0);
+      progress.firstClearClaimed[stageId] = true;
+      if (stage.unlockNext && STAGES[stage.unlockNext]) progress.unlockedStages[stage.unlockNext] = true;
+    }
+    progress.clearedStages[stageId] = (progress.clearedStages[stageId] || 0) + 1;
+    progress.stageStars[stageId] = Math.max(Number(progress.stageStars[stageId] || 0), stars);
+    if (!progress.bestClearTurns[stageId] || (run.turns && run.turns < progress.bestClearTurns[stageId])) progress.bestClearTurns[stageId] = Number(run.turns || 0);
+    progress.lastRoomEvents = eventLog;
+    progress.currentRun = null;
+    progress.selectedStageId = stageId;
+    player.stageProgress = progress;
+    isInStageRun = false; stageRoomIndex = 0; stageRoomCount = 0;
+    if (typeof document !== 'undefined') document.body.classList.remove('stage-run-active');
+    const gainedItems = [...(clearGain.items || []), ...(firstGain.items || [])].map(i => i.name).join('、');
+    const fullWarn = clearGain.full || firstGain.full ? ' · 背包已满，部分装备未获得' : '';
+    lastStageClearSummary = { success: true, title: `${stage.name} 通关！ ${getStageStarText(stars)}`, desc: `${isFirst ? '首通奖励已领取，后续关卡已解锁。' : '重复通关奖励已发放。'}${eventLog.length ? ' 房间事件：' + eventLog.join('；') : ''}`, rewards: `${formatConfiguredRewards(stage.clearRewards)}${isFirst ? ' · ' + formatConfiguredRewards(stage.firstClearRewards) + (stage.firstClearSkillPoints ? ` · 技能点+${stage.firstClearSkillPoints}` : '') : ''}${gainedItems ? ' · 获得装备：' + gainedItems : ''}${fullWarn}` };
+    showStageClearPanel = true; showStageSelectUI = false;
+    syncBodyPanelState();
+    autoSave();
+  };
+  window.onStageDefeat = function onStageDefeat() {
+    if (player.stageProgress) player.stageProgress.currentRun = null;
+    isInStageRun = false; stageRoomIndex = 0; stageRoomCount = 0;
+    if (typeof document !== 'undefined') document.body.classList.remove('stage-run-active');
+    if (player.hp <= 0 || player.hp < Math.floor(player.maxHp * 0.3)) player.hp = Math.floor(player.maxHp * 0.3);
+    lastStageClearSummary = { success: false, title: '副本挑战失败', desc: '未获得通关奖励，可调整装备技能后重试。', rewards: '' };
+    showStageClearPanel = true; showStageSelectUI = false;
+    syncBodyPanelState(); autoSave();
+  };
+  window.onStageFlee = function onStageFlee() {
+    if (player.stageProgress) player.stageProgress.currentRun = null;
+    isInStageRun = false; stageRoomIndex = 0; stageRoomCount = 0;
+    if (typeof document !== 'undefined') document.body.classList.remove('stage-run-active');
+    showMessage('🏃 已退出副本。', '#88ccff');
+    showStageSelectUI = true; showStageClearPanel = false;
+    stageTab = 'stages';
+    stageDetailOpen = false;
+    stageSweepOpen = false;
+    selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
+    syncBodyPanelState(); autoSave();
+  };
+
+  // ─── Tribulation System ───
+  function closeTribulationPanel(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    showTribulationUI = false;
+    const p = document.getElementById('tribulation-dom-panel');
+    if (p) p.style.display = 'none';
+    clearTouchMovementState();
+    syncBodyPanelState();
+  }
+  function ensureTribulationDomPanel() {
+    let p = document.getElementById('tribulation-dom-panel');
+    if (p) return p;
+    p = document.createElement('div');
+    p.id = 'tribulation-dom-panel';
+    document.body.appendChild(p);
+    return p;
+  }
+  function renderTribulationDomPanel() {
+    const p = ensureTribulationDomPanel();
+    if (!showTribulationUI) { p.style.display = 'none'; return; }
+    p.style.display = '';
+    if (typeof TRIBULATIONS === 'undefined') {
+      p.innerHTML = '<div class="trib-head"><b>⚡ 天劫</b><span>数据未加载</span><button class="pclose">×</button></div><div class="trib-empty">天劫数据未加载</div>';
+      return;
+    }
+    if (isInTribulation) {
+      const trial = TRIBULATIONS[player?.tribulationProgress?.tribulationId] || TRIBULATIONS.minor;
+      p.innerHTML = `<div class="trib-progress"><b>${trial.icon}${escapeHtml(trial.name)}</b><button class="pclose" type="button">×</button><div>劫雷 ${tribulationNodeIndex + 1}/${tribulationNodeCount}</div><span>战斗结束后自动推进</span></div>`;
+    } else {
+      const cards = Object.values(TRIBULATIONS).map(trial => {
+        const check = getTribulationAvailability(player, trial.id);
+        const selected = selectedTribulationId === trial.id;
+        const clears = player?.tribulationClears?.[trial.id] || 0;
+        return `<button class="trib-card ${selected ? 'selected' : ''} ${check.ok ? '' : 'locked'}" type="button" data-trib-id="${escapeHtml(trial.id)}">
+          <span class="trib-icon">${trial.icon}</span><div><b>${escapeHtml(trial.name)}</b><em>${escapeHtml(trial.desc)}</em><small>${escapeHtml(check.ok ? `消耗：${check.costText || getTribulationCostText(trial)} · 已渡劫 ${clears} 次` : check.reason)}</small></div><strong>${trial.waves}道</strong>
+        </button>`;
+      }).join('');
+      const selected = TRIBULATIONS[selectedTribulationId] || TRIBULATIONS.minor;
+      const check = getTribulationAvailability(player, selected.id);
+      p.innerHTML = `<div class="trib-head"><b>⚡ 天劫</b><span>雷劫精华 ${Number(player?.tribulationEssence || 0)} · 淬体 ${Number(player?.bodyTemperLevel || 0)}</span><button class="pclose" type="button">×</button></div><div class="trib-body">${cards}</div><div class="trib-foot"><div>${escapeHtml(check.ok ? `准备挑战：${selected.name}` : check.reason)}</div><button class="trib-enter ${check.ok ? '' : 'disabled'}" type="button" data-trib-enter="${escapeHtml(selected.id)}" ${check.ok ? '' : 'disabled'}>${check.ok ? `挑战${selected.name}` : '条件不足'}</button></div>`;
+    }
+    p.querySelectorAll('.pclose').forEach(btn => {
+      btn.addEventListener('pointerdown', closeTribulationPanel, { passive: false });
+      btn.addEventListener('click', closeTribulationPanel);
+    });
+    p.querySelectorAll('[data-trib-id]').forEach(btn => {
+      btn.addEventListener('click', e => { e.preventDefault(); selectedTribulationId = btn.dataset.tribId || 'minor'; renderTribulationDomPanel(); });
+    });
+    p.querySelector('[data-trib-enter]')?.addEventListener('click', e => {
+      e.preventDefault();
+      enterTribulation(e.currentTarget.dataset.tribEnter);
+    });
+  }
+  function enterTribulation(tribulationId) {
+    if (isInCombat() || isInTribulation) return;
+    const trial = TRIBULATIONS[tribulationId];
+    if (!trial) { showMessage('未知天劫', '#ff4444'); return; }
+    const paid = consumeTribulationCost(player, tribulationId);
+    if (!paid.ok) { showMessage(paid.reason || '条件不足', '#ff8844'); renderTribulationDomPanel(); return; }
+    isInTribulation = true;
+    tribulationNodeIndex = 0;
+    tribulationNodeCount = trial.waves;
+    player.tribulationProgress = { tribulationId, waves: trial.waves };
+    showTribulationUI = false;
+    const tp = document.getElementById('tribulation-dom-panel');
+    if (tp) tp.style.display = 'none';
+    syncBodyPanelState();
+    setTimeout(() => { advanceTribulationNode(); }, 300);
+  }
+  window.advanceTribulationNode = function advanceTribulationNode() {
+    if (!isInTribulation) return;
+    const progress = player?.tribulationProgress;
+    if (!progress) { isInTribulation = false; return; }
+    const enemy = buildTribulationEnemy(player, progress.tribulationId, tribulationNodeIndex);
+    startCombat(enemy);
+    showMessage(`⚡ ${enemy.title} 降临（${tribulationNodeIndex + 1}/${tribulationNodeCount}）`, '#ffe27a');
+  };
+  window.onTribulationComplete = function onTribulationComplete() {
+    const id = player?.tribulationProgress?.tribulationId;
+    const trial = TRIBULATIONS[id] || TRIBULATIONS.minor;
+    const rewards = applyTribulationSuccess(player, id);
+    player.tribulationProgress = null;
+    isInTribulation = false;
+    tribulationNodeIndex = 0;
+    tribulationNodeCount = 0;
+    resetTemporaryCombatBuffs();
+    player.hp = Math.min(player.maxHp, Math.max(1, player.hp + Math.floor(player.maxHp * 0.25)));
+    showMessage(`⚡ ${trial.name} 成功！雷劫精华+${rewards.essence}，淬体+${rewards.bodyTemper}`, '#ffe27a');
+    showTribulationUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+  window.onTribulationDefeat = function onTribulationDefeat() {
+    const id = player?.tribulationProgress?.tribulationId;
+    const trial = TRIBULATIONS[id] || TRIBULATIONS.minor;
+    const rewards = applyTribulationFailure(player, id);
+    player.tribulationProgress = null;
+    isInTribulation = false;
+    tribulationNodeIndex = 0;
+    tribulationNodeCount = 0;
+    resetTemporaryCombatBuffs();
+    player.hp = Math.max(1, Math.floor(player.maxHp * 0.35));
+    showMessage(`⚡ ${trial.name} 失败，但获得保底：雷劫精华+${rewards.essence}，淬体+${rewards.bodyTemper}`, '#ffdd88');
+    showTribulationUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+  window.onTribulationFlee = function onTribulationFlee() {
+    player.tribulationProgress = null;
+    isInTribulation = false;
+    tribulationNodeIndex = 0;
+    tribulationNodeCount = 0;
+    resetTemporaryCombatBuffs();
+    showMessage('🏃 中断天劫，本次消耗不返还。', '#88ccff');
+    showTribulationUI = true;
+    syncBodyPanelState();
+    autoSave();
+  };
+
+  // ─── Ascension / Immortal World Panel ───
+  function closeAscensionPanel(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    showAscensionUI = false;
+    const p = document.getElementById('ascension-dom-panel');
+    if (p) p.style.display = 'none';
+    clearTouchMovementState();
+    syncBodyPanelState();
+  }
+  function ensureAscensionDomPanel() {
+    let p = document.getElementById('ascension-dom-panel');
+    if (p) return p;
+    p = document.createElement('div');
+    p.id = 'ascension-dom-panel';
+    const onDelegatedAscensionClose = e => {
+      if (!e.target || !e.target.closest('.pclose')) return;
+      closeAscensionPanel(e);
+    };
+    p.addEventListener('pointerdown', onDelegatedAscensionClose, { passive: false });
+    p.addEventListener('touchstart', onDelegatedAscensionClose, { passive: false });
+    p.addEventListener('click', onDelegatedAscensionClose);
+    document.body.appendChild(p);
+    return p;
+  }
+  function getEquippedWeaponForAscension() {
+    return player?.equipment?.weapon || null;
+  }
+  function formatAscensionRefineCandidateName(item) {
+    if (!item) return '未知装备';
+    const lv = Number(item.enhanceLevel || item.level || 0);
+    const rarity = item.rarity ? ` · ${item.rarity}` : '';
+    return `${itemIconDom(item, item.slot)} ${item.name || '未命名装备'}${rarity}${lv > 0 ? ` · +${lv}` : ''}`;
+  }
+  function getAscensionRefineCandidates() {
+    const entries = [];
+    const seen = new Set();
+    const push = (item, source, key) => {
+      if (!item || typeof item !== 'object') return;
+      const sig = item.id || item.uid || `${source}:${key}:${item.name || ''}:${item.slot || ''}`;
+      if (seen.has(sig)) return;
+      seen.add(sig);
+      entries.push({ item, source, key, label: source === 'equipment' ? '已装备' : '背包' });
+    };
+    Object.entries(player.equipment || {}).forEach(([slot, item]) => push(item, 'equipment', slot));
+    (player.inventory?.items || player.inventory || []).forEach((item, index) => push(item, 'inventory', index));
+    return entries.filter(entry => entry.item?.slot || entry.item?.type).sort((a, b) => {
+      const ar = getImmortalRefineActionState(player, playerMaterials, a.item);
+      const br = getImmortalRefineActionState(player, playerMaterials, b.item);
+      if (ar.canRefine !== br.canRefine) return ar.canRefine ? -1 : 1;
+      if (!!a.item.immortalRefined !== !!b.item.immortalRefined) return a.item.immortalRefined ? 1 : -1;
+      return itemPowerDom(b.item) - itemPowerDom(a.item);
+    });
+  }
+  function renderAscensionRefineList() {
+    const entries = getAscensionRefineCandidates().slice(0, 8);
+    if (!entries.length) return `<div class="asc-refine-list empty"><b>仙炼装备列表</b><span>暂无装备。通关副本获取传说/神话装备后，可强化至+10再仙炼。</span></div>`;
+    const rows = entries.map((entry, idx) => {
+      const action = getImmortalRefineActionState(player, playerMaterials, entry.item);
+      const state = entry.item.immortalRefined ? '已仙炼' : (action.canRefine ? '可仙炼' : action.reason || '暂不可仙炼');
+      const stateCls = entry.item.immortalRefined ? 'done' : (action.canRefine ? 'ready' : 'locked');
+      return `<div class="asc-refine-item ${stateCls}"><div><b>${escapeHtml(formatAscensionRefineCandidateName(entry.item))}</b><span>${escapeHtml(entry.label)} · 战力${escapeHtml(itemPowerDom(entry.item))}</span><small>${escapeHtml(state)}</small></div><button class="asc-action" type="button" data-asc-refine-item="${idx}" ${action.canRefine ? '' : 'disabled aria-disabled="true"'}>${action.canRefine ? '仙炼' : escapeHtml(state)}</button></div>`;
+    }).join('');
+    return `<div class="asc-refine-list"><b>仙炼装备列表</b>${rows}</div>`;
+  }
+  function getActiveArtifactProgressForAscension() {
+    const active = typeof getActiveArtifact === 'function' ? getActiveArtifact(player) : null;
+    const progress = active && typeof getArtifactProgress === 'function' ? getArtifactProgress(active.id, player) : null;
+    return { active, progress };
+  }
+  function getAscensionResourceMeta(id, fallbackSource = '', fallbackName = '') {
+    const mat = typeof MATERIALS !== 'undefined' ? MATERIALS.find(m => m.id === id) : null;
+    return {
+      id,
+      name: mat?.name || fallbackName || (typeof getStageMaterialName === 'function' ? getStageMaterialName(id) : id),
+      icon: mat ? materialIconDom(mat) : '✦',
+      source: mat ? materialSourceTextDom(mat) : fallbackSource,
+    };
+  }
+  function getAscensionResourceStageSources(id, limit = 3) {
+    if (typeof getStageMaterialSources === 'function') return getStageMaterialSources(id).slice(0, limit);
+    if (typeof STAGES === 'undefined' || !STAGES) return [];
+    return Object.values(STAGES).filter(stage => {
+      const buckets = [stage.firstClearRewards, stage.repeatRewards, stage.sweepRewards, stage.rewards].filter(Boolean);
+      return buckets.some(reward => Object.prototype.hasOwnProperty.call(reward.materials || reward, id));
+    }).slice(0, limit).map(stage => ({
+      stageId: stage.id,
+      stageName: stage.name,
+      chapterId: stage.chapterId,
+      chapterName: STAGE_CHAPTERS?.[stage.chapterId]?.name || stage.chapterId || '副本',
+      recommendedPower: stage.recommendedPower || stage.power || 0,
+    }));
+  }
+  function openAscensionResourceStageSource(stageId) {
+    if (!stageId || typeof STAGES === 'undefined' || !STAGES?.[stageId]) return;
+    selectedStageId = stageId;
+    player.stageProgress = normalizeStageProgress(player.stageProgress || {});
+    player.stageProgress.selectedStageId = stageId;
+    selectedStageChapterId = STAGES[stageId]?.chapterId || selectedStageChapterId;
+    stageTab = 'stages';
+    stageDetailOpen = true;
+    stageSweepOpen = false;
+    showAscensionUI = false;
+    showStageSelectUI = true;
+    const ascPanel = document.getElementById('ascension-dom-panel');
+    if (ascPanel) ascPanel.style.display = 'none';
+    syncBodyPanelState();
+  }
+  function renderAscensionResourceGuide(items = []) {
+    const rows = items.map(item => {
+      const meta = getAscensionResourceMeta(item.id, item.source || '章节副本 / 首领掉落', item.name || '');
+      const owned = Math.max(0, Number(playerMaterials?.[item.id] || 0));
+      const need = Math.max(1, Number(item.need || 1));
+      const ready = owned >= need;
+      const stageSources = getAscensionResourceStageSources(item.id, 3);
+      const sourceActions = stageSources.map(source => `<button class="asc-source-btn" type="button" data-asc-resource-source="${escapeHtml(source.stageId)}"><span>${escapeHtml(source.chapterName)} · ${escapeHtml(source.stageName)}</span><em>战力${escapeHtml(source.recommendedPower || 0)}</em></button>`).join('');
+      return `<div class="asc-resource-row ${ready ? 'ready' : 'lack'}"><b>${escapeHtml(meta.icon)} ${escapeHtml(meta.name)}</b><span>${escapeHtml(owned)}/${escapeHtml(need)}</span><small>材料来源：${escapeHtml(meta.source || item.source || '章节副本 / 首领掉落')}</small>${sourceActions ? `<div class="asc-source-actions">${sourceActions}</div>` : ''}</div>`;
+    }).join('');
+    return rows ? `<div class="asc-resource-guide"><strong>材料来源</strong>${rows}</div>` : '';
+  }
+  function renderAscensionTrialPanel() {
+    const plan = typeof getAscensionTrialPlan === 'function' ? getAscensionTrialPlan(player) : { nodes: [] };
+    const trial = player.ascension.trial || { active: false, index: 0, cleared: [] };
+    const trialActionState = typeof getAscensionTrialActionState === 'function'
+      ? getAscensionTrialActionState(player, playerMaterials)
+      : { canStart: false, canChallenge: !!trial.active, tokenCount: Number(playerMaterials.ascension_trial_token || 0), startReason: '飞升三劫数据未加载' };
+    const trialDone = !!trialActionState.trialDone || (plan.nodes.length > 0 && plan.nodes.every(n => trial.cleared?.includes(n.id)));
+    const buttonState = ok => ({ cls: ok ? '' : ' disabled', attr: ok ? '' : ' disabled aria-disabled="true"' });
+    const startState = buttonState(trialActionState.canStart);
+    const challengeState = buttonState(trialActionState.canChallenge);
+    const startLabel = trialDone ? '三劫已完成' : (trial.active ? '三劫进行中' : '开启三劫');
+    const challengeLabel = trialDone ? '三劫已完成' : (trial.active ? '挑战当前劫' : '请先开启');
+    const tokenText = `飞升试炼令：${trialActionState.tokenCount || 0}/1`;
+    const guide = renderAscensionResourceGuide([{ id: 'ascension_trial_token', name: '飞升试炼令', need: 1, source: '仙门镇守者首通 / 仙门镇守者复刷' }]);
+    const cards = plan.nodes.map((n, i) => `<div class="asc-step ${trial.cleared?.includes(n.id) ? 'done' : (trial.index === i ? 'active' : '')}"><b>${n.icon} ${escapeHtml(n.name)}</b><span>${escapeHtml(n.desc || '')}</span><small>${trial.cleared?.includes(n.id) ? '已通过' : (trial.index === i ? '当前节点' : '待挑战')}</small></div>`).join('');
+    return `<section class="asc-card"><h3>飞升三劫</h3><p>先过问心劫、炼体劫、叩仙门，再执行最终飞升。</p><div class="asc-token-line"><b>${escapeHtml(tokenText)}</b><span>${escapeHtml(trialActionState.startReason || '可开启三劫')}</span></div>${guide}<div class="asc-progress">${cards}</div><div class="asc-action-row"><button class="asc-action${startState.cls}" type="button" data-asc-trial-start title="${escapeHtml(trialActionState.startReason || '')}"${startState.attr}>${startLabel}</button><button class="asc-action${challengeState.cls}" type="button" data-asc-trial-complete title="${escapeHtml(trialActionState.challengeReason || '')}"${challengeState.attr}>${challengeLabel}</button></div></section>`;
+  }
+  function startAscensionTrialCombatNode() {
+    if (isInCombat()) return;
+    if (!player?.ascension?.trial?.active) {
+      showMessage('请先开启飞升三劫', '#ff8844');
+      renderAscensionDomPanel();
+      return;
+    }
+    const r = typeof advanceAscensionTrialNode === 'function' ? advanceAscensionTrialNode(player) : null;
+    if (!r?.ok || !r.enemy) {
+      showMessage('飞升三劫已完成，可返回总览叩仙门', '#c8f7ff');
+      renderAscensionDomPanel();
+      return;
+    }
+    r.enemy.x = Math.floor(Number(player.x || 0));
+    r.enemy.y = Math.floor(Number(player.y || 0));
+    showAscensionUI = false;
+    const p = document.getElementById('ascension-dom-panel');
+    if (p) p.style.display = 'none';
+    syncBodyPanelState();
+    startCombat(r.enemy);
+    showMessage(`⚔️ 飞升三劫：${r.enemy.name} 开战！`, '#c8f7ff');
+  }
+  function renderAscensionSkillTree() {
+    const tree = ASCENSION_CLASS_TREES?.[player.ascension.classId || ''] || null;
+    if (!tree) return `<section class="asc-card"><h3>仙职技能</h3><p>请先选择仙职，再学习专属技能树。</p></section>`;
+    return `<div class="asc-skill-tree">${tree.nodes.map(n => `<button class="asc-choice ${player.ascension.classSkills?.[n.id] ? 'selected' : ''}" type="button" data-asc-skill="${n.id}"><b>${escapeHtml(n.name)}</b><span>仙玉x${n.cost}</span><small>${player.ascension.classSkills?.[n.id] ? '已习得' : '点击学习'}</small></button>`).join('')}</div>`;
+  }
+  function renderAscensionEndgamePanel() {
+    const dw = player.ascension.demonWar || { active: false, progress: 0, bestClear: 0, clears: 0, nodes: [] };
+    const demonActionState = typeof getDemonWarActionState === 'function'
+      ? getDemonWarActionState(player, playerMaterials)
+      : { active: !!dw.active, progress: Math.max(0, Number(dw.progress || 0)), total: dw.nodes?.length || 4, canStart: false, canAdvance: false, canSettle: false, startReason: '战场数据未加载' };
+    const weapon = getEquippedWeaponForAscension();
+    const refineAction = typeof getImmortalRefineActionState === 'function'
+      ? getImmortalRefineActionState(player, playerMaterials)
+      : { canRefine: false, reason: '仙炼数据未加载', item: weapon };
+    const weaponState = weapon?.immortalRefined ? '已仙炼' : (refineAction.canRefine ? '可仙炼' : (refineAction.reason || (!weapon ? '未装备武器' : '强化+10后可仙炼')));
+    const { active, progress } = getActiveArtifactProgressForAscension();
+    const awakenAction = typeof getArtifactAwakenActionState === 'function'
+      ? getArtifactAwakenActionState(player, playerMaterials)
+      : { canAwaken: false, reason: '觉醒数据未加载', artifact: active, progress };
+    const artifactState = progress?.awakened ? '神器已觉醒' : (awakenAction.canAwaken ? '可觉醒' : (awakenAction.reason || (!active ? '未激活神器' : '满级后可觉醒')));
+    const demonTotal = demonActionState.total || 4;
+    const demonProgress = demonActionState.progress || 0;
+    const buttonState = ok => ({ cls: ok ? '' : ' disabled', attr: ok ? '' : ' disabled aria-disabled="true"' });
+    const startState = buttonState(demonActionState.canStart);
+    const advanceState = buttonState(demonActionState.canAdvance);
+    const settleState = buttonState(demonActionState.canSettle);
+    const refineState = buttonState(refineAction.canRefine);
+    const awakenState = buttonState(awakenAction.canAwaken);
+    const refineList = renderAscensionRefineList();
+    const refineCost = refineAction.cost || (typeof getImmortalRefineCost === 'function' ? getImmortalRefineCost(weapon || { enhanceLevel: 0 }) : { materials: { immortal_refine_stone: 3, immortal_jade_ascended: 2 } });
+    const resourceGuide = renderAscensionResourceGuide([
+      { id: 'demon_war_banner', name: '仙魔战旗', need: 1, source: '仙界副本首通 / 魔尊投影 / 每轮仙魔战场结算' },
+      ...Object.entries(refineCost.materials || {}).map(([id, need]) => ({ id, need, name: id === 'immortal_refine_stone' ? '仙炼石' : '仙玉', source: id === 'immortal_refine_stone' ? '万器仙宫 / 仙魔战场 / 高阶仙域首通' : '仙界副本 / 仙职突破 / 仙魔战场' })),
+    ]);
+    const next = demonActionState.canAdvance && typeof advanceDemonWarNode === 'function' ? advanceDemonWarNode(player) : null;
+    const nextLabel = next?.enemy ? escapeHtml(next.enemy.name) : (demonActionState.canSettle ? '可结算' : (demonActionState.startReason || '待开启'));
+    return `<section class="asc-card"><h3>仙魔战场</h3><p>终局连续战：当前${demonActionState.active ? '进行中' : '未开启'} · 进度${demonProgress}/${demonTotal} · 最高${dw.bestClear || 0}</p><div class="asc-status-grid"><div><b>战场节点</b><span class="asc-badge">${nextLabel}</span></div><div><b>武器仙炼</b><span class="asc-badge ${weapon ? '' : 'asc-muted'}">${escapeHtml(weaponState)}</span></div><div><b>神器觉醒</b><span class="asc-badge ${active ? '' : 'asc-muted'}">${escapeHtml(artifactState)}</span></div></div>${resourceGuide}<div class="asc-action-row"><button class="asc-action${startState.cls}" type="button" data-asc-demon-start title="${escapeHtml(demonActionState.startReason || '')}"${startState.attr}>消耗战旗开启</button><button class="asc-action${advanceState.cls}" type="button" data-asc-demon-next${advanceState.attr}>推进下一节点</button><button class="asc-action${settleState.cls}" type="button" data-asc-demon-complete${settleState.attr}>结算战场</button></div><div class="asc-action-row"><button class="asc-action${refineState.cls}" type="button" data-asc-refine title="${escapeHtml(refineAction.reason || '')}"${refineState.attr}>${refineAction.canRefine ? '仙炼已装备武器' : escapeHtml(refineAction.reason || '暂不可仙炼')}</button><button class="asc-action${awakenState.cls}" type="button" data-asc-awaken title="${escapeHtml(awakenAction.reason || '')}"${awakenState.attr}>${awakenAction.canAwaken ? '觉醒当前神器' : escapeHtml(awakenAction.reason || '暂不可觉醒')}</button></div>${refineList}</section>`;
+  }
+  function startDemonWarCombatNode() {
+    if (isInCombat()) return;
+    if (!player?.ascension?.demonWar?.active) {
+      showMessage('请先消耗战旗开启仙魔战场', '#ff8844');
+      renderAscensionDomPanel();
+      return;
+    }
+    const r = typeof advanceDemonWarNode === 'function' ? advanceDemonWarNode(player) : null;
+    if (!r?.ok || !r.enemy) {
+      showMessage('仙魔战场已推进至终点，可结算奖励', '#88ccff');
+      renderAscensionDomPanel();
+      return;
+    }
+    r.enemy.x = Math.floor(Number(player.x || 0));
+    r.enemy.y = Math.floor(Number(player.y || 0));
+    showAscensionUI = false;
+    const p = document.getElementById('ascension-dom-panel');
+    if (p) p.style.display = 'none';
+    syncBodyPanelState();
+    startCombat(r.enemy);
+    showMessage(`⚔️ 仙魔战场：${r.enemy.name} 开战！`, '#ffcc88');
+  }
+  function renderAscensionDomPanel() {
+    const p = ensureAscensionDomPanel();
+    if (!showAscensionUI) { p.style.display = 'none'; return; }
+    p.style.display = '';
+    if (typeof normalizeAscensionState !== 'function') {
+      p.innerHTML = '<div class="asc-head"><b>☁️ 飞升仙界</b><span>数据未加载</span><button class="pclose">×</button></div><div class="asc-empty">飞升数据未加载</div>';
+      return;
+    }
+    player.ascension = normalizeAscensionState(player.ascension);
+    const status = getAscensionStatus(player, playerMaterials);
+    const cls = player.ascension.classId ? ASCENSION_CLASSES[player.ascension.classId] : null;
+    const bodyTier = getImmortalBodyTier(player);
+    const nextBody = getNextImmortalBodyTier(player);
+    const bonuses = getAscensionStatBonuses(player);
+    const tabs = [['overview','飞升'], ['trial','三劫'], ['body','仙躯'], ['class','仙职'], ['skills','技能'], ['law','法则'], ['endgame','终局']].map(([id,label]) => `<button class="asc-tab ${ascensionTab === id ? 'active' : ''}" type="button" data-asc-tab="${id}">${label}</button>`).join('');
+    let body = '';
+    if (ascensionTab === 'overview') {
+      const req = status.ready ? '<li class="ok">条件已满足，可叩仙门</li>' : status.missing.map(x => `<li>${escapeHtml(x)}</li>`).join('');
+      const overviewGuide = renderAscensionResourceGuide(ASCENSION_REQUIREMENTS.materials);
+      const performReady = status.ready && !player.ascension.ascended;
+      body = `<section class="asc-card hero"><h3>${player.ascension.ascended ? '☁️ 已飞升仙界' : '🚪 叩开仙界之门'}</h3><p>${player.ascension.ascended ? '凡骨尽褪，当前主线转入仙界篇。继续刷接引仙域、淬炼仙躯、选择仙职并参悟法则。' : '通关仙门镇守者并备齐材料后，可飞升为散仙，解锁接引仙域与仙界成长线。'}</p><ul>${req}</ul>${overviewGuide}<div class="asc-action-row"><button class="asc-action" type="button" data-asc-tab="trial">查看三劫</button><button class="asc-action" type="button" data-asc-tab="endgame">终局养成</button><button class="asc-action ${performReady ? '' : 'disabled'}" type="button" data-asc-perform title="${escapeHtml(status.ready || player.ascension.ascended ? '' : status.missing.join('、'))}" ${performReady ? '' : 'disabled aria-disabled="true"'}>${player.ascension.ascended ? '已完成飞升' : '开始飞升'}</button></div></section>`;
+    } else if (ascensionTab === 'trial') {
+      body = renderAscensionTrialPanel();
+    } else if (ascensionTab === 'body') {
+      const bodyNeed = nextBody ? Number(nextBody.cost || 1) : Math.max(1, Number(playerMaterials.immortal_marrow || 0));
+      const bodyReady = !!nextBody && player.ascension.ascended && Number(playerMaterials.immortal_marrow || 0) >= bodyNeed;
+      const bodyReason = nextBody ? (player.ascension.ascended ? (bodyReady ? '' : `需要仙髓（${Number(playerMaterials.immortal_marrow || 0)}/${bodyNeed}）`) : '飞升后可淬炼仙躯') : '仙躯已满';
+      const bodyGuide = renderAscensionResourceGuide([{ id: 'immortal_marrow', name: '仙髓', need: bodyNeed, source: '飞升仪式 / 仙界副本 / 仙界秘境' }]);
+      body = `<section class="asc-card"><h3>仙躯：${escapeHtml(bodyTier.name)}</h3><p>仙髓 ${Number(playerMaterials.immortal_marrow || 0)} · 当前加成：生命${Math.round((bonuses.maxHpPct || 0) * 100)}% / 仙力${Math.round(bonuses.immortalPower || 0)}</p>${bodyGuide}<button class="asc-action ${bodyReady ? '' : 'disabled'}" type="button" data-asc-body title="${escapeHtml(bodyReason)}" ${bodyReady ? '' : 'disabled aria-disabled="true"'}>${nextBody ? `消耗仙髓x${nextBody.cost} 升至${nextBody.name}` : '仙躯已满'}</button></section>`;
+    } else if (ascensionTab === 'class') {
+      body = `<div class="asc-grid">${Object.values(ASCENSION_CLASSES).map(c => `<button class="asc-choice ${player.ascension.classId === c.id ? 'selected' : ''}" type="button" data-asc-class="${c.id}" style="--asc-color:${c.color}"><b>${c.icon} ${escapeHtml(c.name)}</b><span>${escapeHtml(c.desc)}</span><small>${player.ascension.classId === c.id ? '当前仙职' : (player.ascension.classId ? '已定仙职' : '选择')}</small></button>`).join('')}</div>`;
+    } else if (ascensionTab === 'skills') {
+      body = renderAscensionSkillTree();
+    } else if (ascensionTab === 'endgame') {
+      body = renderAscensionEndgamePanel();
+    } else {
+      body = `<div class="asc-grid laws">${Object.values(LAW_DEFINITIONS).map(law => {
+        const lv = player.ascension.laws[law.id] || 0;
+        const cost = getLawUpgradeCost(lv);
+        const owned = Number(playerMaterials[law.materialId] || 0);
+        const canUpgrade = player.ascension.ascended && lv < 10 && owned >= cost;
+        const reason = lv >= 10 ? '法则已圆满' : (player.ascension.ascended ? (canUpgrade ? '点击升级' : `需要${getStageMaterialName(law.materialId)}（${owned}/${cost}）`) : '飞升后可参悟法则');
+        const guide = renderAscensionResourceGuide([{ id: law.materialId, name: getStageMaterialName(law.materialId), need: cost, source: law.source || '仙界副本 / 法则试炼 / 高阶仙域' }]);
+        return `<button class="asc-choice ${selectedAscensionLawId === law.id ? 'selected' : ''}" type="button" data-asc-law="${law.id}" style="--asc-color:${law.color}" title="${escapeHtml(reason)}" ${canUpgrade ? '' : 'aria-disabled="true"'}><b>${law.icon} ${escapeHtml(law.name)} Lv.${lv}</b><span>材料 ${escapeHtml(getStageMaterialName(law.materialId))}：${owned}/${cost}</span><small>${escapeHtml(reason)}</small>${guide}</button>`;
+      }).join('')}</div>`;
+    }
+    p.innerHTML = `<div class="asc-head"><b>☁️ 飞升仙界</b><span>${escapeHtml(REALMS?.[player.realmIndex]?.name || '修士')} · ${cls ? cls.icon + cls.name : '未选仙职'}</span><button class="pclose" type="button">×</button></div><div class="asc-tabs">${tabs}</div><div class="asc-body">${body}</div>`;
+    p.querySelectorAll('.pclose').forEach(btn => { btn.addEventListener('pointerdown', closeAscensionPanel, { passive: false }); btn.addEventListener('click', closeAscensionPanel); });
+    p.querySelectorAll('[data-asc-tab]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); ascensionTab = btn.dataset.ascTab || 'overview'; renderAscensionDomPanel(); }));
+    p.querySelector('[data-asc-perform]')?.addEventListener('click', e => { e.preventDefault(); const r = performAscension(player, playerMaterials); showMessage(r.message || r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelector('[data-asc-trial-start]')?.addEventListener('click', e => { e.preventDefault(); const r = startAscensionTrial(player, playerMaterials); showMessage(r.ok ? '飞升三劫已开启' : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelector('[data-asc-trial-complete]')?.addEventListener('click', e => { e.preventDefault(); startAscensionTrialCombatNode(); autoSave(); });
+    p.querySelector('[data-asc-body]')?.addEventListener('click', e => { e.preventDefault(); const r = upgradeImmortalBody(player, playerMaterials); showMessage(r.ok ? `仙躯升级：${r.tier.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelectorAll('[data-asc-class]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const r = chooseAscensionClass(player, btn.dataset.ascClass); showMessage(r.ok ? `选择仙职：${r.classInfo.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
+    p.querySelectorAll('[data-asc-skill]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const r = upgradeAscensionClassSkill(player, btn.dataset.ascSkill, playerMaterials); showMessage(r.ok ? `习得${r.node.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
+    p.querySelector('[data-asc-demon-start]')?.addEventListener('click', e => { e.preventDefault(); const r = startDemonWarRun(player, playerMaterials); showMessage(r.ok ? '仙魔战场开启' : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelector('[data-asc-demon-next]')?.addEventListener('click', e => { e.preventDefault(); startDemonWarCombatNode(); autoSave(); });
+    p.querySelector('[data-asc-demon-complete]')?.addEventListener('click', e => { e.preventDefault(); const r = completeDemonWarRun(player, playerMaterials); showMessage(r.ok ? `仙魔战场结算：仙玉+${r.rewards?.immortal_jade_ascended || 0}` : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelector('[data-asc-refine]')?.addEventListener('click', e => { e.preventDefault(); const refineAction = getImmortalRefineActionState(player, playerMaterials); if (!refineAction.canRefine) return; const item = getEquippedWeaponForAscension(); const r = immortalRefineItem(item, player, playerMaterials); showMessage(r.ok ? '武器仙炼完成' : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelectorAll('[data-asc-resource-source]').forEach(btn => bindPanelTap(btn, e => { if (e?.stopPropagation) e.stopPropagation(); openAscensionResourceStageSource(btn.dataset.ascResourceSource); }));
+    p.querySelectorAll('[data-asc-refine-item]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const entry = getAscensionRefineCandidates()[Number(btn.dataset.ascRefineItem || 0)]; if (!entry) return; const action = getImmortalRefineActionState(player, playerMaterials, entry.item); if (!action.canRefine) return; const r = immortalRefineItem(entry.item, player, playerMaterials); showMessage(r.ok ? `仙炼完成：${entry.item.name || '装备'}` : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
+    p.querySelector('[data-asc-awaken]')?.addEventListener('click', e => { e.preventDefault(); const awakenAction = getArtifactAwakenActionState(player, playerMaterials); if (!awakenAction.canAwaken) return; const r = awakenArtifact(player, playerMaterials); showMessage(r.ok ? `神器觉醒：${r.awaken?.name || r.artifact.name}` : r.reason, r.ok ? '#ffdd66' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
+    p.querySelectorAll('[data-asc-law]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); selectedAscensionLawId = btn.dataset.ascLaw || 'sword'; const r = upgradeLaw(player, selectedAscensionLawId, playerMaterials); showMessage(r.ok ? `${r.law.name}提升至Lv.${r.level}` : r.reason, r.ok ? '#ffe27a' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
+  }
+  window.renderAscensionDomPanel = renderAscensionDomPanel;
+
+  // ─── End Secret Realm System ───
    // Start
    window.addEventListener('DOMContentLoaded', () => {
      init();

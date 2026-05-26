@@ -15,7 +15,7 @@ function runFile(path, expose = '') {
 }
 
 runFile('js/entities.js', 'this.Player = Player;');
-runFile('js/loot.js', 'this.generateArtifactMaterialDrop = generateArtifactMaterialDrop;');
+runFile('js/loot.js', 'this.generateArtifactMaterialDrop = generateArtifactMaterialDrop; this.generateArtifactTreasureEchoDrop = generateArtifactTreasureEchoDrop;');
 runFile('js/artifacts.js');
 runFile('js/skills.js', 'this.REALM_UNLOCKS = REALM_UNLOCKS;');
 runFile('js/alchemy.js', 'this.MATERIALS = MATERIALS; this.generateMaterialDrop = generateMaterialDrop;');
@@ -114,6 +114,13 @@ assert.strictEqual(recoverResult.ok, true, 'lianyao should recover on victory');
 assert.strictEqual(player.hp, 66, 'lianyao should recover hp by configured pct');
 assert.strictEqual(player.mp, 28, 'lianyao should recover mp by configured pct');
 
+assert.strictEqual(context.activateArtifact(player, 'qiankun').ok, true, 'should activate qiankun for treasure echo test');
+let echoRolls = [0, 0];
+const echoDrop = context.generateArtifactTreasureEchoDrop(player, { isElite: true }, () => echoRolls.shift() ?? 0);
+assert(echoDrop && echoDrop.id.startsWith('artifact_'), 'qiankun treasure echo should grant an extra artifact material when roll succeeds');
+let failEchoRolls = [0.99];
+assert.strictEqual(context.generateArtifactTreasureEchoDrop(player, { isElite: true }, () => failEchoRolls.shift() ?? 0), null, 'qiankun treasure echo should respect trigger chance');
+
 const legacySave = {
   version: 1,
   timestamp: 1,
@@ -123,12 +130,13 @@ const legacySave = {
   equipment: {},
   inventory: [],
   learnedSkills: [],
-  materials: { artifact_shard_zhuxian: 7, herb: 2 },
+  materials: { artifact_shard_zhuxian: 7, artifact_dust: 4, herb: 2 },
   floor: 9,
 };
 const migratedLegacy = context.migrateSave(legacySave);
 assert.strictEqual(JSON.stringify(migratedLegacy.artifacts), JSON.stringify({ activeId: null, owned: {} }), 'legacy save without artifacts should migrate to default artifact state');
-assert.strictEqual(migratedLegacy.materials.artifact_shard_zhuxian, 7, 'artifact materials should survive save migration');
+assert.strictEqual(migratedLegacy.materials.artifact_shard_zhuxian, 11, 'legacy artifact_dust should migrate into usable artifact shards');
+assert.strictEqual(migratedLegacy.materials.artifact_dust, undefined, 'legacy artifact_dust should be removed during migration');
 assert.strictEqual(context.validateSave(migratedLegacy), true, 'migrated legacy save should validate');
 const parsedLegacy = context.parseSaveRaw(JSON.stringify(legacySave));
 assert.strictEqual(JSON.stringify(parsedLegacy.artifacts), JSON.stringify({ activeId: null, owned: {} }), 'parseSaveRaw should migrate missing artifact field');
@@ -141,7 +149,7 @@ assert.strictEqual(migratedMalformed.artifacts.owned.bad, undefined, 'migration 
 assert.strictEqual(context.SAVE_VERSION >= 3, true, 'SAVE_VERSION should bump for artifact save schema');
 
 const unlockText = JSON.stringify(context.REALM_UNLOCKS);
-assert(!unlockText.includes('宠物'), 'realm unlock text should not mention pets');
+assert(unlockText.includes('秘境钥匙开始掉落'), 'realm unlock text should mention secret realm keys after removing pet');
 assert(unlockText.includes('神器系统'), 'realm unlock text should mention artifact system');
 assert(unlockText.includes('神器碎片'), 'realm unlock text should mention artifact shards');
 

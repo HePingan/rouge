@@ -3,8 +3,15 @@ const vm = require('vm');
 const path = require('path');
 
 function createBaseContext() {
+  const consoleErrors = [];
   const context = {
-    console,
+    console: {
+      ...console,
+      error(...args) {
+        consoleErrors.push(args.join(' '));
+        console.error(...args);
+      },
+    },
     window: { innerWidth: 390, innerHeight: 844, addEventListener() {}, dispatchEvent() {} },
     document: {
       body: { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, appendChild() {} },
@@ -23,9 +30,12 @@ function createBaseContext() {
     Math,
   };
   vm.createContext(context);
-  const files = ['js/dungeon.js', 'js/entities.js', 'js/loot.js', 'js/alchemy.js', 'js/combat.js', 'js/main.js'];
+  const files = ['js/dungeon.js', 'js/stages.js', 'js/entities.js', 'js/loot.js', 'js/alchemy.js', 'js/combat.js', 'js/secretRealms.js', 'js/main.js'];
   for (const file of files) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), context, { filename: file });
+  }
+  if (consoleErrors.some(msg => msg.includes('[致命]'))) {
+    throw new Error(`main.js emitted fatal load-order errors in VM harness: ${consoleErrors.join(' | ')}`);
   }
   return context;
 }

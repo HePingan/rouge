@@ -133,6 +133,106 @@ const EQUIPMENT_SETS = {
       { count: 8, label: '长生道体：击杀恢复 12% 生命与灵力', effects: { victoryRecoverPct: 0.12 } },
     ],
   },
+  qingyun: {
+    name: '青云', icon: '⛰️', color: '#8ed8ff', weight: 0,
+    prefixes: ['青云', '山岚', '云影', '狼魂'],
+    bonuses: [
+      { count: 2, label: '速度 +5，闪避 +5%', stats: { speed: 5, dodge: 5 } },
+      { count: 4, label: '暴击 +6%，经验 +10%', stats: { crit: 6, xpBonus: 10 } },
+      { count: 6, label: '攻击 +8%，命中概率迟缓敌人', stats: { atkPct: 0.08 }, effects: { freezeOnHit: 8 } },
+      { count: 8, label: '青云狼魂：首领伤害 +18%，胜利恢复 8%', stats: { bossDmg: 18 }, effects: { victoryRecoverPct: 0.08 } },
+    ],
+  },
+  bloodfiend: {
+    name: '血煞', icon: '🩸', color: '#ff5577', weight: 0,
+    prefixes: ['血煞', '赤魇', '妖血', '煞魂'],
+    bonuses: [
+      { count: 2, label: '吸血 +4%，攻击 +8', stats: { lifesteal: 4, atk: 8 } },
+      { count: 4, label: '暴击 +8%，破甲 +8%', stats: { crit: 8, armorPen: 8 } },
+      { count: 6, label: '首领伤害 +16%，命中概率虚弱', stats: { bossDmg: 16 }, effects: { weakenOnHit: 12 } },
+      { count: 8, label: '血祭战意：低生命时减伤，击杀恢复 12%', effects: { lowHpGuard: 10, victoryRecoverPct: 0.12 } },
+    ],
+  },
+  thundertrib: {
+    name: '雷劫', icon: '⚡', color: '#ffe27a', weight: 0,
+    prefixes: ['雷劫', '天罚', '紫霄', '劫雷'],
+    bonuses: [
+      { count: 2, label: '雷伤 +14，速度 +4', stats: { lightningDmg: 14, speed: 4 } },
+      { count: 4, label: '暴击 +10%，连击 +6%', stats: { crit: 10, extraHitChance: 6 } },
+      { count: 6, label: '首领伤害 +20%，全抗 +10', stats: { bossDmg: 20, allRes: 10 } },
+      { count: 8, label: '九霄雷罚：普通攻击后概率追加雷击', effects: { thunderChain: 0.35 } },
+    ],
+  },
+  yaogu: {
+    name: '万妖毒藤', icon: '🐍', color: '#7ee072', weight: 0,
+    prefixes: ['万妖', '毒藤', '妖皇', '青鳞'],
+    bonuses: [
+      { count: 2, label: '毒伤 +18，闪避 +6%', stats: { poisonDmg: 18, dodge: 6 } },
+      { count: 4, label: '攻击 +10%，命中概率虚弱', stats: { atkPct: 0.10 }, effects: { weakenOnHit: 12 } },
+      { count: 6, label: '首领伤害 +18%，吸血 +4%', stats: { bossDmg: 18, lifesteal: 4 } },
+      { count: 8, label: '万妖缠身：胜利恢复 10%，低血减伤', effects: { victoryRecoverPct: 0.10, lowHpGuard: 8 } },
+    ],
+  },
+  nether: {
+    name: '幽冥魂火', icon: '👻', color: '#b086ff', weight: 0,
+    prefixes: ['幽冥', '魂火', '鬼帝', '冥玉'],
+    bonuses: [
+      { count: 2, label: '灵力上限 +35，吸血 +4%', stats: { maxMp: 35, lifesteal: 4 } },
+      { count: 4, label: '毒伤 +10，全抗 +12', stats: { poisonDmg: 10, allRes: 12 } },
+      { count: 6, label: '首领伤害 +22%，命中概率虚弱', stats: { bossDmg: 22 }, effects: { weakenOnHit: 14 } },
+      { count: 8, label: '魂火护体：低生命减伤，击杀回灵', stats: { killMpRestore: 8 }, effects: { lowHpGuard: 12 } },
+    ],
+  },
+  voidstar: {
+    name: '虚空星痕', icon: '🌀', color: '#8aa0ff', weight: 0,
+    prefixes: ['虚空', '星痕', '裂隙', '寰宇'],
+    bonuses: [
+      { count: 2, label: '速度 +8，闪避 +8%', stats: { speed: 8, dodge: 8 } },
+      { count: 4, label: '暴击 +12%，破甲 +10%', stats: { crit: 12, armorPen: 10 } },
+      { count: 6, label: '攻击 +12%，连击 +8%', stats: { atkPct: 0.12, extraHitChance: 8 } },
+      { count: 8, label: '虚空反击：闪避后下次攻击伤害 +45%', effects: { shadowCounter: 0.45 } },
+    ],
+  },
+  demonwar: {
+    name: '天魔战甲', icon: '😈', color: '#ff8a55', weight: 0,
+    prefixes: ['天魔', '战甲', '修罗', '魔焰'],
+    bonuses: [
+      { count: 2, label: '攻击 +16，暴击 +6%', stats: { atk: 16, crit: 6 } },
+      { count: 4, label: '首领伤害 +24%，破甲 +12%', stats: { bossDmg: 24, armorPen: 12 } },
+      { count: 6, label: '攻击 +14%，低生命减伤', stats: { atkPct: 0.14 }, effects: { lowHpGuard: 14 } },
+      { count: 8, label: '天魔连斩：普通攻击后概率半伤害连击', effects: { thunderChain: 0.30 } },
+    ],
+  },
+  ascensionjade: {
+    name: '登仙白玉', icon: '🌌', color: '#ffd98e', weight: 0,
+    prefixes: ['登仙', '白玉', '仙阶', '道台'],
+    bonuses: [
+      { count: 2, label: '生命上限 +55，防御 +12', stats: { maxHp: 55, def: 12 } },
+      { count: 4, label: '生命 +10%，防御 +10%', stats: { maxHpPct: 0.10, defPct: 0.10 } },
+      { count: 6, label: '全抗 +18，首领伤害 +18%', stats: { allRes: 18, bossDmg: 18 } },
+      { count: 8, label: '白玉仙体：胜利恢复 14%，低血护体', effects: { victoryRecoverPct: 0.14, frostBarrier: 0.22 } },
+    ],
+  },
+  ninethunder: {
+    name: '九劫雷纹', icon: '🌩️', color: '#f6e05e', weight: 0,
+    prefixes: ['九劫', '雷纹', '天罚', '雷帝'],
+    bonuses: [
+      { count: 2, label: '雷伤 +24，雷法亲和 +6', stats: { lightningDmg: 24, thunderAffinity: 6 } },
+      { count: 4, label: '暴击 +14%，速度 +8', stats: { crit: 14, speed: 8 } },
+      { count: 6, label: '首领伤害 +28%，连击 +10%', stats: { bossDmg: 28, extraHitChance: 10 } },
+      { count: 8, label: '九劫雷引：普通攻击后高概率追加雷击', effects: { thunderChain: 0.42 } },
+    ],
+  },
+  trueimmortal: {
+    name: '真仙云门', icon: '🚪', color: '#f7fafc', weight: 0,
+    prefixes: ['真仙', '云门', '仙使', '天门'],
+    bonuses: [
+      { count: 2, label: '生命 +12%，灵力 +12%', stats: { maxHpPct: 0.12, maxMpPct: 0.12 } },
+      { count: 4, label: '攻击 +12%，防御 +12%', stats: { atkPct: 0.12, defPct: 0.12 } },
+      { count: 6, label: '首领伤害 +30%，全抗 +22', stats: { bossDmg: 30, allRes: 22 } },
+      { count: 8, label: '真仙道体：胜利恢复 16%，濒危大幅减伤', effects: { victoryRecoverPct: 0.16, lowHpGuard: 18 } },
+    ],
+  },
 };
 
 function rarityRank(name) {
@@ -280,6 +380,11 @@ function rebuildEquipmentStats(item) {
   item.enhanceLevel = level;
   item.enhanceBonus = bonusValue > 0 ? { [stat]: bonusValue } : {};
   if (bonusValue > 0) stats[stat] = Number(stats[stat] || 0) + bonusValue;
+  if (item.immortalRefined) {
+    const refinedPower = Number(item.immortalRefinePower || item.immortalPowerBonus || item.stats?.immortalPower || 0);
+    stats.immortalPower = Number(stats.immortalPower || 0) + Math.max(1, refinedPower);
+    stats.bossDmg = Number(stats.bossDmg || 0) + Math.max(4, Number(item.immortalRefineBossDmg || item.stats?.bossDmg || 0));
+  }
   item.stats = stats;
   return item;
 }
@@ -371,11 +476,11 @@ function weightedPick(items, weightKey = 'weight') {
   return items[items.length - 1];
 }
 
-function generateEquipment(floorLevel = 1) {
+function generateEquipment(floorLevel = 1, options = {}) {
   // Pick rarity
-  const rarity = weightedPick(RARITY, 'dropWeight');
+  const rarity = options.rarityName ? (Object.values(RARITY).find(r => r.name === options.rarityName) || weightedPick(RARITY, 'dropWeight')) : weightedPick(RARITY, 'dropWeight');
   // Pick slot
-  const slot = SLOTS[Math.floor(Math.random() * SLOTS.length)];
+  const slot = options.slot && SLOTS.includes(options.slot) ? options.slot : SLOTS[Math.floor(Math.random() * SLOTS.length)];
   const slotInfo = SLOT_NAMES[slot];
 
   // Base stat
@@ -422,7 +527,8 @@ function generateEquipment(floorLevel = 1) {
   affixes.push(...specialAffixes);
 
   // Optional set identity; matching pieces unlock 2/4/6/8-piece abilities
-  const set = (player?.realmIndex || 0) >= 2 ? rollEquipmentSet(rarity.name, floorLevel) : null;
+  const forcedSet = options.setId && EQUIPMENT_SETS[options.setId] ? { id: options.setId, ...EQUIPMENT_SETS[options.setId] } : null;
+  const set = forcedSet || ((player?.realmIndex || 0) >= 2 ? rollEquipmentSet(rarity.name, floorLevel) : null);
 
   // Pick sub-type & icon for more visual variety
   const types = slotInfo.subTypes || [{ name: slotInfo.name, icon: slotInfo.icon || '■' }];
@@ -491,6 +597,18 @@ function generateArtifactMaterialDrop(p = player, enemy = null, rng = Math.rando
   if (boss && realmIndex >= 3 && rng() > 0.92) return ARTIFACT_MATERIALS.find(m => m.id === 'artifact_core') || null;
   if ((boss || elite) && realmIndex >= 2 && rng() > 0.82) return ARTIFACT_MATERIALS.find(m => m.id === 'artifact_essence') || weightedArtifactMaterialPick(shardPool, rng);
   return weightedArtifactMaterialPick(shardPool, rng);
+}
+
+function generateArtifactTreasureEchoDrop(p = player, enemy = null, rng = Math.random) {
+  if (typeof ARTIFACT_MATERIALS === 'undefined') return null;
+  if (typeof getActiveArtifact !== 'function' || getActiveArtifact(p)?.id !== 'qiankun') return null;
+  const chance = typeof getArtifactEffectValue === 'function' ? Number(getArtifactEffectValue('treasureEchoChance', p) || 0) : 0;
+  if (Number(p?.realmIndex || 0) < 1 || chance <= 0 || rng() * 100 >= chance) return null;
+  const shardPool = ARTIFACT_MATERIALS.filter(m => String(m.id).startsWith('artifact_shard_'));
+  const rarePool = (enemy?.isBoss || enemy?.isElite) && Number(p?.realmIndex || 0) >= 2
+    ? ARTIFACT_MATERIALS.filter(m => m.id === 'artifact_essence' || String(m.id).startsWith('artifact_shard_'))
+    : shardPool;
+  return weightedArtifactMaterialPick(rarePool.length ? rarePool : shardPool, rng);
 }
 
 // Generate drop from a monster kill
@@ -566,7 +684,7 @@ function unequipItem(player, slot) {
   if (!item) return false;
   const capacity = getInventoryCapacity(player);
   if (player.inventory.length >= capacity) {
-    showMessage(`⚠️ 背包已满（${capacity}格），无法取下 ${item.name}`, '#ff4444');
+    showMessage(`⚠️ 乾坤袋已满（${capacity}格），${item.name}无处安置！`, '#ff4444');
     return false;
   }
   player.equipment[slot] = null;

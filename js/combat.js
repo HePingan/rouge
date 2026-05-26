@@ -4,16 +4,38 @@ let combatState = COMBAT_STATE.IDLE;
 let currentEnemy = null;
 let combatLogBuffer = [];
 let combatLogSeq = 0;
+let isInSecretRealm = false;
+let secretRealmNodeIndex = 0;
+let secretRealmNodeCount = 0;
+let isInStageRun = false;
+let stageRoomIndex = 0;
+let stageRoomCount = 0;
+let isInTribulation = false;
+let tribulationNodeIndex = 0;
+let tribulationNodeCount = 0;
 function resetTemporaryCombatBuffs() {
   if (!player) return;
-  if (!player.tempAtkBuff && !player.tempDefBuff && !player._statusEffects && !player._combatTriggers) return;
+  if (!player.tempAtkBuff && !player.tempDefBuff && !player._statusEffects && !player._combatTriggers && !player._secretRealmDebuffs) return;
   player.tempAtkBuff = 0;
   player.tempDefBuff = 0;
   player._statusEffects = [];
   player._combatTriggers = {};
+  player._secretRealmDebuffs = [];
   player.recalcStats();
 }
 function startCombat(enemy) {
+  if (!enemy || Number(enemy.hp || 0) <= 0) {
+    // Defensive cleanup: do not start combat with a dead/stale monster reference.
+    if (dungeon && enemy && Number.isFinite(enemy.x) && Number.isFinite(enemy.y)) {
+      const key = `${enemy.x},${enemy.y}`;
+      if (dungeon._monsters) dungeon._monsters.delete(key);
+      if (dungeon.grid?.[enemy.y]?.[enemy.x] !== undefined && dungeon.grid[enemy.y][enemy.x] !== TILE.STAIRS_DOWN) {
+        dungeon.grid[enemy.y][enemy.x] = TILE.FLOOR;
+      }
+      if (typeof resetDomMapCache === 'function') resetDomMapCache();
+    }
+    return;
+  }
   currentEnemy = enemy;
   if (!currentEnemy._statusEffects) currentEnemy._statusEffects = [];
   if (!currentEnemy._skillCooldowns) currentEnemy._skillCooldowns = {};
@@ -21,10 +43,19 @@ function startCombat(enemy) {
   combatState = COMBAT_STATE.PLAYER_TURN;
   combatLogBuffer = [];
   if (typeof applyPassiveOnCombatStart === 'function') applyPassiveOnCombatStart();
+  currentEnemy._bossMechanicState = { turn: 0, hp70: false, hp40: false };
   const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(enemy) : [];
+  const immortalBossMechanic = typeof getImmortalBossMechanic === 'function'
+    ? getImmortalBossMechanic(enemy.bossMechanicId || enemy.id || enemy.stageId)
+    : null;
+  const stageBossMechanic = typeof getStageBossMechanic === 'function'
+    ? (getStageBossMechanic(enemy.stageId) || (enemy.bossMechanicId && typeof STAGE_BOSS_MECHANICS !== 'undefined' ? STAGE_BOSS_MECHANICS[enemy.bossMechanicId] : null))
+    : null;
+  const bossMechanic = immortalBossMechanic || stageBossMechanic;
   const skillText = enemySkills.length ? ` · 技能：${enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、')}` : '';
-  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${skillText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
-  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${skillText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
+  const mechanicText = bossMechanic ? ` · 机制：${bossMechanic.icon || '👑'}${bossMechanic.name}` : '';
+  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
+  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
   document.body.classList.add('combat-active');
 }
 function getCombatLogTone(text, color = '#d4c8b0') {
@@ -87,6 +118,14 @@ function applyArtifactVictoryEffects(p = player) {
   p.hp = Math.min(p.maxHp, Number(p.hp || 0) + hp);
   p.mp = Math.min(p.maxMp, Number(p.mp || 0) + mp);
   return { ok: true, hp, mp };
+}
+function notifyArtifactTrigger({ label = '神器共鸣', icon = '🗡️', color = '#ffdd66', text = '', worldX = null, worldY = null, quietToast = false } = {}) {
+  const msg = `${icon} ${label}${text ? `：${text}` : ''}`;
+  combatLog(msg, color);
+  if (!quietToast && typeof showMessage === 'function') showMessage(msg, color, { ttl: 46, quiet: true });
+  if (typeof spawnArtifactTriggerEffect === 'function' && Number.isFinite(worldX) && Number.isFinite(worldY)) {
+    spawnArtifactTriggerEffect(worldX, worldY, color);
+  }
 }
 function applyEquipmentOnHitEffects(damage, crit) {
   if (!player || !currentEnemy || currentEnemy.hp <= 0) return;
@@ -158,7 +197,9 @@ function playerAttack() {
     if (currentEnemy.hp <= 0) break;
     currentEnemy.hp -= effect.damage;
     dmg += effect.damage;
-    combatLog(`${effect.icon || '🗡️'} ${effect.label}追加 ${effect.damage} 点伤害`, effect.color || '#ffdd66');
+    const ex = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
+    const ey = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
+    notifyArtifactTrigger({ label: effect.label, icon: effect.icon || '🗡️', color: effect.color || '#ffdd66', text: `追加 ${effect.damage} 点伤害`, worldX: ex, worldY: ey });
   }
   combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}`, '#ffaa44');
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
@@ -176,6 +217,7 @@ function playerAttack() {
   const wy = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
   if (crit) { spawnCritEffect(wx, wy); sfxCrit(); }
   else { spawnHitEffect(wx, wy); sfxHit(); }
+  if (currentEnemy.hp > 0) maybeTriggerBossMechanic('hp');
   if (currentEnemy.hp <= 0) {
     currentEnemy.hp = 0;
     if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
@@ -212,12 +254,15 @@ function playerFlee() {
   }
 }
 function getPlayerTakenDamageMultiplier() {
-  if (!player || !player._statusEffects) return 1;
+  if (!player) return 1;
   let mult = 1;
-  for (const st of player._statusEffects) {
+  for (const st of (player._statusEffects || [])) {
     if (st.type === 'curse') mult *= 1 + (st.ratio || 0.15);
     if (st.type === 'slow') mult *= 1 + (st.ratio || 0.10);
     if (st.type === 'entangle') mult *= 1 + (st.ratio || 0.12);
+  }
+  for (const st of (player._secretRealmDebuffs || [])) {
+    if (st.type === 'takenDmgUp') mult *= 1 + (st.ratio || 0.10);
   }
   return mult;
 }
@@ -259,8 +304,13 @@ function getEnemyDefenseBuffMultiplier() {
   return currentEnemy._buffs.reduce((mult, buff) => mult * (1 + (buff.defRatio || 0)), 1);
 }
 
+function getEnemyAttackBuffMultiplier() {
+  if (!currentEnemy || !currentEnemy._buffs) return 1;
+  return currentEnemy._buffs.reduce((mult, buff) => mult * (1 + (buff.atkRatio || 0)), 1);
+}
+
 function calculateEnemyDamage(mult = 1) {
-  const attackMult = typeof getEnemyAttackMultiplier === 'function' ? getEnemyAttackMultiplier() : 1;
+  const attackMult = (typeof getEnemyAttackMultiplier === 'function' ? getEnemyAttackMultiplier() : 1) * getEnemyAttackBuffMultiplier();
   const guardMult = typeof getPlayerGuardMultiplier === 'function' ? getPlayerGuardMultiplier() : 1;
   const baseDmg = Math.max(1, Math.floor(currentEnemy.atk * attackMult * mult) - player.def);
   let dmg = Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 3));
@@ -299,7 +349,10 @@ function chooseEnemySkill() {
   const skills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
   const usable = skills.filter(s => !currentEnemy._skillCooldowns?.[s.name]);
   for (const skill of usable) {
-    const chance = currentEnemy.isBoss ? Math.min(0.68, (skill.chance || 0.25) + 0.12) : (skill.chance || 0.25);
+    let chance = skill.chance || 0.25;
+    if (currentEnemy.isElite) chance += 0.08;
+    if (currentEnemy.isBoss) chance += 0.16;
+    chance = Math.min(currentEnemy.isBoss ? 0.76 : 0.56, chance);
     if (Math.random() < chance) return skill;
   }
   return null;
@@ -312,8 +365,12 @@ function useEnemySkill(skill) {
   const label = `${skill.icon || '✦'} ${currentEnemy.title || currentEnemy.name}施放【${skill.name}】${skill.log ? `，${skill.log}` : ''}`;
   if (skill.type === 'selfBuff') {
     if (!currentEnemy._buffs) currentEnemy._buffs = [];
-    currentEnemy._buffs.push({ ...(skill.buff || { defRatio: 0.15, turns: 2 }) });
-    combatLog(`${label}，防御提升`, skill.color || '#aaddff');
+    const buff = { ...(skill.buff || { defRatio: 0.15, turns: 2 }) };
+    currentEnemy._buffs.push(buff);
+    const parts = [];
+    if (buff.atkRatio) parts.push(`攻击+${Math.round(buff.atkRatio * 100)}%`);
+    if (buff.defRatio) parts.push(`防御+${Math.round(buff.defRatio * 100)}%`);
+    combatLog(`${label}，${parts.join('、') || '妖力提升'}`, skill.color || '#aaddff');
     return true;
   }
   if (skill.type === 'multiHit') {
@@ -348,11 +405,112 @@ function useEnemySkill(skill) {
   return true;
 }
 
+function getCurrentImmortalBossMechanic() {
+  if (!currentEnemy?.isBoss || typeof getImmortalBossMechanic !== 'function') return null;
+  return getImmortalBossMechanic(currentEnemy.bossMechanicId || currentEnemy.id || currentEnemy.stageId);
+}
+
+function getCurrentBossMechanic() {
+  if (!currentEnemy?.isBoss) return null;
+  const immortalMechanic = getCurrentImmortalBossMechanic();
+  if (immortalMechanic?.triggers) return immortalMechanic;
+  if (typeof getStageBossMechanic === 'function' && currentEnemy.stageId) return getStageBossMechanic(currentEnemy.stageId);
+  return currentEnemy.bossMechanicId && typeof STAGE_BOSS_MECHANICS !== 'undefined' ? STAGE_BOSS_MECHANICS[currentEnemy.bossMechanicId] : null;
+}
+
+function describeImmortalBossEffect(effect) {
+  if (!effect) return '异象涌动';
+  if (effect.type === 'damage') return `造成 ${effect.value} 伤害`;
+  if (effect.type === 'drain') return `吸取 ${effect.value} 生命`;
+  if (effect.type === 'status') return `附加${effect.value}`;
+  if (effect.type === 'atkBuff') return '攻击提升';
+  if (effect.type === 'defBuff') return '防御提升';
+  if (effect.type === 'shield') return '护盾回升';
+  return effect.type || '异象';
+}
+
+function triggerImmortalBossMechanic(mechanic, phase = 'turn') {
+  if (!mechanic?.triggers || !currentEnemy || !player || typeof applyImmortalBossMechanic !== 'function') return false;
+  const result = applyImmortalBossMechanic(currentEnemy, player, phase);
+  if (!result?.effects?.length) return false;
+  const detail = result.effects.map(describeImmortalBossEffect).join('、');
+  combatLog(`${mechanic.icon || '👑'} ${currentEnemy.name}触发【仙界机制·${mechanic.name}】：${detail}`, '#ffcc88');
+  return true;
+}
+
+function triggerBossMechanic(mechanic) {
+  if (!mechanic || !currentEnemy || !player) return false;
+  const effect = mechanic.effect || {};
+  const label = `${mechanic.icon || '👑'} ${currentEnemy.name}触发【${mechanic.name}】`;
+  if (effect.type === 'bossBuff') {
+    currentEnemy._buffs = currentEnemy._buffs || [];
+    currentEnemy._buffs.push({ atkRatio: effect.atkRatio || 0, defRatio: effect.defRatio || 0, turns: effect.turns || 2 });
+    combatLog(`${label}，气势暴涨`, '#ffdd66');
+    return true;
+  }
+  if (effect.type === 'healBuff') {
+    const heal = Math.max(1, Math.floor((currentEnemy.maxHp || currentEnemy.hp || 1) * (effect.healMaxHpRatio || 0.05)));
+    currentEnemy.hp = Math.min(currentEnemy.maxHp || currentEnemy.hp, currentEnemy.hp + heal);
+    currentEnemy._buffs = currentEnemy._buffs || [];
+    currentEnemy._buffs.push({ atkRatio: effect.atkRatio || 0, defRatio: effect.defRatio || 0, turns: effect.turns || 2 });
+    combatLog(`${label}，回复 ${heal} 生命并强化自身`, '#ffdd66');
+    return true;
+  }
+  if (effect.type === 'debuff') {
+    if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
+    if (effect.status) addPlayerDebuff({ ...effect.status, sourceAtk: currentEnemy.atk });
+    combatLog(`${label}，负面状态缠身`, '#d4a0ff');
+    return true;
+  }
+  if (effect.type === 'drainDebuff') {
+    const result = calculateEnemyDamage(effect.mult || 0.75);
+    finishEnemyDamage(result.dmg, label, '#b086ff', false, result.guardMult, result.takenMult);
+    const heal = Math.max(1, Math.floor(result.dmg * (effect.healRatio || 0.4)));
+    currentEnemy.hp = Math.min(currentEnemy.maxHp || currentEnemy.hp, currentEnemy.hp + heal);
+    if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
+    combatLog(`👻 ${currentEnemy.name} 摄魂回复 ${heal} 生命`, '#b086ff');
+    return true;
+  }
+  if (effect.type === 'multiHitDebuff') {
+    let total = 0, guardMult = 1, takenMult = 1;
+    for (let i = 0; i < (effect.hits || 2); i++) { const r = calculateEnemyDamage(effect.mult || 0.35); total += r.dmg; guardMult = r.guardMult; takenMult = r.takenMult; }
+    finishEnemyDamage(total, `${label}（${effect.hits || 2}段）`, '#f6e05e', false, guardMult, takenMult);
+    if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
+    return true;
+  }
+  if (effect.type === 'damageDebuff') {
+    const dmg = Math.max(1, Math.floor((currentEnemy.atk || 1) * (effect.damageAtkRatio || 0.5)));
+    finishEnemyDamage(dmg, label, '#ff8844');
+    if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
+    if (effect.status) addPlayerDebuff({ ...effect.status, sourceAtk: currentEnemy.atk });
+    return true;
+  }
+  return false;
+}
+
+function maybeTriggerBossMechanic(phase = 'turn') {
+  const mechanic = getCurrentBossMechanic();
+  if (!mechanic || !currentEnemy || currentEnemy.hp <= 0) return false;
+  currentEnemy._bossMechanicState = currentEnemy._bossMechanicState || { turn: 0, hp70: false, hp40: false };
+  const state = currentEnemy._bossMechanicState;
+  if (mechanic.triggers) {
+    if (phase === 'turn') state.turn = (state.turn || 0) + 1;
+    return triggerImmortalBossMechanic(mechanic, phase);
+  }
+  const hpRatio = currentEnemy.hp / Math.max(1, currentEnemy.maxHp || currentEnemy.hp);
+  if (phase === 'hp' && mechanic.trigger === 'hp70' && hpRatio <= 0.70 && !state.hp70) { state.hp70 = true; return triggerBossMechanic(mechanic); }
+  if (phase === 'hp' && mechanic.trigger === 'hp40' && hpRatio <= 0.40 && !state.hp40) { state.hp40 = true; return triggerBossMechanic(mechanic); }
+  if (phase === 'turn' && mechanic.trigger === 'turn3') { state.turn = (state.turn || 0) + 1; if (state.turn % 3 === 0) return triggerBossMechanic(mechanic); }
+  return false;
+}
+
 function finishEnemyTurn() {
   if (player.hp <= 0) {
     const saved = typeof applyArtifactDeathSave === 'function' ? applyArtifactDeathSave(player) : null;
     if (saved?.ok) {
-      combatLog(`🗼 昊天塔护住元神，生命恢复至 ${player.hp}`, '#ffd166');
+      const px = player.x * CELL_SIZE + CELL_SIZE / 2;
+      const py = player.y * CELL_SIZE + CELL_SIZE / 2;
+      notifyArtifactTrigger({ label: '昊天塔护体', icon: '🗼', color: '#ffd166', text: `生命恢复至 ${player.hp}`, worldX: px, worldY: py });
     } else {
       player.hp = 0;
       combatLog('💀 你被击败了...', '#ff3333');
@@ -383,6 +541,7 @@ function enemyAttack() {
   if (typeof tickEnemyStatusStartTurn === 'function' && tickEnemyStatusStartTurn()) return;
   if (tickPlayerStatusStartEnemyTurn()) return;
   tickEnemyBuffsStartTurn();
+  if (maybeTriggerBossMechanic('turn')) { finishEnemyTurn(); return; }
   if (currentEnemy._skillCooldowns) {
     for (const key of Object.keys(currentEnemy._skillCooldowns)) {
       currentEnemy._skillCooldowns[key] -= 1;
@@ -407,7 +566,153 @@ function enemyAttack() {
   finishEnemyDamage(dmg, `${currentEnemy.name} 攻击你`, '#ff6666', crit, result.guardMult, result.takenMult);
   finishEnemyTurn();
 }
+function isAscensionTrialCombat() {
+  return !!(currentEnemy?.ascensionTrial && player?.ascension?.trial?.active);
+}
+function isDemonWarCombat() {
+  return !!(currentEnemy?.demonWar && player?.ascension?.demonWar?.active);
+}
+function onDemonWarDefeat() {
+  if (!player?.ascension?.demonWar) return;
+  player.ascension.demonWar.active = false;
+  player.ascension.demonWar.progress = 0;
+  showMessage('仙魔战场失利，战旗燃尽，需重新开启。', '#ff8844');
+  if (typeof autoSave === 'function') autoSave();
+}
 function onVictory() {
+  if (isAscensionTrialCombat() && currentEnemy) {
+    const result = typeof completeAscensionTrialNode === 'function' ? completeAscensionTrialNode(player, currentEnemy.trialId) : null;
+    const total = typeof ASCENSION_TRIALS !== 'undefined' ? ASCENSION_TRIALS.length : 3;
+    const cleared = player.ascension?.trial?.cleared?.length || 0;
+    const xpReward = Math.ceil((currentEnemy.xp || 70) * 1.2);
+    player.gainXp(xpReward);
+    showMessage(`飞升三劫胜利：${currentEnemy.name}（${cleared}/${total}）· 获得 ${xpReward} 修为${result?.done ? ' · 三劫已全部通过' : ''}`, result?.done ? '#ffdd66' : '#c8f7ff');
+    resetTemporaryCombatBuffs();
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof showAscensionUI !== 'undefined') showAscensionUI = true;
+    if (typeof ascensionTab !== 'undefined') ascensionTab = 'trial';
+    if (typeof renderAscensionDomPanel === 'function') renderAscensionDomPanel();
+    if (typeof syncBodyPanelState === 'function') syncBodyPanelState();
+    if (typeof autoSave === 'function') autoSave();
+    return;
+  }
+  if (isDemonWarCombat() && currentEnemy) {
+    const dw = player.ascension.demonWar;
+    const total = dw.nodes?.length || 4;
+    const before = Number(dw.progress || 0);
+    const nextProgress = Math.min(total, before + 1);
+    const xpReward = Math.ceil((currentEnemy.xp || 80) * 1.35);
+    const stonesReward = Math.ceil((currentEnemy.stones || 20) * 1.5);
+    player.gainXp(xpReward);
+    player.addSpiritStones(stonesReward);
+    player.ascension.demonWar.progress = Math.min(total, nextProgress);
+    showMessage(`仙魔战场胜利：${currentEnemy.name}（${nextProgress}/${total}）· 获得 ${xpReward} 修为、${stonesReward} 灵石${nextProgress >= total ? ' · 可结算终局奖励' : ''}`, nextProgress >= total ? '#ffdd66' : '#ffcc88');
+    resetTemporaryCombatBuffs();
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof showAscensionUI !== 'undefined') showAscensionUI = true;
+    if (typeof ascensionTab !== 'undefined') ascensionTab = 'endgame';
+    if (typeof renderAscensionDomPanel === 'function') renderAscensionDomPanel();
+    if (typeof syncBodyPanelState === 'function') syncBodyPanelState();
+    if (typeof autoSave === 'function') autoSave();
+    return;
+  }
+  if (isInTribulation && currentEnemy) {
+    const xpReward = Math.ceil((currentEnemy.xp || 30) * 1.15);
+    player.gainXp(xpReward);
+    combatLog(`⚡ 扛过第 ${tribulationNodeIndex + 1}/${tribulationNodeCount} 道劫雷，获得 ${xpReward} 修为`, '#ffe27a');
+    resetTemporaryCombatBuffs();
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    tribulationNodeIndex++;
+    if (tribulationNodeIndex >= tribulationNodeCount) {
+      isInTribulation = false;
+      if (typeof onTribulationComplete === 'function') onTribulationComplete();
+    } else {
+      setTimeout(() => { if (typeof advanceTribulationNode === 'function') advanceTribulationNode(); }, 700);
+    }
+    return;
+  }
+  if (isInSecretRealm && currentEnemy) {
+    // Secret realm victory: use shared node reward logic so manual combat and quick challenge settle consistently.
+    const summary = player?.secretRealmProgress?.nodeSummary || null;
+    const beforeXp = summary?.xp || 0;
+    const beforeStones = summary?.stones || 0;
+    const beforeLootCount = summary?.loot?.length || 0;
+    if (typeof grantSecretRealmNodeRewards === 'function') {
+      grantSecretRealmNodeRewards(currentEnemy, summary);
+    }
+    const xpReward = summary ? summary.xp - beforeXp : Math.ceil((currentEnemy.xp || 20) * 1.35);
+    const stonesReward = summary ? summary.stones - beforeStones : Math.ceil((currentEnemy.stones || 5) * 1.45);
+    const newLoot = summary?.loot?.slice(beforeLootCount) || [];
+    let msg = `🏞️ 秘境·${currentEnemy.title || currentEnemy.name}击败！获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
+    if (newLoot.length) msg += ` | 🎁 ${newLoot.join('、')}`;
+    showMessage(msg, currentEnemy.isBoss ? '#ffdd55' : '#88ddff');
+    resetTemporaryCombatBuffs();
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    // Advance node
+    secretRealmNodeIndex++;
+    if (secretRealmNodeIndex >= secretRealmNodeCount) {
+      // Secret realm complete!
+      isInSecretRealm = false;
+      if (typeof onSecretRealmComplete === 'function') {
+        onSecretRealmComplete();
+      }
+    } else {
+      // Next enemy
+      setTimeout(() => {
+        if (typeof advanceSecretRealmNode === 'function') {
+          advanceSecretRealmNode();
+        }
+      }, 800);
+    }
+    return;
+  }
+
+  if (isInStageRun && currentEnemy) {
+    const xpReward = Math.ceil((currentEnemy.xp || 20) * (currentEnemy.isBoss ? 1.55 : 1.25));
+    const stonesReward = Math.ceil((currentEnemy.stones || 5) * (currentEnemy.isBoss ? 1.7 : 1.3));
+    player.gainXp(xpReward);
+    player.addSpiritStones(stonesReward);
+    let msg = `🗺️ ${currentEnemy.title || currentEnemy.name}击败！获得 ${xpReward} 经验，💎 ${stonesReward} 灵石`;
+    const lootRolls = currentEnemy.isBoss ? 2 : (currentEnemy.isElite ? 1 : (Math.random() < 0.45 ? 1 : 0));
+    const maxInv = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
+    for (let i = 0; i < lootRolls; i++) {
+      const loot = generateLootDrop(dungeonLevel, currentEnemy);
+      if (!loot) continue;
+      if (player.inventory.length < maxInv) { player.inventory.push(loot); msg += ` | 🎁 ${loot.name}`; }
+      else { msg += ` | ⚠️ 背包已满(${maxInv}格)`; break; }
+    }
+    const echoDrop = typeof generateArtifactTreasureEchoDrop === 'function' ? generateArtifactTreasureEchoDrop(player, currentEnemy) : null;
+    if (echoDrop) {
+      playerMaterials[echoDrop.id] = (playerMaterials[echoDrop.id] || 0) + 1;
+      msg += ` | 🪞机缘回响：${echoDrop.name}`;
+      const ex = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
+      const ey = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
+      notifyArtifactTrigger({ label: '乾坤镜机缘回响', icon: '🪞', color: '#88ccff', text: `额外获得 ${echoDrop.name}`, worldX: ex, worldY: ey });
+    }
+    clearCurrentEnemyFromDungeon(false);
+    const roomCleared = typeof revealStageRoomExitIfCleared === 'function' ? revealStageRoomExitIfCleared(dungeon) : true;
+    if (roomCleared) msg += ' | ▽ 出口已开启';
+    showMessage(msg, currentEnemy.isBoss ? '#ffdd55' : '#88ddff');
+    resetTemporaryCombatBuffs();
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    return;
+  }
+
   const rewardMult = currentEnemy.isElite ? (currentEnemy.eliteRewardMult || 1.8) : 1;
   const xpReward = Math.ceil((currentEnemy.xp || 20) * 1.35 * rewardMult);
   const stonesReward = Math.ceil((currentEnemy.stones || 5) * 1.45 * rewardMult);
@@ -447,17 +752,20 @@ function onVictory() {
     playerMaterials[artifactMat.id] = (playerMaterials[artifactMat.id] || 0) + 1;
     msg += ` | 🗡️ ${artifactMat.name}`;
   }
+  const echoDrop = typeof generateArtifactTreasureEchoDrop === 'function' ? generateArtifactTreasureEchoDrop(player, currentEnemy) : null;
+  if (echoDrop) {
+    playerMaterials[echoDrop.id] = (playerMaterials[echoDrop.id] || 0) + 1;
+    msg += ` | 🪞机缘回响：${echoDrop.name}`;
+    const ex = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
+    const ey = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
+    notifyArtifactTrigger({ label: '乾坤镜机缘回响', icon: '🪞', color: '#88ccff', text: `额外获得 ${echoDrop.name}`, worldX: ex, worldY: ey });
+  }
   // Clear enemy tile and remove from monsters map.
   // Boss guards spawn on the same cell as STAIRS_DOWN, so preserve/reveal the exit.
   if (dungeon && currentEnemy) {
-    const key = `${currentEnemy.x},${currentEnemy.y}`;
     const wasBossGuard = !!currentEnemy.isBoss;
-    dungeon.grid[currentEnemy.y][currentEnemy.x] = wasBossGuard ? TILE.STAIRS_DOWN : TILE.FLOOR;
-    if (dungeon._monsters) dungeon._monsters.delete(key);
+    clearCurrentEnemyFromDungeon(wasBossGuard);
     if (wasBossGuard) {
-      if (typeof discoveredMap !== 'undefined') discoveredMap.add(key);
-      if (typeof visibleMap !== 'undefined') visibleMap.add(key);
-      if (typeof resetDomMapCache === 'function') resetDomMapCache();
       combatLog('▽ 守卫倒下，通往下一层的入口显现！', '#ffdd55');
       msg += ' | ▽ 下一层入口已开启';
     }
@@ -481,6 +789,44 @@ function onVictory() {
 
 function onDefeat() {
   combatLog('💀 你被击败了...', '#ff3333');
+  if (isDemonWarCombat()) {
+    combatLog('仙魔战场失利，你被战场法则送回仙门...', '#ff8844');
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    setTimeout(() => { if (typeof onDemonWarDefeat === 'function') onDemonWarDefeat(); }, 500);
+    return;
+  }
+  if (isInTribulation) {
+    combatLog('天劫暂歇，你带着雷痕坠回凡尘...', '#ff8844');
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    setTimeout(() => { if (typeof onTribulationDefeat === 'function') onTribulationDefeat(); }, 500);
+    return;
+  }
+  if (isInSecretRealm) {
+    combatLog('秘境溃散，你被传送出来...', '#ff8844');
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    setTimeout(() => {
+      if (typeof onSecretRealmDefeat === 'function') onSecretRealmDefeat();
+    }, 500);
+    return;
+  }
+  if (isInStageRun) {
+    combatLog('副本挑战失败，你被传回入口...', '#ff8844');
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    setTimeout(() => { if (typeof onStageDefeat === 'function') onStageDefeat(); }, 500);
+    return;
+  }
   combatLog('境界修为护住了你的魂魄，但装备和灵石尽数遗失...', '#ff8844');
   combatState = COMBAT_STATE.DEFEAT;
   const dx = player.x * CELL_SIZE + CELL_SIZE / 2;
@@ -531,7 +877,7 @@ function onDefeat() {
     combatLogBuffer = [];
     combatState = COMBAT_STATE.IDLE;
     document.body.classList.remove('combat-active');
-    showMessage('你在深渊入口重生，修为尚在，从头再来！', '#ffdd44');
+    showMessage('道心未灭，肉身重塑！深渊入口，仙途再启...', '#ffdd44');
     autoSave();
   }, 1500);
 }
@@ -541,14 +887,68 @@ function onFlee() {
   player.x = Math.round(fallbackX);
   player.y = Math.round(fallbackY);
   resetTemporaryCombatBuffs();
+
+  // If fleeing from a secret realm combat, end the realm run
+  if (isDemonWarCombat()) {
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof onDemonWarDefeat === 'function') onDemonWarDefeat();
+    return;
+  }
+
+  if (isInTribulation) {
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof onTribulationFlee === 'function') onTribulationFlee();
+    return;
+  }
+
+  // If fleeing from a secret realm combat, end the realm run
+  if (isInSecretRealm) {
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof onSecretRealmFlee === 'function') onSecretRealmFlee();
+    return;
+  }
+
+  if (isInStageRun) {
+    combatState = COMBAT_STATE.IDLE;
+    combatLogBuffer = [];
+    currentEnemy = null;
+    document.body.classList.remove('combat-active');
+    if (typeof onStageFlee === 'function') onStageFlee();
+    return;
+  }
+
   combatState = COMBAT_STATE.IDLE;
   combatLogBuffer = [];
   currentEnemy = null;
   document.body.classList.remove('combat-active');
-  showMessage('你趁机后撤，暂时脱离了战斗。', '#88ccff');
+  showMessage('御风遁走！暂避锋芒，来日再战。', '#88ccff');
 }
 function isInCombat() {
   return combatState === COMBAT_STATE.PLAYER_TURN || combatState === COMBAT_STATE.ENEMY_TURN;
+}
+function clearCurrentEnemyFromDungeon(preserveBossStairs = false) {
+  if (!dungeon || !currentEnemy || !Number.isFinite(currentEnemy.x) || !Number.isFinite(currentEnemy.y)) return;
+  const key = `${currentEnemy.x},${currentEnemy.y}`;
+  const currentTile = dungeon.grid?.[currentEnemy.y]?.[currentEnemy.x];
+  const shouldPreserveStairs = preserveBossStairs || currentTile === TILE.STAIRS_DOWN;
+  if (dungeon.grid?.[currentEnemy.y]?.[currentEnemy.x] !== undefined) {
+    dungeon.grid[currentEnemy.y][currentEnemy.x] = shouldPreserveStairs ? TILE.STAIRS_DOWN : TILE.FLOOR;
+  }
+  if (dungeon._monsters) dungeon._monsters.delete(key);
+  if (shouldPreserveStairs) {
+    if (typeof discoveredMap !== 'undefined') discoveredMap.add(key);
+    if (typeof visibleMap !== 'undefined') visibleMap.add(key);
+  }
+  if (typeof resetDomMapCache === 'function') resetDomMapCache();
 }
 // Check adjacency for combat trigger (main loop calls this)
 function checkCombatTrigger() {
@@ -557,8 +957,13 @@ function checkCombatTrigger() {
   const py = Math.floor(player.y);
   if (dungeon._monsters && dungeon._monsters.has(`${px},${py}`)) {
     const enemy = dungeon._monsters.get(`${px},${py}`);
+    if (!enemy || Number(enemy.hp || 0) <= 0) {
+      dungeon._monsters.delete(`${px},${py}`);
+      if (dungeon.grid?.[py]?.[px] !== undefined && dungeon.grid[py][px] !== TILE.STAIRS_DOWN) dungeon.grid[py][px] = TILE.FLOOR;
+      if (typeof resetDomMapCache === 'function') resetDomMapCache();
+      return false;
+    }
     startCombat(enemy);
     return true;
   }
-  return false;
 }

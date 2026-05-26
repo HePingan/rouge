@@ -12,18 +12,31 @@
 ├── css/
 │   └── style.css       # 全局样式、手机端布局、HUD/面板/控件样式
 └── js/
+    ├── debug.js        # 调试浮层、错误捕获、ROUGE_DEBUG 工具
     ├── dungeon.js      # 地牢、地图、地形、楼层等基础定义
+    ├── stages.js      # 副本章节、关卡、扫荡、章节标题与材料来源
     ├── entities.js     # 玩家、怪物、装备/物品等实体定义
     ├── combat.js       # 战斗、伤害结算、状态处理
     ├── loot.js         # 掉落、奖励、装备生成
+    ├── artifacts.js   # 神器解锁、升级、觉醒与神器属性加成
     ├── skills.js       # 技能树与技能效果
     ├── alchemy.js      # 炼丹与材料逻辑
+    ├── ascension.js   # 飞升三劫、叩仙门、仙躯、仙职、法则、仙魔战场
     ├── particles.js    # 粒子/特效渲染
     ├── ui.js           # UI 辅助、HUD、面板交互
     ├── save.js         # localStorage 存档读写、备份、坏档隔离、导入导出
-    ├── debug.js        # 调试浮层、错误捕获、ROUGE_DEBUG 工具
+    ├── secretRealms.js # 秘境入口、房间事件、难度、奖励与钥匙消耗
+    ├── tribulation.js # 天劫配置、词缀、敌人、奖励与失败惩罚
     └── main.js         # 游戏主循环、输入、初始化与整体编排
 ```
+
+## 当前内容规模
+
+- **35 个副本关卡**：覆盖凡界主线、渡劫、仙门、接引仙域与仙界后续章节。
+- **4 类秘境**：草药、铸造、神器、天劫资源秘境。
+- **4 档天劫**：小天劫、三九、六九、九九天劫。
+- **5 件神器**：含解锁、升级、觉醒、主动神器选择与 HUD 入口。
+- **飞升后期线**：飞升三劫、叩仙门、仙躯淬炼、仙职、法则、仙魔战场、仙炼装备与终局 Boss 机制。
 
 ## 打开方式
 
@@ -74,14 +87,19 @@ http://<服务器IP>/
 ```html
 <script src="js/debug.js"></script>
 <script src="js/dungeon.js"></script>
+<script src="js/stages.js"></script>
 <script src="js/entities.js"></script>
 <script src="js/combat.js"></script>
 <script src="js/loot.js"></script>
+<script src="js/artifacts.js"></script>
 <script src="js/skills.js"></script>
 <script src="js/alchemy.js"></script>
+<script src="js/ascension.js"></script>
 <script src="js/particles.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/save.js"></script>
+<script src="js/secretRealms.js"></script>
+<script src="js/tribulation.js"></script>
 <script src="js/main.js"></script>
 ```
 
@@ -168,15 +186,27 @@ ROUGE_DEBUG.lastErrors      // 最近捕获到的 window error / unhandledreject
 ```bash
 cd /www/wwwroot/rouge
 node --check js/*.js
+for f in test-*.js; do node "$f" || exit 1; done
 git diff --check
 ```
 
 说明：
 
 - `node --check js/*.js`：检查所有 JS 文件语法是否有效。
+- `for f in test-*.js; do node "$f" || exit 1; done`：运行所有轻量静态/行为回归测试，覆盖脚本顺序、cachebuster、移动端面板、飞升/副本/秘境/天劫流程等关键约束。
 - `git diff --check`：检查 diff 中是否存在尾随空格、空白错误等问题。
 
-如果修改了 `index.html` 中的资源版本号或加载顺序，还需要在浏览器中实际刷新页面，并确认 Console 无报错。
+### 移动端冒烟
+
+建议用本地静态服务加载手机框验证页，检查 Console、资源版本、面板开关与地图优先显示：
+
+```bash
+cd /www/wwwroot/rouge
+python3 -m http.server 8787
+# 浏览器访问 http://127.0.0.1:8787/mobile-verify.html
+```
+
+`mobile-verify.html` 会在 390×844 手机框中加载 `index.html`，并提供 `inspectGame()` 辅助检查 HUD、底部导航和各 DOM 面板的几何状态。若修改了 `index.html` 中的资源版本号或加载顺序，还需要在浏览器中实际刷新页面，并确认 Console 无报错。
 
 ## 并行开发规则
 
