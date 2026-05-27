@@ -9,7 +9,7 @@ const entities = fs.readFileSync('js/entities.js', 'utf8');
 const main = fs.readFileSync('js/main.js', 'utf8');
 const combat = fs.readFileSync('js/combat.js', 'utf8');
 
-const CURRENT_TOKEN = '20260526nexthint1';
+const CURRENT_TOKEN = '20260527invfix1';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 assert(/炼虚期[\s\S]*合体期[\s\S]*大乘期[\s\S]*渡劫期[\s\S]*真仙境/.test(entities), 'REALMS should extend to 真仙境 in order');

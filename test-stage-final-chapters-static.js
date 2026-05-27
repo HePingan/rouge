@@ -19,6 +19,6 @@ assert(stages.includes("unlockNext: 'thunder_trial'"), 'ascension to thunder unl
 assert(stages.includes("unlockNext: 'immortal_path'"), 'thunder to immortal unlock missing');
 assert(stages.includes('九霄雷帝'), 'final thunder boss missing');
 assert(stages.includes('仙门镇守者'), 'immortal final boss missing');
-assert(index.includes('js/stages.js?v=20260526nexthint1'), 'cachebuster missing');
+assert(index.includes('js/stages.js?v=20260527invfix1'), 'cachebuster missing');
 
 console.log('stage final chapters static ok');

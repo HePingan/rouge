@@ -290,6 +290,16 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     document.body.classList.toggle('stage-open', !!showStageSelectUI || !!showStageClearPanel);
     document.body.classList.toggle('tribulation-open', !!showTribulationUI);
     document.body.classList.toggle('ascension-open', !!showAscensionUI);
+    /* Clear stale inline display styles so CSS class rules can control visibility.
+       hideDomPanelById sets panel.style.display = 'none' which has higher priority
+       than body.<panel>-open CSS selectors; removing it lets the stylesheet win. */
+    if (open) {
+      [
+        'inventory-dom-panel', 'character-dom-panel', 'stage-dom-panel',
+        'secretrealm-dom-panel', 'tribulation-dom-panel', 'ascension-dom-panel',
+        'artifact-dom-panel', 'alchemy-dom-panel', 'breakthrough-dom-panel',
+      ].forEach(id => { const el = document.getElementById(id); if (el) el.style.removeProperty('display'); });
+    }
     const moreMenu = document.getElementById('more-menu');
     if (moreMenu && open) {
       moreMenu.classList.remove('open');
@@ -1169,7 +1179,9 @@ function escapeHtml(value) {
       'artifact-dom-panel',
       'alchemy-dom-panel',
       'breakthrough-dom-panel',
-    ].forEach(hideDomPanelById);
+    ].forEach(id => {
+      if (!shouldSync) hideDomPanelById(id);
+    });
     clearTouchMovementState();
     if (shouldSync) syncBodyPanelState();
   }

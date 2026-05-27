@@ -18,6 +18,6 @@ assert(main.includes('<div class="stage-body stage-codex-body"') && main.include
 assert(css.includes('.stage-guide-strip'), 'stage next-step guide css missing');
 assert(css.includes('.stage-codex'), 'codex css missing');
 assert(css.includes('.codex-stats'), 'codex stat css missing');
-assert(index.includes('js/stages.js?v=20260526nexthint1'), 'cachebuster missing');
+assert(index.includes('js/stages.js?v=20260527invfix1'), 'cachebuster missing');
 
 console.log('stage codex static ok');

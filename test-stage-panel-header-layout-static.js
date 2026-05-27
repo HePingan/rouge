@@ -6,7 +6,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260526nexthint1';
+const CURRENT_TOKEN = '20260527invfix1';
 const PREVIOUS_TOKEN = '20260526guide1';
 
 assert(/<div class="stage-head">\s*<b>🗺️ 副本<\/b>[\s\S]*<div class="stage-tabs">[\s\S]*<button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×<\/button>[\s\S]*<\/div>/.test(main), 'stage panel header should render title + tabs first and put the close button as the last/rightmost header item');

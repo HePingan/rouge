@@ -16,6 +16,6 @@ assert(
   /data-asc-body[^>]+title="\$\{escapeHtml\([^}]*\)\}"/.test(main) || /data-asc-body[\s\S]{0,220}aria-disabled="true"/.test(main),
   '仙躯升级按钮不可用时应暴露 title/aria-disabled 原因，便于移动端长按与读屏'
 );
-assert(index.includes('20260526nexthint1'), '本轮不应回退当前缓存戳');
+assert(index.includes('20260527invfix1'), '本轮不应回退当前缓存戳');
 
 console.log('ascension body/law resource guidance static assertions passed');

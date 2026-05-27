@@ -28,7 +28,7 @@ mustInclude(stages, 'law_fragment_forge', 'forge palace should reward forge law 
 mustInclude(stages, 'law_fragment_nether', 'nether rift should reward nether law fragments');
 mustInclude(stages, 'law_fragment_void', 'immortal demon battlefield should reward void law fragments');
 mustInclude(stages, 'demon_war_banner', 'immortal demon battlefield should reward demon war banners');
-assert(index.includes('20260526nexthint1'), 'cachebuster should bump to endgame6 for immortal continuation chapters');
+assert(index.includes('20260527invfix1'), 'cachebuster should bump to endgame6 for immortal continuation chapters');
 assert(!index.includes('20260524endgame5'), 'index should not keep stale endgame5 token');
-mustInclude(css, 'Mobile Universal Interface Layout 20260526nexthint1', 'mobile layout marker should bump');
+mustInclude(css, 'Mobile Universal Interface Layout 20260527invfix1', 'mobile layout marker should bump');
 console.log('immortal chapter continuation static assertions passed');

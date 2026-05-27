@@ -13,16 +13,16 @@ function mustMatch(label, regex) {
 }
 
 // Cache token must be bumped when mobile layout changes.
-assert(html.includes('20260526nexthint1'), 'index cachebuster should include inventory cleanup token');
+assert(html.includes('20260527invfix1'), 'index cachebuster should include inventory cleanup token');
 
 const mobileVerify = fs.readFileSync('mobile-verify.html', 'utf8');
 assert(
-  /<iframe[^>]+src="\.\/index\.html\?v=20260526nexthint1"/.test(mobileVerify),
+  /<iframe[^>]+src="\.\/index\.html\?v=20260527invfix1"/.test(mobileVerify),
   'mobile-verify iframe should load this project entrypoint, not the web root'
 );
 
 // Universal mobile sheet contract: panels should feel native on phones.
-mustInclude('mobile layout marker', 'Mobile Universal Interface Layout 20260526nexthint1');
+mustInclude('mobile layout marker', 'Mobile Universal Interface Layout 20260527invfix1');
 mustInclude('panel list includes character', '#character-dom-panel');
 mustInclude('panel list includes inventory', '#inventory-dom-panel');
 mustInclude('panel list includes skill', '#skills-dom-panel');

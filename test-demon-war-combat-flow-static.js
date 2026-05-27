@@ -6,7 +6,7 @@ const combat = fs.readFileSync('js/combat.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260526nexthint1';
+const CURRENT_TOKEN = '20260527invfix1';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 function mustInclude(src, needle, label) {

@@ -18,7 +18,7 @@ for (const id of [
 ]) {
   assert(closeBlock.includes(`'${id}'`), `closeAllPanels must explicitly list stale ${id}`);
 }
-assert(closeBlock.includes('.forEach(hideDomPanelById)'), 'closeAllPanels should pass all listed stale panels through hideDomPanelById');
+assert(closeBlock.includes('.forEach(id => {') && closeBlock.includes('hideDomPanelById(id)'), 'closeAllPanels should iterate panels and hide them via hideDomPanelById (conditional on shouldSync)');
 
 const openPanelStart = main.indexOf('function openPanel(panel)');
 const openPanelEnd = main.indexOf('function drawPanelFrame', openPanelStart);

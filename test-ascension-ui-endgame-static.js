@@ -30,6 +30,6 @@ mustInclude(css, '.asc-progress', 'ascension progress styles');
 mustInclude(css, '.asc-skill-tree', 'ascension skill tree styles');
 mustInclude(css, '.asc-action-row', 'ascension action row styles');
 
-assert(index.includes('20260526nexthint1'), 'cachebuster should bump to endgame2 for UI integration');
+assert(index.includes('20260527invfix1'), 'cachebuster should bump to endgame2 for UI integration');
 assert(!index.includes('20260524endgame1'), 'index should not keep stale endgame1 cachebuster');
 console.log('ascension endgame UI static assertions passed');

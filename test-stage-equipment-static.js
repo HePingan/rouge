@@ -16,5 +16,5 @@ assert(main.includes('function addStageEquipmentReward'), 'stage equipment rewar
 assert(main.includes('rewards.equipment'), 'equipment rewards not applied/formatted');
 assert(stages.includes('function getStageSetDropText'), 'set drop text helper missing');
 assert(main.includes('套装目标'), 'stage UI set target missing');
-assert(index.includes('js/stages.js?v=20260526nexthint1'), 'cachebuster missing');
+assert(index.includes('js/stages.js?v=20260527invfix1'), 'cachebuster missing');
 console.log('stage equipment static ok');

@@ -5,7 +5,7 @@ const stages = fs.readFileSync('js/stages.js', 'utf8');
 const alchemy = fs.readFileSync('js/alchemy.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260526nexthint1';
+const CURRENT_TOKEN = '20260527invfix1';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 const chapters = ['yaogu_valley', 'nether_palace', 'void_rift', 'demon_battlefield', 'ascension_platform'];

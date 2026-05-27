@@ -177,7 +177,7 @@ assert(css.includes('sr-card-drops'), 'realm cards should show concise drop hint
 assert(css.includes('@media (max-width: 620px)'), 'secret realm UI should remain mobile responsive');
 assert(entities.includes('lastSecretRealmRun'), 'Player should have last secret realm run summary');
 assert(save.includes('lastSecretRealmRun'), 'save should persist last secret realm run summary');
-assert(html.includes('20260526nexthint1'), 'index cache version should be bumped for secret realm result panel');
+assert(html.includes('20260527invfix1'), 'index cache version should be bumped for secret realm result panel');
 assert(!html.includes('20260524secretQuick2'), 'previous secret realm quick cache version should be removed');
 assert(!html.includes('20260524secretQuick1'), 'older secret realm quick cache version should be removed');
 assert(!html.includes('20260524secretRealmOpt1'), 'old secret realm cache version should be removed');

@@ -14,6 +14,6 @@ assert(main.includes('dungeon.biome = getStageTheme(activeStage) || dungeon.biom
 assert(main.includes('const theme = typeof getStageTheme'), 'stage card theme display missing');
 assert(main.includes('selectedTheme') && main.includes('地图'), 'stage footer/detail theme text missing');
 assert(main.includes("biome?.decor === 'thunder'"), 'theme decor rendering missing');
-assert(index.includes('js/stages.js?v=20260526nexthint1'), 'cachebuster missing');
+assert(index.includes('js/stages.js?v=20260527invfix1'), 'cachebuster missing');
 
 console.log('stage themes static ok');

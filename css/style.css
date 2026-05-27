@@ -6567,7 +6567,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
   #artifact-dom-panel .artifact-body { padding-bottom: calc(142px + env(safe-area-inset-bottom)); }
 }
 
-/* ─── Global Panel Close Right 20260526nexthint1 ─── */
+/* ─── Global Panel Close Right 20260527invfix1 ─── */
 .panel-head,
 #secretrealm-dom-panel .sr-head,
 #tribulation-dom-panel .trib-head,
@@ -6642,7 +6642,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Stage Header Layout 20260526nexthint1 ─── */
+/* ─── Stage Header Layout 20260527invfix1 ─── */
 #stage-dom-panel .stage-head {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) 34px;
@@ -6710,7 +6710,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Mobile Universal Interface Layout 20260526nexthint1 ─── */
+/* ─── Mobile Universal Interface Layout 20260527invfix1 ─── */
 @media (max-width: 620px), (pointer: coarse) {
   /* 所有功能面板统一为手机原生底部抽屉：上方留出地图/状态呼吸感，底部按钮固定，内容单独滚动。 */
   #character-dom-panel,
@@ -7204,7 +7204,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Ascension Resource Source Navigation 20260526nexthint1 ─── */
+/* ─── Ascension Resource Source Navigation 20260527invfix1 ─── */
 .asc-source-actions {
   grid-column: 1 / -1;
   display: grid;
@@ -7231,7 +7231,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 .asc-source-btn em { color:#ffdd88; font-style:normal; font-size:10px; }
 .asc-source-btn:active { transform: translateY(1px); background: rgba(200,247,255,.13); }
 
-/* ─── Combat Mobile Bottom Sheet 20260526nexthint1 ─── */
+/* ─── Combat Mobile Bottom Sheet 20260527invfix1 ─── */
 @media (max-width: 767px) {
   body.combat-active #hud-bottom {
     top: calc(6px + var(--safe-top));

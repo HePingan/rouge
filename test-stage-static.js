@@ -45,5 +45,5 @@ const handleInputStart = main.indexOf('function handleInput()');
 const handleInputMovement = main.indexOf('player.x = newX;', handleInputStart);
 const handleInputTurn = main.indexOf(turnIncrement, handleInputStart);
 assert(handleInputStart >= 0 && handleInputMovement > handleInputStart && handleInputTurn > handleInputMovement, 'stage turn counter must not increment before dx/dy movement checks or idle frames will make stage entry look frozen');
-assert(index.includes('js/stages.js?v=20260526nexthint1'), 'stage cachebuster missing');
+assert(index.includes('js/stages.js?v=20260527invfix1'), 'stage cachebuster missing');
 console.log('stage static integration ok');

@@ -102,9 +102,9 @@ const parsed = context.parseSaveRaw(JSON.stringify({ version: 4, realmIndex: 9, 
 assert.strictEqual(parsed.ascension.immortalBody.level, 0, 'parseSaveRaw should normalize ascension state');
 
 const index = fs.readFileSync('index.html', 'utf8');
-assert(index.includes('js/ascension.js?v=20260526nexthint1'), 'index should load ascension.js with current cachebuster');
+assert(index.includes('js/ascension.js?v=20260527invfix1'), 'index should load ascension.js with current cachebuster');
 assert(index.includes('btn-ascension'), 'mobile more menu should expose 飞升/仙界 entry');
-assert(index.includes('20260526nexthint1'), 'cachebuster should use ascension version');
+assert(index.includes('20260527invfix1'), 'cachebuster should use ascension version');
 const main = fs.readFileSync('js/main.js', 'utf8');
 assert(main.includes('showAscensionUI'), 'main should track ascension panel state');
 assert(main.includes('renderAscensionDomPanel'), 'main should render ascension DOM panel');

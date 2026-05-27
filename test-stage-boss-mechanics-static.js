@@ -6,7 +6,7 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const combat = fs.readFileSync('js/combat.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260526nexthint1';
+const CURRENT_TOKEN = '20260527invfix1';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 assert(stages.includes('const STAGE_BOSS_MECHANICS'), 'missing boss mechanic config');

@@ -18,6 +18,6 @@ mustInclude(main, 'selectedStageChapterId = STAGES[selectedStageId]?.chapterId',
 mustInclude(main, 'stageDetailOpen = true', 'tap source should keep detail sheet open for the target');
 mustInclude(css, '.stage-material-source button', 'material source button style missing');
 mustInclude(css, '.stage-material-source button:active', 'material source tap feedback missing');
-assert(index.includes('20260526nexthint1'), 'cachebuster should bump to drain3 for material source navigation');
+assert(index.includes('20260527invfix1'), 'cachebuster should bump to drain3 for material source navigation');
 assert(!index.includes('20260525drain2'), 'index should not keep stale drain2 token');
 console.log('stage material source navigation static assertions passed');
