@@ -540,7 +540,7 @@ function escapeHtml(value) {
   }
   function inventoryItemsByRarityDom(rarity) {
     if (!player?.inventory) return [];
-    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item?.rarity === rarity);
+    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item && entry.item.rarity === rarity);
   }
   function bulkBreakdownTotalDom(entries) {
     const totalGains = {};
@@ -566,13 +566,6 @@ function escapeHtml(value) {
     const actionIcon = isSell ? '💰' : '🔧';
     const sample = preview?.names?.length ? preview.names.map(escapeHtml).join('、') + (count > preview.names.length ? ` 等${count}件` : '') : '暂无';
     const empty = count ? '' : ' empty';
-    /* Build small per-rarity summary row */
-    const rarityRow = ITEM_RARITIES_DOM.map(r => {
-      const p = bulkPreviewDom(r);
-      const cls = r === (preview?.rarity || '普通') ? ' active' : '';
-      const dis = p.count ? '' : ' disabled';
-      return `<button class="bulk-rarity-chip${cls}${dis}" type="button" data-bulk-rarity-chip="${escapeHtml(r)}" ${p.count ? '' : 'disabled'}><b>${escapeHtml(rarityShortDom(r))}</b><span>${p.count}</span></button>`;
-    }).join('');
     /* Build reward detail chips for decompose */
     let rewardDetail = '';
     if (!isSell && count && preview?.gains) {
@@ -595,6 +588,7 @@ function escapeHtml(value) {
     </div>`;
   }
   function openBulkConfirmDom(mode, rarity) {
+    if (isInCombat()) { showMessage('战斗中无法处理装备', '#ff7777'); return false; }
     const preview = bulkPreviewDom(rarity);
     if (!preview.count) {
       showMessage(`没有${rarity}品质装备可${mode === 'sell' ? '售卖' : '分解'}`, '#aaa');
@@ -649,6 +643,8 @@ function escapeHtml(value) {
     </div>`;
   }
   function executeBulkInventoryActionDom(mode, rarity) {
+    if (isInCombat()) { showMessage('战斗中无法处理装备', '#ff7777'); inventoryBulkConfirm = null; renderInventoryDomPanel(); return false; }
+    if (!player) { inventoryBulkConfirm = null; return false; }
     const preview = bulkPreviewDom(rarity);
     if (!preview.count) { inventoryBulkConfirm = null; renderInventoryDomPanel(); return false; }
     const indices = new Set(preview.entries.map(entry => entry.index));
@@ -1038,7 +1034,40 @@ function escapeHtml(value) {
     panel.addEventListener('touchstart', e => {
       if (e.target.closest('.bulk-confirm-card')) e.stopPropagation();
     }, { passive: true });
+    /* Delegated tap handler for all static panel controls — prevents per-render listener leak */
+    let invStart = null, invMoved = false;
+    const invPoint = e => { const t = e.changedTouches?.[0] || e.touches?.[0] || e; return { x: Number(t.clientX) || 0, y: Number(t.clientY) || 0 }; };
+    const invScrollTop = () => inventoryScrollableParentDom(panel)?.scrollTop || 0;
+    panel.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { const p = invPoint(e); invStart = { x: p.x, y: p.y, scrollTop: invScrollTop() }; invMoved = false; } }, { passive: true });
+    panel.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse' && invStart) { const p = invPoint(e); if (Math.hypot(p.x - invStart.x, p.y - invStart.y) > INVENTORY_TAP_MOVE_THRESHOLD || Math.abs(invScrollTop() - invStart.scrollTop) > 2) invMoved = true; } }, { passive: true });
+    panel.addEventListener('pointerup', e => {
+      if (e.pointerType !== 'mouse' || !invStart) return;
+      const shouldTap = !invMoved && Math.abs(invScrollTop() - invStart.scrollTop) <= 2;
+      invStart = null; invMoved = false;
+      if (!shouldTap) return;
+      markInventoryTouchActionDom();
+      handleInventoryDelegatedTapDom(e);
+    }, { passive: false });
+    panel.addEventListener('click', e => {
+      if (shouldIgnoreInventorySyntheticClickDom()) return;
+      handleInventoryDelegatedTapDom(e);
+    });
+    const bulkSelect = panel.querySelector('.bulk-rarity');
+    if (bulkSelect) {
+      bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
+      bulkSelect.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    }
     return panel;
+  }
+  function handleInventoryDelegatedTapDom(e) {
+    const target = e.target;
+    const closest = sel => target.closest(sel);
+    if (closest('[data-inv-tab]')) { e.preventDefault(); e.stopPropagation(); inventoryTab = closest('[data-inv-tab]').dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
+    if (closest('[data-bag-sort]')) { e.preventDefault(); e.stopPropagation(); const mode = closest('[data-bag-sort]').dataset.bagSort || 'power'; if (inventorySortMode === mode) return; inventorySortMode = mode; inventoryDetailTarget = null; scheduleInventoryRenderDom('sort'); return; }
+    if (closest('[data-bulk-rarity-chip]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkRarity = closest('[data-bulk-rarity-chip]').dataset.bulkRarityChip || inventoryBulkRarity; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
+    if (closest('[data-bulk-mode]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkMode = closest('[data-bulk-mode]').dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
+    if (closest('[data-bulk-sell]')) { e.preventDefault(); e.stopPropagation(); bulkSellInventoryByRarityDom(inventoryBulkRarity); return; }
+    if (closest('[data-bulk-decompose]')) { e.preventDefault(); e.stopPropagation(); bulkDecomposeInventoryByRarityDom(inventoryBulkRarity); return; }
   }
   function renderInventoryDomPanel(reason = '') {
     const panel = ensureInventoryDomPanel();
@@ -1092,7 +1121,7 @@ function escapeHtml(value) {
         }
       }
     }
-    if (materialList) materialList.innerHTML = materialCardsHtmlDom();
+    if (materialList && inventoryTab === 'materials') materialList.innerHTML = materialCardsHtmlDom();
     const detail = inventoryDetailItemDom();
     if (!renderMaterialsOnly) {
       detailWrap.innerHTML = itemDetailHtmlDom(detail);
@@ -1109,36 +1138,13 @@ function escapeHtml(value) {
         bindInventoryTapDom(card, () => { inventoryDetailTarget = { type: 'bag', index: Number(card.dataset.index) }; renderInventoryDomPanel(); });
       });
     }
-    panel.querySelectorAll('[data-inv-tab]').forEach(btn => {
-      bindPanelActionDom(btn, () => { inventoryTab = btn.dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
-    });
+    panel.querySelectorAll('[data-inv-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.invTab === inventoryTab));
     panel.querySelectorAll('[data-bag-sort]').forEach(btn => {
       const mode = btn.dataset.bagSort || 'power';
       btn.classList.toggle('active', mode === inventorySortMode);
       btn.setAttribute('aria-pressed', mode === inventorySortMode ? 'true' : 'false');
-      bindPanelActionDom(btn, () => {
-        if (inventorySortMode === mode) return;
-        inventorySortMode = mode;
-        inventoryDetailTarget = null;
-        scheduleInventoryRenderDom('sort');
-      });
     });
-    if (bulkSelect) {
-      bulkSelect.addEventListener('change', e => { inventoryBulkRarity = e.target.value; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
-      bulkSelect.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-    }
-    panel.querySelectorAll('[data-bulk-rarity-chip]').forEach(btn => {
-      bindPanelActionDom(btn, () => { inventoryBulkRarity = btn.dataset.bulkRarityChip || inventoryBulkRarity; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
-    });
-    panel.querySelectorAll('[data-bulk-mode]').forEach(btn => {
-      bindPanelActionDom(btn, () => { inventoryBulkMode = btn.dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); });
-    });
-    panel.querySelectorAll('[data-bulk-sell]').forEach(btn => {
-      bindPanelActionDom(btn, () => bulkSellInventoryByRarityDom(inventoryBulkRarity));
-    });
-    panel.querySelectorAll('[data-bulk-decompose]').forEach(btn => {
-      bindPanelActionDom(btn, () => bulkDecomposeInventoryByRarityDom(inventoryBulkRarity));
-    });
+    panel.querySelectorAll('[data-bulk-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.bulkMode === inventoryBulkMode));
   }
   function hideDomPanelById(id) {
     const panel = typeof document !== 'undefined' ? document.getElementById(id) : null;
