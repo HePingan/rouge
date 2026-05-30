@@ -13,7 +13,7 @@ function mustMatch(label, regex) {
 }
 
 // Cache token must be bumped when mobile layout changes.
-const CURRENT_TOKEN = '20260530ascguard1';
+const CURRENT_TOKEN = '20260530synergy7';
 assert(html.includes(CURRENT_TOKEN), 'index cachebuster should include current mobile layout token');
 assert(!html.includes('20260530stageclose1'), 'index should not keep stale stage close token');
 
@@ -24,7 +24,7 @@ assert(
 );
 
 // Universal mobile sheet contract: panels should feel native on phones.
-mustInclude('mobile layout marker', 'Mobile Universal Interface Layout 20260530ascguard1');
+mustInclude('mobile layout marker', 'Mobile Universal Interface Layout 20260530synergy7');
 mustInclude('stage top overlay marker', `Mobile Stage Footer Readability + Scroll Fix ${CURRENT_TOKEN}`);
 mustInclude('panel list includes character', '#character-dom-panel');
 mustInclude('panel list includes inventory', '#inventory-dom-panel');

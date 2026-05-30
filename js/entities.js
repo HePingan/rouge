@@ -185,24 +185,24 @@ const MONSTER_SKILLS = {
 };
 
 const MONSTERS = [
-  { name: '石魔',    symbol: '石', hp: 34, atk: 7,  def: 3, xp: 16, stones: 3, color: '#8a8a8a', weight: 30, skillIds: ['rockSmash', 'ironShell'] },
-  { name: '毒蝠',    symbol: '蝠', hp: 24, atk: 10, def: 1, xp: 13, stones: 2, color: '#aa66aa', weight: 25, skillIds: ['venomFang'] },
-  { name: '魂妖',    symbol: '魂', hp: 28, atk: 8,  def: 2, xp: 19, stones: 4, color: '#6688ff', weight: 20, skillIds: ['soulDrain'] },
-  { name: '火蜥',    symbol: '蜥', hp: 38, atk: 12, def: 3, xp: 23, stones: 5, color: '#ff6644', weight: 15, skillIds: ['flameSpit'] },
-  { name: '暗影刺客', symbol: '影', hp: 26, atk: 15, def: 1, xp: 27, stones: 6, color: '#444444', weight: 10, skillIds: ['shadowBackstab'] },
+  { name: '石魔',    symbol: '石', hp: 34, atk: 7,  def: 3, xp: 16, stones: 3, color: '#8a8a8a', weight: 30, skillIds: ['rockSmash', 'ironShell'], weaknesses: ['water', 'wood'], resists: ['earth', 'sword'] },
+  { name: '毒蝠',    symbol: '蝠', hp: 24, atk: 10, def: 1, xp: 13, stones: 2, color: '#aa66aa', weight: 25, skillIds: ['venomFang'], weaknesses: ['fire', 'thunder'], resists: ['wood'] },
+  { name: '魂妖',    symbol: '魂', hp: 28, atk: 8,  def: 2, xp: 19, stones: 4, color: '#6688ff', weight: 20, skillIds: ['soulDrain'], weaknesses: ['thunder', 'sword'], resists: ['water'] },
+  { name: '火蜥',    symbol: '蜥', hp: 38, atk: 12, def: 3, xp: 23, stones: 5, color: '#ff6644', weight: 15, skillIds: ['flameSpit'], weaknesses: ['water', 'earth'], resists: ['fire', 'thunder'] },
+  { name: '暗影刺客', symbol: '影', hp: 26, atk: 15, def: 1, xp: 27, stones: 6, color: '#444444', weight: 10, skillIds: ['shadowBackstab'], weaknesses: ['fire', 'sword'], resists: ['wood'] },
 ];
 
 const BOSSES = [
-  { floor: 5,  name: '深渊守卫',   symbol: '守', hp: 110, atk: 16, def: 7, xp: 95,  stones: 36, isBoss: true, color: '#ff4444', skillIds: ['abyssCleave', 'ironShell'] },
-  { floor: 10, name: '暗黑魔龙',   symbol: '龙', hp: 210, atk: 25, def: 11, xp: 180, stones: 72, isBoss: true, color: '#ff6622', skillIds: ['dragonBreath', 'rockSmash'] },
-  { floor: 15, name: '幽冥鬼王',   symbol: '王', hp: 340, atk: 34, def: 15, xp: 300, stones: 120, isBoss: true, color: '#aa44ff', skillIds: ['ghostCurse', 'soulDrain'] },
-  { floor: 20, name: '无间修罗',   symbol: '罗', hp: 520, atk: 45, def: 21, xp: 480, stones: 210, isBoss: true, color: '#ff0066', skillIds: ['shuraCombo', 'abyssCleave'] },
-  { floor: 25, name: '冰狱妖后',   symbol: '后', hp: 680, atk: 52, def: 24, xp: 650, stones: 280, isBoss: true, color: '#66ddff', skillIds: ['frostDomain', 'frostBite'] },
-  { floor: 30, name: '万毒魔君',   symbol: '毒', hp: 820, atk: 60, def: 26, xp: 820, stones: 360, isBoss: true, color: '#66cc66', skillIds: ['poisonDomain', 'venomFang'] },
-  { floor: 35, name: '炼虚天魔',   symbol: '虚', hp: 1050, atk: 72, def: 32, xp: 1080, stones: 480, isBoss: true, color: '#bb88ff', skillIds: ['ghostCurse', 'frostDomain'] },
-  { floor: 40, name: '合体妖皇',   symbol: '皇', hp: 1360, atk: 86, def: 40, xp: 1400, stones: 640, isBoss: true, color: '#ffbb44', skillIds: ['shuraCombo', 'ironShell'] },
-  { floor: 45, name: '大乘古魔',   symbol: '古', hp: 1760, atk: 104, def: 50, xp: 1820, stones: 860, isBoss: true, color: '#ff5577', skillIds: ['abyssCleave', 'poisonDomain'] },
-  { floor: 50, name: '渡劫雷君',   symbol: '劫', hp: 2280, atk: 126, def: 62, xp: 2380, stones: 1160, isBoss: true, color: '#ffdd44', skillIds: ['dragonBreath', 'shuraCombo'] },
+  { floor: 5,  name: '深渊守卫',   symbol: '守', hp: 110, atk: 16, def: 7, xp: 95,  stones: 36, isBoss: true, color: '#ff4444', skillIds: ['abyssCleave', 'ironShell'], weaknesses: ['earth', 'sword'], resists: ['fire'] },
+  { floor: 10, name: '暗黑魔龙',   symbol: '龙', hp: 210, atk: 25, def: 11, xp: 180, stones: 72, isBoss: true, color: '#ff6622', skillIds: ['dragonBreath', 'rockSmash'], weaknesses: ['water', 'sword'], resists: ['fire', 'earth'] },
+  { floor: 15, name: '幽冥鬼王',   symbol: '王', hp: 340, atk: 34, def: 15, xp: 300, stones: 120, isBoss: true, color: '#aa44ff', skillIds: ['ghostCurse', 'soulDrain'], weaknesses: ['thunder', 'fire'], resists: ['water'] },
+  { floor: 20, name: '无间修罗',   symbol: '罗', hp: 520, atk: 45, def: 21, xp: 480, stones: 210, isBoss: true, color: '#ff0066', skillIds: ['shuraCombo', 'abyssCleave'], weaknesses: ['wood', 'water'], resists: ['sword'] },
+  { floor: 25, name: '冰狱妖后',   symbol: '后', hp: 680, atk: 52, def: 24, xp: 650, stones: 280, isBoss: true, color: '#66ddff', skillIds: ['frostDomain', 'frostBite'], weaknesses: ['fire', 'thunder'], resists: ['water'] },
+  { floor: 30, name: '万毒魔君',   symbol: '毒', hp: 820, atk: 60, def: 26, xp: 820, stones: 360, isBoss: true, color: '#66cc66', skillIds: ['poisonDomain', 'venomFang'], weaknesses: ['fire', 'sword'], resists: ['wood'] },
+  { floor: 35, name: '炼虚天魔',   symbol: '虚', hp: 1050, atk: 72, def: 32, xp: 1080, stones: 480, isBoss: true, color: '#bb88ff', skillIds: ['ghostCurse', 'frostDomain'], weaknesses: ['thunder', 'earth'], resists: ['water', 'wood'] },
+  { floor: 40, name: '合体妖皇',   symbol: '皇', hp: 1360, atk: 86, def: 40, xp: 1400, stones: 640, isBoss: true, color: '#ffbb44', skillIds: ['shuraCombo', 'ironShell'], weaknesses: ['water', 'wood'], resists: ['earth'] },
+  { floor: 45, name: '大乘古魔',   symbol: '古', hp: 1760, atk: 104, def: 50, xp: 1820, stones: 860, isBoss: true, color: '#ff5577', skillIds: ['abyssCleave', 'poisonDomain'], weaknesses: ['fire', 'thunder'], resists: ['sword'] },
+  { floor: 50, name: '渡劫雷君',   symbol: '劫', hp: 2280, atk: 126, def: 62, xp: 2380, stones: 1160, isBoss: true, color: '#ffdd44', skillIds: ['dragonBreath', 'shuraCombo'], weaknesses: ['earth', 'sword'], resists: ['thunder', 'fire'] },
 ];
 
 function getMonsterSkill(id) {
@@ -211,6 +211,37 @@ function getMonsterSkill(id) {
 
 function getEnemySkills(enemy) {
   return (enemy?.skillIds || []).map(getMonsterSkill).filter(Boolean);
+}
+
+const ENEMY_AFFINITY_LABELS = {
+  fire: '火', water: '水', thunder: '雷', sword: '剑', wood: '木', earth: '土',
+};
+
+function getEnemyAffinityProfile(enemy) {
+  const uniq = arr => [...new Set((arr || []).filter(Boolean))];
+  return {
+    weaknesses: uniq(enemy?.weaknesses),
+    resists: uniq(enemy?.resists),
+  };
+}
+
+function getEnemyAffinityMultiplier(enemy, tree) {
+  if (!enemy || !tree) return 1;
+  const profile = getEnemyAffinityProfile(enemy);
+  if (profile.weaknesses.includes(tree)) return enemy.isBoss ? 1.12 : 1.16;
+  if (profile.resists.includes(tree)) return enemy.isBoss ? 0.90 : 0.86;
+  return 1;
+}
+
+function getEnemyAffinitySummary(enemy) {
+  const profile = getEnemyAffinityProfile(enemy);
+  const mapNames = arr => arr.map(t => ENEMY_AFFINITY_LABELS[t] || t).join('/');
+  return {
+    ...profile,
+    weakText: profile.weaknesses.length ? mapNames(profile.weaknesses) : '',
+    resistText: profile.resists.length ? mapNames(profile.resists) : '',
+    text: `${profile.weaknesses.length ? `弱${mapNames(profile.weaknesses)}` : ''}${profile.weaknesses.length && profile.resists.length ? ' · ' : ''}${profile.resists.length ? `抗${mapNames(profile.resists)}` : ''}` || '无明显克制',
+  };
 }
 
 function isBossFloor(level) {

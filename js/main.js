@@ -3386,8 +3386,27 @@ function generateNewFloor() {
     const selectedEffectText = selectedSkill.effectText || selectedSummary;
     const learnedCount = learnedSkills.length;
     const totalCount = treeNames.reduce((n, t) => n + SKILL_TREES[t].skills.length, 0);
+    const activeMasteries = typeof getActiveSkillMasteries === 'function' ? getActiveSkillMasteries() : [];
+    const activeSynergies = typeof getActiveSkillSynergies === 'function' ? getActiveSkillSynergies() : [];
+    const synergyProgress = typeof getSkillSynergyProgress === 'function' ? getSkillSynergyProgress() : [];
+    const skillCodex = typeof getSkillCodexSummary === 'function' ? getSkillCodexSummary() : null;
+    const synergyHint = typeof getNextSkillSynergyHint === 'function' ? getNextSkillSynergyHint() : '';
+    const claimableHint = skillCodex?.claimableCount ? ` · 待领${skillCodex.claimableCount}` : '';
+    const buildSummary = typeof getActiveSkillBuildSummary === 'function' ? getActiveSkillBuildSummary() : null;
+    const synergyTitleSmall = skillCodex ? `${skillCodex.headline}${claimableHint} · ${buildSummary?.hint || synergyHint}` : (buildSummary ? `${(buildSummary.activeLabels || []).length ? `已成型：${buildSummary.activeText}` : '路线推荐'} · ${buildSummary.hint || synergyHint}` : synergyHint);
+    const selectedMastery = typeof getSkillTreeMastery === 'function' ? getSkillTreeMastery(selectedTree) : null;
+    const selectedTreeSynergies = typeof getSkillSynergiesForTree === 'function' ? getSkillSynergiesForTree(selectedTree) : [];
+    const selectedRecommendation = typeof getSkillSynergyRecommendationForTree === 'function' ? getSkillSynergyRecommendationForTree(selectedTree) : null;
+    const selectedImpact = typeof getSkillLearningImpact === 'function' ? getSkillLearningImpact(selectedTree, selectedIndex) : null;
+    const buildRecommendations = typeof getRecommendedSkillNodesForBuild === 'function' ? getRecommendedSkillNodesForBuild(3) : [];
     const selectedReqTextSafe = escapeHtml(selectedReqText);
     const detailTagsHtml = selectedSummary.split(' · ').map(t => `<span>${escapeHtml(t)}</span>`).join('');
+    const selectedBuildHintHtml = selectedRecommendation ? `<div class="skill-build-hint ${selectedRecommendation.type === 'mastery' ? 'mastery' : 'synergy'}"><b>${escapeHtml(selectedRecommendation.icon || '✦')} 推荐路线</b><span>${escapeHtml(selectedRecommendation.hint || '')}</span></div>` : '';
+    const selectedImpactHtml = selectedImpact ? `<div class="skill-impact-preview"><b>${selectedState.learned ? '当前贡献' : '领悟预览'}</b><span>${escapeHtml(selectedImpact.text || '')}</span></div>` : '';
+    const selectedSynergyHtml = selectedTreeSynergies.length ? `<div class="skill-related-synergy"><b>参与共鸣</b>${selectedTreeSynergies.map(s => {
+      const prog = (s.progress || []).map(p => `${p.shortName}${Math.min(p.learned, p.required)}/${p.required}`).join(' · ');
+      return `<span class="${s.active ? 'active' : 'locked'}">${escapeHtml(s.icon || '✦')} ${escapeHtml(s.name)}<small>${escapeHtml(prog)}</small></span>`;
+    }).join('')}</div>` : '';
     const skillDmgText = selectedSkill.dmgMult ? `×${selectedSkill.dmgMult}${selectedSkill.hits ? ` / ${selectedSkill.hits}段` : ''}` : '—';
     const detailHtml = `<div class="detail-kicker">${escapeHtml(selectedData.name)} · 第 ${selectedIndex + 1} 阶 · ${escapeHtml(selectedKindLabel)}</div>
         <div class="detail-title">${escapeHtml(selectedSkill.icon || '✦')} ${escapeHtml(selectedSkill.name)}</div>
@@ -3395,6 +3414,10 @@ function generateNewFloor() {
         <p class="detail-desc">${escapeHtml(selectedSkill.desc)}</p>
         <p class="detail-effect">${escapeHtml(selectedEffectText)}</p>
         <div class="detail-tags">${detailTagsHtml}</div>
+        ${selectedBuildHintHtml}
+        ${selectedImpactHtml}
+        ${selectedSynergyHtml}
+        ${selectedMastery?.active ? `<div class="skill-mastery-note">单系专精：伤害 +${Math.round(selectedMastery.damageBonus * 100)}%，效果 +${Math.round(selectedMastery.effectBonus * 100)}%</div>` : ''}
         <div class="detail-stats compact-stats">
           <span>类型 <b>${escapeHtml(selectedKindLabel)}</b></span>
           <span>灵力 <b>${escapeHtml(getActualSkillMpCostDom(selectedSkill))}</b></span>
@@ -3409,15 +3432,16 @@ function generateNewFloor() {
         </div>`;
     let html = `<div class="panel-head skill-panel-head">
       <span class="ptitle" style="color:#d4a0ff">📜 星盘技能树</span>
-      <span class="psub">悟道 ${availableSkillPoints} · 炼体 ${availableStatPoints} · 已悟 ${learnedCount}/${totalCount}</span>
+      <span class="psub">悟道 ${availableSkillPoints} · 炼体 ${availableStatPoints} · 已悟 ${learnedCount}/${totalCount}${synergyHint ? ` · ${escapeHtml(synergyHint)}` : ''}</span>
       <button class="pclose">×</button>
     </div>
     <div class="panel-body skills-panel-body">
       <div class="skill-orbit-board">`;
     treeNames.forEach(tree => {
       const td = SKILL_TREES[tree];
-      html += `<section class="skill-branch branch-${cssClassToken(tree)}" style="--branch-color:${safeCssColor(td.color)}">
-        <div class="skill-branch-title"><span>${escapeHtml(td.name)}</span><em>${escapeHtml(skillTreeShortName(td.name))}</em></div>
+      const mastery = typeof getSkillTreeMastery === 'function' ? getSkillTreeMastery(tree) : null;
+      html += `<section class="skill-branch branch-${cssClassToken(tree)}${mastery?.active ? ' mastery-active' : ''}" style="--branch-color:${safeCssColor(td.color)}">
+        <div class="skill-branch-title"><span>${escapeHtml(td.name)}</span><em>${escapeHtml(skillTreeShortName(td.name))}${mastery?.active ? ` · 专精+${Math.round(mastery.damageBonus * 100)}%` : ''}</em></div>
         <div class="skill-path branch-layout">`;
       td.skills.forEach((skill, row) => {
         const st = skillNodeState(tree, row);
@@ -3428,18 +3452,22 @@ function generateNewFloor() {
         if (st.locked) cls.push('locked');
         if (st.canLearn) cls.push('learnable');
         if (st.blocked) cls.push('blocked');
+        const nodeRecommendation = typeof getSkillSynergyRecommendationForTree === 'function' ? getSkillSynergyRecommendationForTree(tree) : null;
+        if (nodeRecommendation && !st.learned && !st.locked && !st.blocked) cls.push('recommended');
         if (selectedTree === tree && selectedIndex === row) cls.push('selected');
         const icon = st.learned ? '✦' : st.locked ? '🔒' : st.blocked ? '◇' : (skill.icon || '＋');
         const reqNames = st.prereqs?.map(i => SKILL_TREES[tree].skills[i]?.name).filter(Boolean).join('/') || '';
         const hint = st.learned ? '已激活' : st.locked ? skillRealmName(skill.unlockRealm) : st.blocked ? `需${reqNames}` : st.canLearn ? '可点亮' : '缺点数';
         const kind = skill.kind || 'active';
         const kindLabel = SKILL_KIND_LABELS[kind] || '技能';
+        const recommendationBadge = nodeRecommendation && !st.learned && !st.locked && !st.blocked ? `<span class="node-reco-badge">${nodeRecommendation.type === 'mastery' ? '专精' : '共鸣'}</span>` : '';
         html += `<button class="${cls.map(c => cssClassToken(c)).join(' ')} kind-${cssClassToken(kind)}" data-tree="${escapeHtml(tree)}" data-index="${row}" aria-label="${escapeHtml(skill.name)}">
           <span class="node-ring"><b>${escapeHtml(icon)}</b></span>
           <span class="node-copy">
             <span class="node-name">${escapeHtml(skill.name)}</span>
             <span class="node-meta"><i>${escapeHtml(slotLabel)}</i><i>${escapeHtml(kindLabel)}</i><small>${escapeHtml(hint)}</small></span>
           </span>
+          ${recommendationBadge}
         </button>`;
       });
       html += `</div></section>`;
@@ -3448,6 +3476,40 @@ function generateNewFloor() {
       <aside class="skill-detail-card" style="--branch-color:${safeCssColor(selectedData.color)}">
         ${detailHtml}
       </aside>
+      ${skillCodex ? `<section class="skill-codex-panel">
+        <div class="codex-head"><b>流派图鉴</b><span>${escapeHtml(skillCodex.learnedCount)}/${escapeHtml(skillCodex.totalSkills)} 已悟 · ${escapeHtml(skillCodex.completionPct)}%</span></div>
+        <div class="codex-stats-row">
+          <span class="${skillCodex.claimableCount ? 'claimable' : ''}"><b>${escapeHtml(skillCodex.claimableCount)}</b><small>待领奖励</small></span>
+          <span><b>${escapeHtml(skillCodex.activeCount)}/${escapeHtml(skillCodex.synergyCount)}</b><small>共鸣成型</small></span>
+          <span><b>${escapeHtml(skillCodex.masteryCount)}</b><small>单系专精</small></span>
+        </div>
+        <div class="codex-tree-row">${(skillCodex.treeStats || []).map(t => `<i style="--tree-color:${safeCssColor(t.color)}" class="${t.mastery?.active ? 'mastery' : ''}">${escapeHtml(t.shortName)} ${escapeHtml(t.learned)}/${escapeHtml(t.total)}</i>`).join('')}</div>
+        ${skillCodex.claimableCount ? `<div class="codex-claim-guide">可领取：${[...(skillCodex.claimableSynergies || []).map(s => `「${s.name}」`), ...(skillCodex.claimableMasteries || []).map(m => `「${m.shortName}${m.name}」`)].join('、')}，下滑点击领取。</div>` : `<div class="codex-claim-guide muted">${escapeHtml(skillCodex.next?.hint || skillCodex.headline || '')}</div>`}
+      </section>` : ''}
+      ${skillCodex ? `<section class="skill-synergy-panel mastery-milestone-panel">
+        <div class="synergy-title">单系专精奖励<small>同系悟道达到 3/5 个可领取阶段奖励</small></div>
+        <div class="synergy-list">
+          ${(skillCodex?.masteryMilestones || []).map(m => {
+            const state = m.claimed ? '已领取' : m.claimable ? '可领取' : m.active ? '已达成' : `还差 ${escapeHtml(m.missing)} 个`;
+            return `<div class="synergy-card mastery-card ${m.active ? 'active' : 'locked'} ${m.claimed ? 'claimed' : ''} ${m.claimable ? 'claimable' : ''}" style="--tree-color:${safeCssColor(m.color)}"><b>${escapeHtml(m.icon)} ${escapeHtml(m.shortName)}${escapeHtml(m.name)}</b><span>${state}</span><strong>${escapeHtml(m.shortName)} ${escapeHtml(Math.min(m.learned, m.count))}/${escapeHtml(m.count)}</strong><em>${escapeHtml(m.treeName)}同系已悟 ${escapeHtml(m.count)} 个时凝成专精阶段。</em>${m.rewardText ? `<small class="synergy-reward">${escapeHtml(m.rewardText)}</small>` : ''}${m.claimable ? `<button class="synergy-claim-btn mastery-claim-btn" data-tree="${escapeHtml(m.tree)}" data-count="${escapeHtml(m.count)}">领取专精奖励</button>` : m.claimed ? `<button class="synergy-claim-btn claimed" disabled>奖励已领取</button>` : ''}</div>`;
+          }).join('') || '<div class="synergy-card locked"><b>暂无专精阶段</b><span>继续悟道解锁</span></div>'}
+        </div>
+      </section>` : ''}
+      <section class="skill-synergy-panel">
+        <div class="synergy-title">流派共鸣${synergyTitleSmall ? `<small>${escapeHtml(synergyTitleSmall)}</small>` : ''}</div>
+        ${buildRecommendations.length ? `<div class="synergy-recommend-strip"><b>下一手推荐</b>${buildRecommendations.map(r => `<button type="button" data-tree="${escapeHtml(r.tree)}" data-index="${r.index}">${escapeHtml(r.skill.icon || '✦')} ${escapeHtml(r.skill.name)}<small>${escapeHtml(r.impact?.text || '')}</small></button>`).join('')}</div>` : ''}
+        <div class="synergy-list">
+          ${(synergyProgress.length ? synergyProgress : Object.entries(typeof SKILL_SYNERGIES !== 'undefined' ? SKILL_SYNERGIES : {}).map(([id, syn]) => ({ id, ...syn, active: activeSynergies.some(s => s.id === id), progress: [] }))).map(syn => {
+            const active = !!syn.active;
+            const req = (syn.trees || []).map(t => `${skillTreeShortName(SKILL_TREES[t]?.name || t)}${syn.minLearnedEach || 1}`).join(' + ');
+            const progressText = (syn.progress || []).map(p => `${p.shortName}${Math.min(p.learned, p.required)}/${p.required}`).join(' · ');
+            const missingText = active ? '已激活' : (syn.progress || []).filter(p => p.missing > 0).map(p => `${p.shortName}${p.missing}`).join('、');
+            const effectText = (syn.effects || []).map(e => SKILL_EFFECT_LABELS[e.type] || e.type).join(' / ');
+            const claimState = syn.claimed ? '已领取' : syn.claimable ? '可领取' : active ? '已成型' : `需要 ${escapeHtml(req)}`;
+            return `<div class="synergy-card ${active ? 'active' : 'locked'} ${syn.claimed ? 'claimed' : ''} ${syn.claimable ? 'claimable' : ''}"><b>${escapeHtml(syn.icon || '✦')} ${escapeHtml(syn.name)}</b><span>${claimState}</span>${progressText ? `<strong>${escapeHtml(progressText)}</strong>` : ''}${missingText && !active ? `<i>还差：${escapeHtml(missingText)}</i>` : ''}<em>${escapeHtml(syn.desc || '')}</em>${syn.rewardText ? `<small class="synergy-reward">${escapeHtml(syn.rewardText)}</small>` : ''}${effectText ? `<small>${escapeHtml(effectText)}</small>` : ''}${syn.claimable ? `<button class="synergy-claim-btn" data-synergy="${escapeHtml(syn.id)}">领取成型奖励</button>` : syn.claimed ? `<button class="synergy-claim-btn claimed" disabled>奖励已领取</button>` : ''}</div>`;
+          }).join('') || '<div class="synergy-card locked"><b>暂无共鸣</b><span>继续悟道解锁</span></div>'}
+        </div>
+      </section>
       <div class="attr-bar skill-attr-bar">
         <span class="attr-title">悟道加点</span>`;
     const attrBtns = [['atk','攻+3','#ff6644'],['def','防+2','#4488ff'],['hp','命+20','#55ff55'],['mp','灵+10','#aaddff']];
@@ -3476,6 +3538,13 @@ function generateNewFloor() {
       backdropEl.addEventListener('click', onModalCloseIntent);
       backdropEl.addEventListener('touchstart', onModalCloseIntent, { passive: false });
     }
+    p.querySelectorAll('.synergy-recommend-strip button').forEach(el => {
+      bindInventoryTapDom(el, () => {
+        selectedSkillTreeNode = { tree: el.dataset.tree, index: parseInt(el.dataset.index, 10) || 0 };
+        skillDetailModalOpen = true;
+        renderSkillsDomPanel();
+      });
+    });
     p.querySelectorAll('.skill-node').forEach(el => {
       const openSkillDetail = () => {
         selectedSkillTreeNode = { tree: el.dataset.tree, index: parseInt(el.dataset.index, 10) || 0 };
@@ -3508,6 +3577,33 @@ function generateNewFloor() {
           showMessage(`化道归虚: 【${SKILL_TREES[t].skills[idx].name}】，悟道点已归还`, '#aaddff');
           selectedSkillTreeNode = { tree: t, index: idx };
           skillDetailModalOpen = true;
+          renderSkillsDomPanel();
+        }
+      };
+      bindInventoryTapDom(el, fn);
+    });
+    p.querySelectorAll('.mastery-claim-btn:not([disabled])').forEach(el => {
+      const fn = e => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
+        const tree = el.dataset.tree;
+        const count = parseInt(el.dataset.count, 10) || 0;
+        const treeName = (typeof SKILL_TREES !== 'undefined' && SKILL_TREES[tree]?.name) || '单系专精';
+        if (typeof claimSkillMasteryReward === 'function' && claimSkillMasteryReward(tree, count)) {
+          showMessage(`🌟 ${treeName}${count}重专精，奖励已入体！`, '#b0ffbe');
+          renderSkillsDomPanel();
+        }
+      };
+      bindInventoryTapDom(el, fn);
+    });
+    p.querySelectorAll('.synergy-claim-btn:not([disabled]):not(.mastery-claim-btn)').forEach(el => {
+      const fn = e => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
+        const id = el.dataset.synergy;
+        const syn = (typeof SKILL_SYNERGIES !== 'undefined' && SKILL_SYNERGIES[id]) || null;
+        if (typeof claimSkillSynergyReward === 'function' && claimSkillSynergyReward(id)) {
+          showMessage(`🌟 ${syn?.name || '流派共鸣'}成型，奖励已入体！`, '#ffe28a');
           renderSkillsDomPanel();
         }
       };
@@ -3996,6 +4092,7 @@ function generateNewFloor() {
     const enemyDisplayName = currentEnemy.title || currentEnemy.name;
     const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
     const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
+    const enemyAffinity = typeof getEnemyAffinitySummary === 'function' ? getEnemyAffinitySummary(currentEnemy) : null;
     const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
     const enemyBuffAtk = typeof getEnemyAttackBuffMultiplier === 'function' ? getEnemyAttackBuffMultiplier() : 1;
     const enemyAtkText = Math.floor(Number(currentEnemy.atk || 0) * enemyBuffAtk);
@@ -4003,6 +4100,13 @@ function generateNewFloor() {
     const playerHpPct = player.maxHp ? Math.max(0, Math.min(100, player.hp / player.maxHp * 100)) : 100;
     const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
     const pEnemyName = `${currentEnemy.isBoss ? '👑' : '👺'} ${enemyDisplayName}`;
+    const buildSummary = typeof getActiveSkillBuildSummary === 'function' ? getActiveSkillBuildSummary() : null;
+    const combatBenefit = typeof getSkillCombatBenefitSummary === 'function' ? getSkillCombatBenefitSummary() : null;
+    const combatBuildBadges = buildSummary ? [
+      ...(buildSummary.synergies || []).slice(0, 2).map(s => ({ cls: 'synergy', text: `${s.icon || '✦'} ${s.name}` })),
+      ...(buildSummary.masteries || []).slice(0, 2).map(m => ({ cls: 'mastery', text: `${SKILL_TREES[m.tree]?.icon || '✦'} ${m.shortName || SKILL_TREES[m.tree]?.name || m.tree}专精` })),
+    ] : [];
+    const combatBuildHtml = combatBuildBadges.length ? `<div class="cbt-build-row" title="${escapeHtml(combatBenefit?.text || '')}">${combatBuildBadges.slice(0, 3).map(b => `<span class="cbt-build-badge ${cssClassToken(b.cls)}">${escapeHtml(b.text)}</span>`).join('')}</div>` : (combatBenefit?.text ? `<div class="cbt-build-row"><span class="cbt-build-badge hint">${escapeHtml(combatBenefit.text)}</span></div>` : '');
     const safeCombatColor = color => /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#d4c8b0';
     const statusLabelMap = {
       burn: ['🔥', '灼烧'], bleed: ['🩸', '流血'], freeze: ['🧊', '冻结'], stun: ['⚡', '麻痹'],
@@ -4028,7 +4132,11 @@ function generateNewFloor() {
         const mpCost = getActualSkillMpCostDom(s);
         const reason = !isPlayerTurn ? '等待回合' : player.mp < mpCost ? '灵力不足' : '';
         const values = getSkillEstimatedValuesDom(s, currentEnemy);
-        skillsHtml += `<div class="cbt-skill-btn${reason ? ' disabled' : ''}" data-skill="${i}" style="--skill-color:${color};color:${color};border-color:${color}"><b>${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}</b><small>${escapeHtml(reason || `灵${mpCost} · ${values.damage}伤`)}</small></div>`;
+        const synergyTag = typeof getSkillSynergyTagText === 'function' ? getSkillSynergyTagText(s) : '';
+        const synergyShortTag = typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(s) : synergyTag;
+        const affinityTag = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(s, currentEnemy) : '';
+        const metaText = [synergyShortTag, affinityTag].filter(Boolean).join(' · ');
+        skillsHtml += `<div class="cbt-skill-btn${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ' affinity-hit' : ''}" data-skill="${i}" style="--skill-color:${color};color:${color};border-color:${color}"><b>${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}${synergyTag ? '<i>共</i>' : ''}${affinityTag ? '<i class="aff">克</i>' : ''}</b><small>${escapeHtml(reason || (metaText || `灵${mpCost} · ${values.damage}伤`))}</small></div>`;
       }
       if (combatSkills.length > 3) skillsHtml += `<div class="cbt-skill-more ${combatSkillDrawerOpen ? 'active' : ''}" id="cbt-skill-toggle">${combatSkillDrawerOpen ? '收起' : `技能 ${combatSkills.length}`}</div>`;
       skillsHtml += '</div>';
@@ -4038,13 +4146,16 @@ function generateNewFloor() {
       const mpCost = getActualSkillMpCostDom(s);
       const values = getSkillEstimatedValuesDom(s, currentEnemy);
       const summary = typeof getSkillEffectSummary === 'function' ? getSkillEffectSummary(s) : '';
+      const synergyTag = typeof getSkillSynergyTagText === 'function' ? getSkillSynergyTagText(s) : '';
+      const synergyShortTag = typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(s) : synergyTag;
+      const affinityTag = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(s, currentEnemy) : '';
       const reason = !isPlayerTurn ? '等待回合' : player.mp < mpCost ? '灵力不足' : '';
-      return `<button type="button" class="cbt-drawer-skill${reason ? ' disabled' : ''}" data-skill="${i}" style="--skill-color:${color};border-color:${color};color:${color}"><i>${escapeHtml(s.icon || '✦')}</i><b>${escapeHtml(s.name)}</b><em>灵力 ${escapeHtml(mpCost)}</em><small>${escapeHtml(reason || `预计 ${values.damage} 伤`)}</small><span>${escapeHtml(summary)}</span></button>`;
+      return `<button type="button" class="cbt-drawer-skill${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ' affinity-hit' : ''}" data-skill="${i}" style="--skill-color:${color};border-color:${color};color:${color}"><i>${escapeHtml(s.icon || '✦')}</i><b>${escapeHtml(s.name)}${synergyTag ? '<strong>共鸣</strong>' : ''}${affinityTag ? '<strong class="affinity">克制</strong>' : ''}</b><em>灵力 ${escapeHtml(mpCost)}</em><small>${escapeHtml(reason || `预计 ${values.damage} 伤${affinityTag ? ` · ${affinityTag}` : ''}`)}</small><span>${escapeHtml([summary, synergyShortTag || synergyTag, affinityTag].filter(Boolean).join(' · '))}</span></button>`;
     }).join('')}</div></div>` : '';
     p.innerHTML = `<div class="cbt-topline">
       <div class="cbt-enemy-block">
         <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
-        <div class="cbt-enemy-tags"><span class="stat-tag atk">攻 ${escapeHtml(enemyAtkText)}</span><span class="stat-tag def">防 ${escapeHtml(enemyDefText)}</span>${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
+        <div class="cbt-enemy-tags"><span class="stat-tag atk">攻 ${escapeHtml(enemyAtkText)}</span><span class="stat-tag def">防 ${escapeHtml(enemyDefText)}</span>${enemyAffinity?.weakText ? `<span class="affinity-tag weak">弱 ${escapeHtml(enemyAffinity.weakText)}</span>` : ''}${enemyAffinity?.resistText ? `<span class="affinity-tag resist">抗 ${escapeHtml(enemyAffinity.resistText)}</span>` : ''}${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
       </div>
       <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
     </div>
@@ -4057,6 +4168,7 @@ function generateNewFloor() {
       </div>
     </div>
     <div class="cbt-status-row player-status">${playerStatusHtml || '<span class="cbt-status-empty">我方无状态</span>'}</div>
+    ${combatBuildHtml}
     <div class="cbt-log">${logsHtml || '<div class="cbt-log-entry tone-info"><span>战斗记录将在这里显示</span></div>'}</div>${skillsHtml}${drawerHtml}<div class="cbt-actions-row"><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-attack" style="--act-color:#ff6633">⚔️<b>攻击</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-defend" style="--act-color:#dd9944">🛡️<b>防御</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-skill-toggle-action" style="--act-color:#d4a0ff">📜<b>技能</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-flee" style="--act-color:#66bbcc">🏃<b>逃跑</b></div></div>`;
     const bindTap = (el, fn) => {
       if (!el) return;

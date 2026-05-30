@@ -229,11 +229,66 @@ const SKILL_TREES = {
 };
 
 const SKILL_KIND_LABELS = { active: '主动', passive: '被动', trigger: '触发' };
+
+const SKILL_SYNERGIES = {
+  fire_thunder: {
+    name: '雷火焚天', icon: '🔥⚡', trees: ['fire', 'thunder'], minLearnedEach: 2,
+    desc: '火系灼烧铺场后，雷系暴击率提升；雷系暴击会延长灼烧。',
+    reward: { baseAtk: 4, baseMp: 12 }, rewardText: '成型奖励：攻击 +4，灵力上限 +12',
+    effects: [
+      { type: 'burnCritBonus', value: 0.08 },
+      { type: 'critExtendBurn', chance: 0.35, turns: 1 },
+    ],
+  },
+  water_wood: {
+    name: '水木长生', icon: '💧🌿', trees: ['water', 'wood'], minLearnedEach: 2,
+    desc: '水木同修强化续航与控制：治疗/护盾更强，削弱/冻结持续更久。',
+    reward: { baseHp: 28, baseMp: 10 }, rewardText: '成型奖励：生命上限 +28，灵力上限 +10',
+    effects: [
+      { type: 'healGuardAmp', value: 0.12 },
+      { type: 'controlExtend', turns: 1 },
+    ],
+  },
+  earth_sword: {
+    name: '山河剑骨', icon: '⛰️⚔️', trees: ['earth', 'sword'], minLearnedEach: 2,
+    desc: '厚土承剑，破甲更深；获得护盾时顺势震裂敌甲，剑技命中破甲目标可追加斩杀伤害。',
+    reward: { baseAtk: 3, baseDef: 3, baseHp: 16 }, rewardText: '成型奖励：攻击 +3，防御 +3，生命上限 +16',
+    effects: [
+      { type: 'armorPierceBonus', value: 0.08 },
+      { type: 'guardDefBreak', ratio: 0.12, turns: 2 },
+      { type: 'defBreakExecute', ratio: 0.08, bossCapAtkRatio: 1.2, skillTrees: ['sword'] },
+    ],
+  },
+};
+
+const SKILL_MASTERY = {
+  minLearned: 3,
+  perSkillDamageBonus: 0.03,
+  maxDamageBonus: 0.15,
+  perSkillEffectBonus: 0.02,
+  maxEffectBonus: 0.10,
+  desc: '同系已悟 3 个以上技能时形成专精：每个同系技能提升主动伤害与持续/治疗/护盾效果。',
+};
+
+const SKILL_MASTERY_MILESTONES = {
+  3: { name: '专精初成', reward: { statPoints: 1 }, rewardText: '阶段奖励：炼体点 +1' },
+  5: { name: '一脉贯通', reward: { skillPoints: 1 }, rewardText: '阶段奖励：悟道点 +1' },
+};
+
 const SKILL_EFFECT_LABELS = {
   burn: '灼烧', bleed: '流血', splash: '溅射', healSelf: '治疗', guard: '护盾', weaken: '虚弱', defBreak: '破甲', freeze: '冻结', stun: '麻痹',
   shockOnCrit: '暴击震慑', stunChance: '麻痹', execute: '斩杀', refundOnKill: '击杀返灵',
   passiveStat: '属性强化', burnAmp: '灼烧强化', lowHpHeal: '濒死回春', turnMpRegen: '潮汐回灵',
   critBonusPassive: '暴击精通', critWeakenChance: '暴击虚弱', armorPiercePassive: '破甲精通', victoryRecover: '击杀回元',
+  burnCritBonus: '灼烧暴击', critExtendBurn: '暴击延烧', healGuardAmp: '续航强化', controlExtend: '控制延长', guardDefBreak: '护盾破甲', defBreakExecute: '斩甲追伤',
+};
+
+const SKILL_SYNERGY_SHORT_LABELS = {
+  burnCritBonus: '灼暴', critExtendBurn: '延烧', healGuardAmp: '续航', controlExtend: '控延', guardDefBreak: '盾破', defBreakExecute: '斩甲', armorPierceBonus: '破深',
+};
+
+const SKILL_TREE_SHORT_LABELS = {
+  fire: '火', water: '水', thunder: '雷', sword: '剑', wood: '木', earth: '土',
 };
 
 const DAO_FOUNDATIONS = {
@@ -337,6 +392,8 @@ function getBreakthroughChanceBreakdown() {
 let availableSkillPoints = 0;
 let availableStatPoints = 0;
 let learnedSkills = [];  // [{ tree: 'fire', index: 0 }, ...]
+let claimedSkillSynergies = {}; // { fire_thunder: true, ... } permanent one-time formation rewards
+let claimedSkillMasteries = {}; // { fire_3: true, ... } permanent one-time mastery milestones
 let showBreakthroughUI = false;
 let showSkillTreeUI = false;
 let breakthroughQueue = false;  // true when player just leveled up and needs to see breakthrough
@@ -458,6 +515,479 @@ function sumLearnedEffect(type, field = 'value') {
   return total;
 }
 
+function getLearnedSkillCountsByTree(overrideLearnedSkills = null) {
+  const counts = {};
+  const source = Array.isArray(overrideLearnedSkills) ? overrideLearnedSkills : learnedSkills;
+  for (const s of source || []) {
+    if (!SKILL_TREES[s.tree] || !SKILL_TREES[s.tree].skills?.[s.index]) continue;
+    counts[s.tree] = (counts[s.tree] || 0) + 1;
+  }
+  return counts;
+}
+
+function getSkillTreeMastery(tree, overrideLearnedSkills = null) {
+  const key = tree && SKILL_TREES?.[tree] ? tree : '';
+  const count = key ? (getLearnedSkillCountsByTree(overrideLearnedSkills)[key] || 0) : 0;
+  const active = count >= SKILL_MASTERY.minLearned;
+  const rawName = (key && SKILL_TREES[key]?.name) || key || '未分系';
+  return {
+    tree: key,
+    count,
+    active,
+    name: rawName,
+    shortName: rawName.replace(/^[^\s]+\s*/, ''),
+    damageBonus: active ? Math.min(SKILL_MASTERY.maxDamageBonus, count * SKILL_MASTERY.perSkillDamageBonus) : 0,
+    effectBonus: active ? Math.min(SKILL_MASTERY.maxEffectBonus, count * SKILL_MASTERY.perSkillEffectBonus) : 0,
+  };
+}
+
+function getActiveSkillMasteries(overrideLearnedSkills = null) {
+  return Object.keys(SKILL_TREES || {})
+    .map(tree => getSkillTreeMastery(tree, overrideLearnedSkills))
+    .filter(m => m.active);
+}
+
+function isSkillSynergyActive(synergy, overrideLearnedSkills = null) {
+  const counts = getLearnedSkillCountsByTree(overrideLearnedSkills);
+  return (synergy?.trees || []).every(tree => (counts[tree] || 0) >= (synergy.minLearnedEach || 1));
+}
+
+function getActiveSkillSynergies(overrideLearnedSkills = null) {
+  return Object.entries(SKILL_SYNERGIES || {})
+    .map(([id, data]) => ({ id, ...data, active: isSkillSynergyActive(data, overrideLearnedSkills) }))
+    .filter(s => s.active);
+}
+
+function normalizeClaimedSkillSynergies(value) {
+  const out = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+  for (const id of Object.keys(SKILL_SYNERGIES || {})) if (value[id]) out[id] = true;
+  return out;
+}
+
+function getSkillMasteryMilestoneId(tree, count) {
+  return `${tree}_${count}`;
+}
+
+function normalizeClaimedSkillMasteries(value) {
+  const out = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+  for (const tree of Object.keys(SKILL_TREES || {})) {
+    for (const count of Object.keys(SKILL_MASTERY_MILESTONES || {})) {
+      const id = getSkillMasteryMilestoneId(tree, count);
+      if (value[id]) out[id] = true;
+    }
+  }
+  return out;
+}
+
+function isSkillSynergyClaimed(id) {
+  return !!claimedSkillSynergies?.[id];
+}
+
+function isSkillMasteryClaimed(tree, count) {
+  return !!claimedSkillMasteries?.[getSkillMasteryMilestoneId(tree, count)];
+}
+
+function getSkillSynergyRewardText(synergy) {
+  if (!synergy) return '';
+  if (synergy.rewardText) return synergy.rewardText;
+  const reward = synergy.reward || {};
+  const parts = [];
+  if (reward.baseAtk) parts.push(`攻击 +${reward.baseAtk}`);
+  if (reward.baseDef) parts.push(`防御 +${reward.baseDef}`);
+  if (reward.baseHp) parts.push(`生命上限 +${reward.baseHp}`);
+  if (reward.baseMp) parts.push(`灵力上限 +${reward.baseMp}`);
+  if (reward.skillPoints) parts.push(`悟道点 +${reward.skillPoints}`);
+  if (reward.statPoints) parts.push(`炼体点 +${reward.statPoints}`);
+  return parts.length ? `成型奖励：${parts.join('，')}` : '';
+}
+
+function canClaimSkillSynergy(id) {
+  const synergy = SKILL_SYNERGIES?.[id];
+  return !!synergy && isSkillSynergyActive(synergy) && !isSkillSynergyClaimed(id);
+}
+
+function applySkillSynergyReward(reward = {}) {
+  if (!player) return;
+  if (reward.baseAtk) player.baseAtk += Number(reward.baseAtk) || 0;
+  if (reward.baseDef) player.baseDef += Number(reward.baseDef) || 0;
+  if (reward.baseHp) player.baseHp += Number(reward.baseHp) || 0;
+  if (reward.baseMp) player.baseMp += Number(reward.baseMp) || 0;
+  if (reward.skillPoints) availableSkillPoints += Number(reward.skillPoints) || 0;
+  if (reward.statPoints) availableStatPoints += Number(reward.statPoints) || 0;
+}
+
+function applySkillFormationReward(reward = {}) {
+  applySkillSynergyReward(reward);
+}
+
+function claimSkillSynergyReward(id) {
+  if (!canClaimSkillSynergy(id)) return false;
+  const synergy = SKILL_SYNERGIES[id];
+  claimedSkillSynergies = normalizeClaimedSkillSynergies({ ...claimedSkillSynergies, [id]: true });
+  applySkillFormationReward(synergy.reward || {});
+  if (player && typeof player.recalcStats === 'function') player.recalcStats();
+  autoSave();
+  return true;
+}
+
+function getSkillMasteryMilestoneProgress(overrideLearnedSkills = null) {
+  const counts = getLearnedSkillCountsByTree(overrideLearnedSkills);
+  const out = [];
+  for (const tree of Object.keys(SKILL_TREES || {})) {
+    const learned = counts[tree] || 0;
+    for (const [countKey, data] of Object.entries(SKILL_MASTERY_MILESTONES || {})) {
+      const count = Number(countKey) || 0;
+      const active = learned >= count;
+      const claimed = isSkillMasteryClaimed(tree, count);
+      out.push({
+        id: getSkillMasteryMilestoneId(tree, count),
+        tree,
+        treeName: SKILL_TREES[tree]?.name || tree,
+        shortName: (SKILL_TREES[tree]?.name || tree).replace(/^[^\s]+\s*/, ''),
+        icon: (SKILL_TREES[tree]?.name || '').split(' ')[0] || '✦',
+        color: SKILL_TREES[tree]?.color || '#d4a0ff',
+        count,
+        learned,
+        missing: Math.max(0, count - learned),
+        active,
+        claimed,
+        claimable: active && !claimed,
+        ...data,
+      });
+    }
+  }
+  return out.sort((a, b) => a.count - b.count || a.shortName.localeCompare(b.shortName));
+}
+
+function canClaimSkillMasteryReward(tree, count) {
+  return getSkillMasteryMilestoneProgress().some(m => m.tree === tree && Number(m.count) === Number(count) && m.claimable);
+}
+
+function claimSkillMasteryReward(tree, count) {
+  if (!canClaimSkillMasteryReward(tree, count)) return false;
+  const milestone = SKILL_MASTERY_MILESTONES?.[Number(count)] || SKILL_MASTERY_MILESTONES?.[String(count)];
+  const id = getSkillMasteryMilestoneId(tree, count);
+  claimedSkillMasteries = normalizeClaimedSkillMasteries({ ...claimedSkillMasteries, [id]: true });
+  applySkillFormationReward(milestone?.reward || {});
+  if (player && typeof player.recalcStats === 'function') player.recalcStats();
+  autoSave();
+  return true;
+}
+
+function getSkillSynergyProgress(overrideLearnedSkills = null) {
+  const counts = getLearnedSkillCountsByTree(overrideLearnedSkills);
+  return Object.entries(SKILL_SYNERGIES || {}).map(([id, data]) => {
+    const required = data.minLearnedEach || 1;
+    const progress = (data.trees || []).map(tree => {
+      const learned = counts[tree] || 0;
+      return {
+        tree,
+        name: SKILL_TREES[tree]?.name || tree,
+        shortName: (SKILL_TREES[tree]?.name || tree).replace(/^[^\s]+\s*/, ''),
+        learned,
+        required,
+        missing: Math.max(0, required - learned),
+      };
+    });
+    const missingTotal = progress.reduce((n, p) => n + p.missing, 0);
+    return {
+      id,
+      ...data,
+      active: missingTotal <= 0,
+      claimed: isSkillSynergyClaimed(id),
+      claimable: missingTotal <= 0 && !isSkillSynergyClaimed(id),
+      rewardText: getSkillSynergyRewardText(data),
+      progress,
+      missingTotal,
+    };
+  });
+}
+
+function getSkillCodexSummary(overrideLearnedSkills = null) {
+  const source = Array.isArray(overrideLearnedSkills) ? overrideLearnedSkills : learnedSkills;
+  const totalSkills = Object.values(SKILL_TREES || {}).reduce((n, tree) => n + (tree.skills?.length || 0), 0);
+  const learnedCount = (source || []).filter(s => SKILL_TREES[s.tree]?.skills?.[s.index]).length;
+  const progress = getSkillSynergyProgress(source);
+  const activeSynergies = progress.filter(s => s.active);
+  const claimableSynergies = progress.filter(s => s.claimable);
+  const claimedSynergies = progress.filter(s => s.claimed);
+  const masteries = getActiveSkillMasteries(source);
+  const masteryMilestones = getSkillMasteryMilestoneProgress(source);
+  const claimableMasteries = masteryMilestones.filter(m => m.claimable);
+  const claimedMasteries = masteryMilestones.filter(m => m.claimed);
+  const treeStats = Object.entries(SKILL_TREES || {}).map(([tree, data]) => {
+    const count = (source || []).filter(s => s.tree === tree && data.skills?.[s.index]).length;
+    const total = data.skills?.length || 0;
+    const mastery = getSkillTreeMastery(tree, source);
+    return {
+      tree,
+      name: data.name,
+      shortName: (data.name || tree).replace(/^[^\s]+\s*/, ''),
+      icon: (data.name || '').split(' ')[0] || '✦',
+      color: data.color || '#d4a0ff',
+      learned: count,
+      total,
+      pct: total ? count / total : 0,
+      mastery,
+    };
+  });
+  const next = getNextSkillSynergyRecommendation(source);
+  const completionPct = totalSkills ? Math.round(learnedCount / totalSkills * 100) : 0;
+  return {
+    totalSkills,
+    learnedCount,
+    completionPct,
+    synergies: progress,
+    activeSynergies,
+    claimableSynergies,
+    claimedSynergies,
+    masteries,
+    masteryMilestones,
+    claimableMasteries,
+    claimedMasteries,
+    treeStats,
+    next,
+    claimableCount: claimableSynergies.length + claimableMasteries.length,
+    activeCount: activeSynergies.length,
+    synergyCount: progress.length,
+    masteryCount: masteries.length,
+    headline: (claimableSynergies.length + claimableMasteries.length) ? `${claimableSynergies.length + claimableMasteries.length} 个流派奖励待领取` : activeSynergies.length ? `已成型 ${activeSynergies.length}/${progress.length} 个流派` : (next?.hint || '暂无成型流派'),
+  };
+}
+
+function getSkillSynergiesForTree(tree) {
+  return getSkillSynergyProgress().filter(s => (s.trees || []).includes(tree));
+}
+
+function getNextSkillSynergyHint() {
+  const progress = getSkillSynergyProgress();
+  const locked = progress.filter(s => !s.active).sort((a, b) => a.missingTotal - b.missingTotal)[0];
+  if (!locked) return '基础共鸣已全部激活，可继续深化单系专精。';
+  const missing = locked.progress.filter(p => p.missing > 0);
+  return `距「${locked.name}」还差 ${missing.map(p => `${p.shortName}${p.missing} 个`).join('、')}`;
+}
+
+function getNextSkillSynergyRecommendation(overrideLearnedSkills = null) {
+  const progress = getSkillSynergyProgress(overrideLearnedSkills);
+  const locked = progress
+    .filter(s => !s.active)
+    .sort((a, b) => a.missingTotal - b.missingTotal || (a.name || '').localeCompare(b.name || ''))[0];
+  if (locked) {
+    const missing = (locked.progress || []).filter(p => p.missing > 0);
+    return {
+      type: 'synergy',
+      id: locked.id,
+      name: locked.name,
+      icon: locked.icon || '✦',
+      hint: `距「${locked.name}」还差 ${missing.map(p => `${p.shortName}${p.missing} 个`).join('、')}`,
+      recommendedTrees: missing.map(p => p.tree),
+      missing,
+      progress: locked.progress || [],
+      synergy: locked,
+    };
+  }
+  const counts = getLearnedSkillCountsByTree(overrideLearnedSkills);
+  const candidates = Object.keys(SKILL_TREES || {})
+    .map(tree => ({ tree, count: counts[tree] || 0, mastery: getSkillTreeMastery(tree, overrideLearnedSkills) }))
+    .sort((a, b) => b.count - a.count || (SKILL_TREES[a.tree]?.name || '').localeCompare(SKILL_TREES[b.tree]?.name || ''));
+  const focus = candidates.find(c => c.count > 0) || candidates[0];
+  return {
+    type: 'mastery',
+    id: focus?.tree || '',
+    name: focus ? `${SKILL_TREES[focus.tree]?.name || focus.tree}专精` : '单系专精',
+    icon: focus ? (SKILL_TREES[focus.tree]?.icon || '✦') : '✦',
+    hint: focus ? `基础共鸣已成型，建议继续深化「${(SKILL_TREES[focus.tree]?.name || focus.tree).replace(/^\S+\s*/, '')}」专精。` : '基础共鸣已全部激活，可继续深化单系专精。',
+    recommendedTrees: focus ? [focus.tree] : [],
+    mastery: focus?.mastery || null,
+  };
+}
+
+function getSkillSynergyRecommendationForTree(tree) {
+  const rec = getNextSkillSynergyRecommendation();
+  if (!tree || !(rec.recommendedTrees || []).includes(tree)) return null;
+  return rec;
+}
+
+function getActiveSkillBuildSummary(overrideLearnedSkills = null) {
+  const synergies = getActiveSkillSynergies(overrideLearnedSkills);
+  const masteries = getActiveSkillMasteries(overrideLearnedSkills);
+  const next = getNextSkillSynergyRecommendation(overrideLearnedSkills);
+  const activeLabels = [
+    ...synergies.map(s => `${s.icon || '✦'}${s.name}`),
+    ...masteries.map(m => `${SKILL_TREES[m.tree]?.icon || '✦'}${m.shortName || SKILL_TREES[m.tree]?.name || m.tree}专精`),
+  ];
+  return {
+    synergies,
+    masteries,
+    next,
+    activeLabels,
+    activeText: activeLabels.length ? activeLabels.join(' · ') : '暂无成型流派',
+    hint: next?.hint || '',
+  };
+}
+
+function getActiveSkillSynergyTagsForSkill(skill) {
+  if (!skill?.tree) return [];
+  const active = getActiveSkillSynergies().filter(s => (s.trees || []).includes(skill.tree));
+  return active.map(syn => {
+    const labels = [];
+    const shortLabels = [];
+    for (const eff of syn.effects || []) {
+      const add = (label, short = null) => { labels.push(label); shortLabels.push(short || SKILL_SYNERGY_SHORT_LABELS[eff.type] || label.slice(0, 2)); };
+      if (eff.type === 'burnCritBonus' && (skill.tree === 'fire' || skill.tree === 'thunder')) add('灼烧暴击');
+      if (eff.type === 'critExtendBurn' && skill.tree === 'thunder') add('暴击延烧');
+      if (eff.type === 'healGuardAmp' && skill?.effects?.some(e => e.type === 'healSelf' || e.type === 'guard')) add('续航强化');
+      if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','defBreak'].includes(e.type))) add('控制延长');
+      if (eff.type === 'guardDefBreak' && skill?.effects?.some(e => e.type === 'guard')) add('护盾破甲');
+      if (eff.type === 'defBreakExecute' && (!eff.skillTrees || eff.skillTrees.includes(skill.tree))) add('斩甲追伤');
+      if (eff.type === 'armorPierceBonus') add('破甲加深');
+    }
+    return { id: syn.id, name: syn.name, icon: syn.icon || '✦', labels: [...new Set(labels)], shortLabels: [...new Set(shortLabels)] };
+  }).filter(tag => tag.labels.length > 0);
+}
+
+function getSkillSynergyTagText(skill) {
+  return getActiveSkillSynergyTagsForSkill(skill)
+    .map(tag => `${tag.icon}${tag.labels.join('/')}`)
+    .join(' · ');
+}
+
+function getSkillSynergyShortTagText(skill) {
+  return getActiveSkillSynergyTagsForSkill(skill)
+    .map(tag => `${tag.icon}${tag.shortLabels.join('/')}`)
+    .join(' · ');
+}
+
+function getSkillAffinityText(skill, enemy = currentEnemy) {
+  if (!skill?.tree || !enemy || typeof getEnemyAffinityMultiplier !== 'function') return '';
+  const mult = getEnemyAffinityMultiplier(enemy, skill.tree);
+  if (mult > 1.001) return `克${SKILL_TREE_SHORT_LABELS[skill.tree] || skill.tree}+${Math.round((mult - 1) * 100)}%`;
+  if (mult < 0.999) return `抗${SKILL_TREE_SHORT_LABELS[skill.tree] || skill.tree}-${Math.round((1 - mult) * 100)}%`;
+  return '';
+}
+
+function getSkillLearningImpact(tree, index) {
+  const skill = SKILL_TREES?.[tree]?.skills?.[index];
+  if (!skill) return null;
+  const alreadyLearned = isSkillLearned(tree, index);
+  const before = Array.isArray(learnedSkills) ? learnedSkills.slice() : [];
+  const after = alreadyLearned ? before : [...before, { tree, index }];
+  const beforeProgress = getSkillSynergyProgress(before);
+  const afterProgress = getSkillSynergyProgress(after);
+  const beforeMastery = getSkillTreeMastery(tree, before);
+  const afterMastery = getSkillTreeMastery(tree, after);
+  const newlyActive = afterProgress.filter(next => next.active && !beforeProgress.some(prev => prev.id === next.id && prev.active));
+  const advanced = afterProgress.filter(next => {
+    const prev = beforeProgress.find(p => p.id === next.id);
+    return !next.active && prev && (next.trees || []).includes(tree) && next.missingTotal < prev.missingTotal;
+  });
+  const parts = [];
+  if (newlyActive.length) parts.push(`将激活「${newlyActive.map(s => s.name).join('」「')}」`);
+  else if (advanced.length) parts.push(`推进「${advanced[0].name}」：还差 ${advanced[0].progress.filter(p => p.missing > 0).map(p => `${p.shortName}${p.missing}`).join('、')}`);
+  if (!beforeMastery.active && afterMastery.active) parts.push(`形成${afterMastery.shortName}专精`);
+  else if (afterMastery.active && !alreadyLearned) parts.push(`${afterMastery.shortName}专精提升至伤害+${Math.round(afterMastery.damageBonus * 100)}%`);
+  const tagText = getSkillSynergyTagText({ tree, ...skill });
+  if (tagText) parts.push(`战斗联动：${tagText}`);
+  return {
+    tree,
+    index,
+    skillName: skill.name,
+    alreadyLearned,
+    beforeProgress,
+    afterProgress,
+    newlyActive,
+    advanced,
+    beforeMastery,
+    afterMastery,
+    tagText,
+    text: parts.length ? parts.join('；') : '提升本系进度，继续靠近流派成型',
+  };
+}
+
+function getRecommendedSkillNodesForBuild(limit = 4) {
+  const rec = getNextSkillSynergyRecommendation();
+  const trees = rec?.recommendedTrees?.length ? rec.recommendedTrees : Object.keys(SKILL_TREES || {});
+  const out = [];
+  for (const tree of trees) {
+    const skills = SKILL_TREES[tree]?.skills || [];
+    for (let index = 0; index < skills.length; index++) {
+      const skill = skills[index];
+      if (isSkillLearned(tree, index)) continue;
+      if (skill.unlockRealm > (player?.realmIndex || 0)) continue;
+      if (!areSkillPrereqsMet(tree, index)) continue;
+      const impact = getSkillLearningImpact(tree, index);
+      out.push({ tree, index, skill, rec, impact, score: (impact?.newlyActive?.length ? 30 : 0) + (impact?.afterMastery?.active && !impact?.beforeMastery?.active ? 20 : 0) + (impact?.advanced?.length ? 10 : 0) - index });
+    }
+  }
+  return out.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, limit);
+}
+
+function getSkillCombatBenefitSummary() {
+  const build = getActiveSkillBuildSummary();
+  const parts = [];
+  for (const s of build.synergies || []) parts.push(`${s.icon || '✦'}${s.name}`);
+  for (const m of build.masteries || []) parts.push(`${SKILL_TREES[m.tree]?.icon || '✦'}${m.shortName}专精 伤害+${Math.round(m.damageBonus * 100)}%`);
+  return {
+    labels: parts,
+    text: parts.length ? parts.join(' · ') : (build.hint || '暂无成型流派'),
+    hint: build.hint || '',
+  };
+}
+
+function sumActiveSynergyEffect(type, field = 'value') {
+  let total = 0;
+  for (const syn of getActiveSkillSynergies()) {
+    for (const eff of syn.effects || []) if (eff.type === type) total += eff[field] || 0;
+  }
+  return total;
+}
+
+function getSkillRuntimeEffectBonus(skill) {
+  return getSkillTreeMastery(skill?.tree).effectBonus || 0;
+}
+
+function hasEnemyStatus(type) {
+  return !!currentEnemy?._statusEffects?.some(st => st.type === type && (st.turns || 0) > 0);
+}
+
+function extendEnemyStatus(type, turns) {
+  if (!currentEnemy?._statusEffects || !turns) return false;
+  let changed = false;
+  for (const st of currentEnemy._statusEffects) {
+    if (st.type === type && (st.turns || 0) > 0) {
+      st.turns += turns;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function applySynergyAfterPlayerHit(damage, crit, skill = null) {
+  if (!currentEnemy || currentEnemy.hp <= 0) return;
+  let triggered = 0;
+  for (const syn of getActiveSkillSynergies()) {
+    for (const eff of syn.effects || []) {
+      if (eff.type === 'critExtendBurn' && crit && Math.random() < (eff.chance ?? 0.3)) {
+        if (extendEnemyStatus('burn', eff.turns || 1)) { combatLog(`🔥⚡ ${syn.name}：暴雷延长灼烧`, '#ffb347'); triggered++; }
+      } else if (eff.type === 'guardDefBreak' && skill?.effects?.some(e => e.type === 'guard')) {
+        addCombatStatus(currentEnemy, { type: 'defBreak', turns: eff.turns || 2, ratio: eff.ratio || 0.1 });
+        combatLog(`⛰️⚔️ ${syn.name}：护势震裂敌甲`, '#d8d8ff');
+        triggered++;
+      } else if (eff.type === 'defBreakExecute' && skill && (!eff.skillTrees || eff.skillTrees.includes(skill.tree)) && hasEnemyStatus('defBreak')) {
+        const cap = currentEnemy.isBoss ? Math.floor((player?.atk || 1) * (eff.bossCapAtkRatio || 1.2)) : Infinity;
+        const extra = Math.max(1, Math.min(cap, Math.floor((currentEnemy.hp || 0) * (eff.ratio || 0.08))));
+        currentEnemy.hp = Math.max(0, currentEnemy.hp - extra);
+        combatLog(`⛰️⚔️ ${syn.name}：剑势斩甲追伤 ${extra}`, '#d8d8ff');
+        triggered++;
+      }
+    }
+  }
+  const tag = skill && typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(skill) : '';
+  if (tag && triggered === 0 && Math.random() < 0.35) combatLog(`✦ 共鸣就绪：${tag}`, '#ffe28a');
+}
+
 // ─── Get combat-usable active skills ───
 function getCombatSkills() {
   return getLearnedSkillDefinitions('active');
@@ -469,6 +999,13 @@ function getSkillEffectSummary(skill) {
   if (skill.armorPierce) parts.push(`破防${Math.round(skill.armorPierce * 100)}%`);
   if (skill.critBonus) parts.push(`暴击+${Math.round(skill.critBonus * 100)}%`);
   for (const eff of skill.effects || []) parts.push(SKILL_EFFECT_LABELS[eff.type] || eff.type);
+  for (const syn of getActiveSkillSynergies()) {
+    for (const eff of syn.effects || []) {
+      if (eff.type === 'defBreakExecute' && skill && (!eff.skillTrees || eff.skillTrees.includes(skill.tree))) parts.push('斩甲追伤');
+      if (eff.type === 'healGuardAmp' && skill?.effects?.some(e => e.type === 'healSelf' || e.type === 'guard')) parts.push('共鸣强化');
+      if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','defBreak'].includes(e.type))) parts.push('控制延长');
+    }
+  }
   return [...new Set(parts)].join(' · ');
 }
 
@@ -552,44 +1089,51 @@ function tickPlayerStatusesAfterHit() {
   player._statusEffects = player._statusEffects.filter(st => st.turns > 0);
 }
 
-function getPassiveCritBonus() { return sumLearnedEffect('critBonusPassive') + Number(getDoctrineStatBonuses().crit || 0) / 100; }
-function getPassiveArmorPierce() { return sumLearnedEffect('armorPiercePassive') + Number(getDoctrineStatBonuses().armorPen || 0) / 100; }
+function getPassiveCritBonus() { return sumLearnedEffect('critBonusPassive') + Number(getDoctrineStatBonuses().crit || 0) / 100 + (hasEnemyStatus('burn') ? sumActiveSynergyEffect('burnCritBonus') : 0); }
+function getPassiveArmorPierce() { return sumLearnedEffect('armorPiercePassive') + Number(getDoctrineStatBonuses().armorPen || 0) / 100 + sumActiveSynergyEffect('armorPierceBonus'); }
 function getPassiveBurnAmp() { return sumLearnedEffect('burnAmp'); }
 function getDoctrineSkillDamageBonus(skill) {
   const doctrine = player?.daoFoundation;
-  if (doctrine === 'sword' && skill?.tree === 'sword') return 0.08;
-  if (doctrine === 'spell' && ['fire','water','thunder','wood','earth'].includes(skill?.tree)) return 0.08;
-  return 0;
+  let bonus = getSkillTreeMastery(skill?.tree).damageBonus || 0;
+  if (doctrine === 'sword' && skill?.tree === 'sword') bonus += 0.08;
+  if (doctrine === 'spell' && ['fire','water','thunder','wood','earth'].includes(skill?.tree)) bonus += 0.08;
+  return bonus;
 }
 function getDoctrineMpCostMultiplier(skill) {
   return player?.daoFoundation === 'spell' && getSkillKind(skill) === 'active' ? 0.92 : 1;
 }
 
 function applySkillEffects(skill, totalDamage, killed) {
+  const runtimeEffectBonus = getSkillRuntimeEffectBonus(skill);
+  const healGuardAmp = sumActiveSynergyEffect('healGuardAmp');
+  const controlExtendTurns = sumActiveSynergyEffect('controlExtend', 'turns');
   for (const eff of skill.effects || []) {
     switch (eff.type) {
       case 'burn': {
-        const ratio = (eff.ratio || 0.15) * (1 + getPassiveBurnAmp());
+        const ratio = (eff.ratio || 0.15) * (1 + getPassiveBurnAmp() + runtimeEffectBonus);
         addCombatStatus(currentEnemy, { type: 'burn', turns: eff.turns || 2, ratio, sourceAtk: player.atk });
         combatLog(`🔥 ${currentEnemy.name} 被灼烧 ${eff.turns || 2} 回合`, '#ff8844');
         break;
       }
       case 'bleed':
-        addCombatStatus(currentEnemy, { type: 'bleed', turns: eff.turns || 2, ratio: eff.ratio || 0.12, sourceAtk: player.atk });
+        addCombatStatus(currentEnemy, { type: 'bleed', turns: eff.turns || 2, ratio: (eff.ratio || 0.12) * (1 + runtimeEffectBonus), sourceAtk: player.atk });
         combatLog(`🩸 ${currentEnemy.name} 留下剑痕，持续流血`, '#ff6688');
         break;
       case 'defBreak':
-        addCombatStatus(currentEnemy, { type: 'defBreak', turns: eff.turns || 2, ratio: eff.ratio || 0.15 });
+        addCombatStatus(currentEnemy, { type: 'defBreak', turns: (eff.turns || 2) + controlExtendTurns, ratio: (eff.ratio || 0.15) * (1 + runtimeEffectBonus) });
         combatLog(`🗡️ ${currentEnemy.name} 护甲被撕裂`, '#ddddff');
+        if (controlExtendTurns > 0) combatLog(`💧🌿 水木长生：控制延长 ${controlExtendTurns} 回合`, '#aaddff');
         break;
       case 'weaken':
-        addCombatStatus(currentEnemy, { type: 'weaken', turns: eff.turns || 2, ratio: eff.ratio || 0.15 });
+        addCombatStatus(currentEnemy, { type: 'weaken', turns: (eff.turns || 2) + controlExtendTurns, ratio: (eff.ratio || 0.15) * (1 + runtimeEffectBonus) });
         combatLog(`💧 ${currentEnemy.name} 攻击被削弱`, '#88ccff');
+        if (controlExtendTurns > 0) combatLog(`💧🌿 水木长生：削弱延长 ${controlExtendTurns} 回合`, '#aaddff');
         break;
       case 'freeze':
         if (Math.random() < (eff.chance ?? 1)) {
-          addCombatStatus(currentEnemy, { type: 'freeze', turns: eff.turns || 1 });
+          addCombatStatus(currentEnemy, { type: 'freeze', turns: (eff.turns || 1) + controlExtendTurns });
           combatLog(`🧊 ${currentEnemy.name} 被冻结！`, '#88ccff');
+          if (controlExtendTurns > 0) combatLog(`💧🌿 水木长生：冻结延长 ${controlExtendTurns} 回合`, '#aaddff');
         }
         break;
       case 'stunChance':
@@ -599,22 +1143,25 @@ function applySkillEffects(skill, totalDamage, killed) {
         }
         break;
       case 'healSelf': {
-        const heal = Math.max(1, Math.floor(player.maxHp * (eff.ratio || 0.15)));
+        const heal = Math.max(1, Math.floor(player.maxHp * (eff.ratio || 0.15) * (1 + runtimeEffectBonus + healGuardAmp)));
         const before = player.hp;
         player.hp = Math.min(player.maxHp, player.hp + heal);
         combatLog(`🌿 回春 ${player.hp - before} 点生命`, '#55ff99');
+        if (healGuardAmp > 0) combatLog(`💧🌿 水木长生：治疗强化 +${Math.round(healGuardAmp * 100)}%`, '#88ffcc');
         break;
       }
       case 'guard':
-        addCombatStatus(player, { type: 'guard', turns: eff.turns || 2, ratio: eff.ratio || 0.25 });
-        combatLog(`🛡️ 护体减伤 ${Math.round((eff.ratio || 0.25) * 100)}%`, '#aaddff');
+        addCombatStatus(player, { type: 'guard', turns: eff.turns || 2, ratio: (eff.ratio || 0.25) * (1 + runtimeEffectBonus + healGuardAmp) });
+        combatLog(`🛡️ 护体减伤 ${Math.round((eff.ratio || 0.25) * (1 + runtimeEffectBonus + healGuardAmp) * 100)}%`, '#aaddff');
+        if (healGuardAmp > 0) combatLog(`💧🌿 水木长生：护盾强化 +${Math.round(healGuardAmp * 100)}%`, '#88ffcc');
         break;
       case 'splash':
         splashDamageOtherMonsters(eff, totalDamage, skill.treeColor);
         break;
       case 'execute': {
-        const cap = currentEnemy.isBoss ? Math.floor(player.atk * (eff.bossCapAtkRatio || 1.5)) : Infinity;
-        const extra = Math.max(1, Math.min(cap, Math.floor(currentEnemy.hp * (eff.ratio || 0.1))));
+        const executeAmp = 1 + runtimeEffectBonus + (hasEnemyStatus('defBreak') ? sumActiveSynergyEffect('defBreakExecute', 'ratio') : 0);
+        const cap = currentEnemy.isBoss ? Math.floor(player.atk * (eff.bossCapAtkRatio || 1.5) * executeAmp) : Infinity;
+        const extra = Math.max(1, Math.min(cap, Math.floor(currentEnemy.hp * (eff.ratio || 0.1) * executeAmp)));
         currentEnemy.hp -= extra;
         combatLog(`☯️ 天劫追伤 ${extra}`, '#ffdd44');
         break;
@@ -731,6 +1278,8 @@ function playerUseSkill(skillIndex) {
   const pierce = Math.min(0.85, (skill.armorPierce || 0) + getPassiveArmorPierce());
   const defMult = typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
   const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * defMult * (1 - pierce)));
+  const affinityMult = typeof getEnemyAffinityMultiplier === 'function' ? getEnemyAffinityMultiplier(currentEnemy, skill.tree) : 1;
+  const affinityText = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(skill, currentEnemy) : '';
   let totalDamage = 0;
   let anyCrit = false;
   const hitDamages = [];
@@ -740,7 +1289,8 @@ function playerUseSkill(skillIndex) {
     const crit = Math.random() < (0.15 + (skill.critBonus || 0) + getPassiveCritBonus());
     anyCrit = anyCrit || crit;
     const variance = Math.floor((Math.random() - 0.5) * 6);
-    const dmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, baseDmg + variance);
+    const rawDmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, baseDmg + variance);
+    const dmg = Math.max(1, Math.floor(rawDmg * affinityMult));
     currentEnemy.hp -= dmg;
     totalDamage += dmg;
     hitDamages.push(dmg);
@@ -748,7 +1298,7 @@ function playerUseSkill(skillIndex) {
   skill._lastCrit = anyCrit;
 
   const detail = hits > 1 ? `（${hitDamages.join('+')}）` : '';
-  combatLog(`你使用【${skill.name}】，造成 ${totalDamage} 点伤害${detail}${anyCrit ? ' 💥暴击！' : ''} (-${actualMpCost} 灵力)`, skill.treeColor);
+  combatLog(`你使用【${skill.name}】，造成 ${totalDamage} 点伤害${detail}${anyCrit ? ' 💥暴击！' : ''}${affinityText ? `（${affinityText}）` : ''} (-${actualMpCost} 灵力)`, skill.treeColor);
 
   const wx = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
   const wy = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
@@ -758,6 +1308,7 @@ function playerUseSkill(skillIndex) {
   applyPassiveAfterPlayerHit(totalDamage, anyCrit);
   let killed = currentEnemy.hp <= 0;
   applySkillEffects(skill, totalDamage, killed);
+  if (typeof applySynergyAfterPlayerHit === 'function') applySynergyAfterPlayerHit(totalDamage, anyCrit, skill);
   killed = currentEnemy.hp <= 0;
 
   if (killed) {

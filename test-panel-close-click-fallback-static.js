@@ -39,8 +39,8 @@ assert(mobileCss.includes('#secretrealm-dom-panel,\n  #tribulation-dom-panel,\n 
 assert(mobileCss.includes('body.secretrealm-open #secretrealm-dom-panel') && mobileCss.includes('body.tribulation-open #tribulation-dom-panel') && mobileCss.includes('body.ascension-open #ascension-dom-panel'), 'secret/tribulation/ascension should only display when matching body class is open');
 assert(mobileCss.includes('z-index: 10010 !important'), 'top panels should sit above HUD/nav after audit');
 
-assert(indexHtml.includes('20260530ascguard1'), 'index.html should use current panel audit cache token');
-assert(mobileVerify.includes('20260530ascguard1'), 'mobile-verify iframe should use current panel audit cache token');
+assert(indexHtml.includes('20260530synergy7'), 'index.html should use current panel audit cache token');
+assert(mobileVerify.includes('20260530synergy7'), 'mobile-verify iframe should use current panel audit cache token');
 assert(!indexHtml.includes('20260530stagetop1'), 'index.html should not keep stale stage top cache token');
 assert(!mobileVerify.includes('20260530stagetop1'), 'mobile-verify should not keep stale stage top cache token');
 

@@ -31,6 +31,12 @@ function updateHUD(player, dungeonLevel) {
   document.getElementById('hud-realm').textContent = `境界: ${player.realm.name}`;
   const nextStepEl = document.getElementById('hud-next-step');
   if (nextStepEl) nextStepEl.textContent = getHudNextStepHint(player);
+  const skillClaimCount = typeof getSkillCodexSummary === 'function' ? (getSkillCodexSummary().claimableCount || 0) : 0;
+  if (typeof document.querySelectorAll === 'function') document.querySelectorAll('#btn-skills').forEach(el => {
+    if (!el) return;
+    el.classList.toggle('has-claim', skillClaimCount > 0);
+    el.dataset.claimCount = skillClaimCount > 0 ? String(skillClaimCount) : '';
+  });
   const activeStage = player?.stageProgress?.currentRun?.stageId && typeof STAGES !== 'undefined' ? STAGES[player.stageProgress.currentRun.stageId] : null;
   const roomIndex = Number(player?.stageProgress?.currentRun?.roomIndex || 0);
   document.getElementById('hud-floor').textContent = activeStage ? `${activeStage.name} ${roomIndex + 1}/${activeStage.roomCount}` : '副本入口';

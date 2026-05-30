@@ -54,8 +54,10 @@ function startCombat(enemy) {
   const bossMechanic = immortalBossMechanic || stageBossMechanic;
   const skillText = enemySkills.length ? ` · 技能：${enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、')}` : '';
   const mechanicText = bossMechanic ? ` · 机制：${bossMechanic.icon || '👑'}${bossMechanic.name}` : '';
-  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
-  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
+  const affinity = typeof getEnemyAffinitySummary === 'function' ? getEnemyAffinitySummary(enemy) : null;
+  const affinityText = affinity?.text && affinity.text !== '无明显克制' ? ` · ${affinity.text}` : '';
+  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
+  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
   document.body.classList.add('combat-active');
 }
 function getCombatLogTone(text, color = '#d4c8b0') {
@@ -185,9 +187,12 @@ function playerAttack() {
   const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * buffDefMult * defMult * (1 - Math.min(0.85, pierce))));
   let baseDmg = Math.max(1, player.atk - effectiveDef);
   if (currentEnemy.isBoss) baseDmg = Math.floor(baseDmg * (1 + equipmentAbilityValue('bossDmg') / 100));
+  const affinityMult = typeof getEnemyAffinityMultiplier === 'function' ? getEnemyAffinityMultiplier(currentEnemy, 'sword') : 1;
+  const affinityText = typeof getSkillAffinityText === 'function' ? getSkillAffinityText({ tree: 'sword' }, currentEnemy) : '';
   const critBonus = (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0) + equipmentAbilityValue('crit') / 100;
   const crit = Math.random() < (0.12 + critBonus);
   let dmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, Math.floor(baseDmg + (Math.random() - 0.5) * 4));
+  dmg = Math.max(1, Math.floor(dmg * affinityMult));
   if (player._shadowCounterReady) { dmg = Math.floor(dmg * (1 + equipmentAbilityValue('shadowCounter'))); player._shadowCounterReady = false; }
   currentEnemy.hp -= dmg;
   const flameBurst = equipmentAbilityValue('flameBurst');
@@ -201,8 +206,9 @@ function playerAttack() {
     const ey = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
     notifyArtifactTrigger({ label: effect.label, icon: effect.icon || '🗡️', color: effect.color || '#ffdd66', text: `追加 ${effect.damage} 点伤害`, worldX: ex, worldY: ey });
   }
-  combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}`, '#ffaa44');
+  combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}${affinityText ? `（${affinityText}）` : ''}`, '#ffaa44');
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
+  if (typeof applySynergyAfterPlayerHit === 'function') applySynergyAfterPlayerHit(dmg, crit, null);
   applyEquipmentOnHitEffects(dmg, crit);
   const extraChance = equipmentAbilityValue('extraHitChance');
   const thunderChain = equipmentAbilityValue('thunderChain');

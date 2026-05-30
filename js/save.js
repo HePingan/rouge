@@ -2,7 +2,7 @@
 // Saves player progress, inventory, skills, materials between sessions
 
 const SAVE_KEY = 'xian_save_v1';
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 8;
 const SAVE_BACKUP_KEY = `${SAVE_KEY}_backup`;
 const SAVE_CORRUPT_KEY = `${SAVE_KEY}_corrupt`;
 
@@ -91,6 +91,8 @@ function migrateSave(data) {
   migrated.statPoints = normalizeNumber(migrated.statPoints, migrated.skillPoints || 0);
   if (!Array.isArray(migrated.learnedSkills)) migrated.learnedSkills = [];
   migrated.learnedSkills = migrated.learnedSkills.filter(s => s && typeof s === 'object');
+  migrated.claimedSkillSynergies = typeof normalizeClaimedSkillSynergies === 'function' ? normalizeClaimedSkillSynergies(migrated.claimedSkillSynergies) : (migrated.claimedSkillSynergies || {});
+  migrated.claimedSkillMasteries = typeof normalizeClaimedSkillMasteries === 'function' ? normalizeClaimedSkillMasteries(migrated.claimedSkillMasteries) : (migrated.claimedSkillMasteries || {});
   if (!migrated.materials || typeof migrated.materials !== 'object' || Array.isArray(migrated.materials)) {
     migrated.materials = {};
   }
@@ -112,6 +114,8 @@ function validateSave(data) {
   if (data.equipment !== undefined && (!data.equipment || typeof data.equipment !== 'object' || Array.isArray(data.equipment))) return false;
   if (data.inventory !== undefined && !Array.isArray(data.inventory)) return false;
   if (data.learnedSkills !== undefined && !Array.isArray(data.learnedSkills)) return false;
+  if (data.claimedSkillSynergies !== undefined && (!data.claimedSkillSynergies || typeof data.claimedSkillSynergies !== 'object' || Array.isArray(data.claimedSkillSynergies))) return false;
+  if (data.claimedSkillMasteries !== undefined && (!data.claimedSkillMasteries || typeof data.claimedSkillMasteries !== 'object' || Array.isArray(data.claimedSkillMasteries))) return false;
   if (data.materials !== undefined && (!data.materials || typeof data.materials !== 'object' || Array.isArray(data.materials))) return false;
   if (data.artifacts !== undefined && (!data.artifacts || typeof data.artifacts !== 'object' || Array.isArray(data.artifacts))) return false;
   if (data.ascension !== undefined && (!data.ascension || typeof data.ascension !== 'object' || Array.isArray(data.ascension))) return false;
@@ -143,6 +147,7 @@ function saveGame() {
     const data = {
       version: SAVE_VERSION,
       timestamp: Date.now(),
+      featureFlags: { skillSynergy: 1, skillSynergyReward: 1, skillMasteryReward: 1 },
       // Player cultivation
       realmIndex: player.realmIndex,
       xp: player.xp,
@@ -166,6 +171,8 @@ function saveGame() {
       skillPoints: availableSkillPoints,
       statPoints: availableStatPoints,
       learnedSkills: learnedSkills.map(s => ({ tree: s.tree, index: s.index })),
+      claimedSkillSynergies: typeof normalizeClaimedSkillSynergies === 'function' ? normalizeClaimedSkillSynergies(claimedSkillSynergies) : { ...(claimedSkillSynergies || {}) },
+      claimedSkillMasteries: typeof normalizeClaimedSkillMasteries === 'function' ? normalizeClaimedSkillMasteries(claimedSkillMasteries) : { ...(claimedSkillMasteries || {}) },
       // Materials
       materials: normalizeMaterialIds(playerMaterials),
       // Stage dungeon progress
@@ -266,6 +273,8 @@ function applySaveData(data) {
     tree: s.tree,
     index: s.index,
   }));
+  claimedSkillSynergies = typeof normalizeClaimedSkillSynergies === 'function' ? normalizeClaimedSkillSynergies(data.claimedSkillSynergies) : (data.claimedSkillSynergies || {});
+  claimedSkillMasteries = typeof normalizeClaimedSkillMasteries === 'function' ? normalizeClaimedSkillMasteries(data.claimedSkillMasteries) : (data.claimedSkillMasteries || {});
 
   // Restore materials
   playerMaterials = normalizeMaterialIds(data.materials);
