@@ -5219,6 +5219,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     player.stageProgress.currentRun = { stageId, roomIndex: 0, startedAt: Date.now(), turns: 0, events: [] };
     selectedStageId = stageId;
     player.stageProgress.selectedStageId = stageId;
+    popPanelFromStack('stages');
     showStageSelectUI = false;
     showStageClearPanel = false;
     const sp = document.getElementById('stage-dom-panel');

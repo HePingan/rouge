@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stage enter browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260530ascguard1"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+  const gameWindow = () => document.getElementById('game').contentWindow;
+  const gameDocument = () => gameWindow().document;
+  const click = selector => {
+    const d = gameDocument();
+    const el = d.querySelector(selector);
+    assert(el, `selector not found: ${selector}`);
+    el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:d.defaultView }));
+  };
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try { last = predicate(); if (last) return last; } catch (err) { last = err.message; }
+      await sleep(100);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function inspect() {
+    const w = gameWindow();
+    const d = gameDocument();
+    const p = d.getElementById('stage-dom-panel');
+    const btn = d.querySelector('[data-stage-enter]');
+    return {
+      gameReady: w.gameReady === true,
+      bodyClass: d.body.className,
+      stageRunActive: d.body.classList.contains('stage-run-active'),
+      stagePanelDisplay: p ? w.getComputedStyle(p).display : null,
+      enterDisabled: btn ? btn.disabled : null,
+      enterText: btn ? btn.textContent.trim() : null,
+      currentRun: !!w.player?.stageProgress?.currentRun,
+      selectedStageId: w.player?.stageProgress?.selectedStageId,
+    };
+  }
+  async function run() {
+    await waitFor(() => gameWindow().gameReady === true, 'gameReady');
+    click('#btn-stages');
+    await waitFor(() => gameDocument().querySelector('[data-stage-enter]'), 'stage enter button');
+    const before = inspect();
+    assert(before.bodyClass.includes('stage-open'), `stage panel should open before enter: ${JSON.stringify(before)}`);
+    assert(before.enterDisabled === false, `initial stage enter should be enabled: ${JSON.stringify(before)}`);
+    click('[data-stage-enter]');
+    await sleep(250);
+    const after = inspect();
+    assert(after.stageRunActive, `clicking enter should activate stage run: ${JSON.stringify(after)}`);
+    assert(after.currentRun, `clicking enter should create currentRun: ${JSON.stringify(after)}`);
+    assert(!after.bodyClass.includes('stage-open'), `stage panel should close after enter: ${JSON.stringify(after)}`);
+    return { ok:true, message:'stage enter browser smoke passed' };
+  }
+  run().then(result => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+    document.title = 'SMOKE_OK';
+  }).catch(err => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify({ ok:false, message:err.message, stack:err.stack, state:(() => { try { return inspect(); } catch (_) { return null; } })() });
+    document.title = 'SMOKE_FAIL';
+  });
+})();
+</script>
