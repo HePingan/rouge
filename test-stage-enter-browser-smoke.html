@@ -60,7 +60,21 @@
     assert(after.stageRunActive, `clicking enter should activate stage run: ${JSON.stringify(after)}`);
     assert(after.currentRun, `clicking enter should create currentRun: ${JSON.stringify(after)}`);
     assert(!after.bodyClass.includes('stage-open'), `stage panel should close after enter: ${JSON.stringify(after)}`);
-    return { ok:true, message:'stage enter browser smoke passed' };
+
+    click('#btn-stage-exit');
+    await sleep(250);
+    const exited = inspect();
+    assert(!exited.stageRunActive, `stage exit should clear stage-run-active: ${JSON.stringify(exited)}`);
+    assert(!exited.currentRun, `stage exit should clear currentRun: ${JSON.stringify(exited)}`);
+    assert(exited.bodyClass.includes('stage-open'), `stage exit should return to selector panel: ${JSON.stringify(exited)}`);
+
+    click('[data-stage-enter]');
+    await sleep(250);
+    const reentered = inspect();
+    assert(reentered.stageRunActive, `re-enter after exit should activate stage run: ${JSON.stringify(reentered)}`);
+    assert(reentered.currentRun, `re-enter after exit should create currentRun: ${JSON.stringify(reentered)}`);
+    assert(!reentered.bodyClass.includes('stage-open'), `re-enter after exit should close selector panel: ${JSON.stringify(reentered)}`);
+    return { ok:true, message:'stage enter/exit browser smoke passed' };
   }
   run().then(result => {
     resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);

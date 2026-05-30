@@ -16,4 +16,7 @@ const popIndex = block.indexOf("popPanelFromStack('stages')");
 const syncIndex = block.indexOf('syncBodyPanelState()', popIndex);
 assert(syncIndex > popIndex, 'enterStage should sync after popping stages from the stack');
 
+const bindEnterLine = main.split('\n').find(line => line.includes("querySelectorAll('[data-stage-enter]')")) || '';
+assert(!bindEnterLine.includes('suppressPanelSyntheticClickUntil'), 'stage enter handler should not globally suppress later clicks after the panel closes');
+
 console.log('stage enter panel-stack static test passed');

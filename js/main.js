@@ -5057,7 +5057,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     p.querySelectorAll('[data-stage-detail-toggle]').forEach(btn => bindPanelTap(btn, () => { stageDetailOpen = !stageDetailOpen; stageSweepOpen = false; renderStageDomPanel(); }));
     p.querySelectorAll('[data-stage-sweep-toggle]').forEach(btn => bindPanelTap(btn, () => { stageSweepOpen = !stageSweepOpen; stageDetailOpen = false; renderStageDomPanel(); }));
     p.querySelectorAll('[data-stage-sheet-close]').forEach(btn => bindPanelTap(btn, () => { stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); }));
-    p.querySelectorAll('[data-stage-enter]').forEach(btn => bindPanelTap(btn, e => { suppressPanelSyntheticClickUntil = Math.max(suppressPanelSyntheticClickUntil, Date.now() + 900); if (e?.stopPropagation) e.stopPropagation(); enterStage(btn.dataset.stageEnter); }));
+    p.querySelectorAll('[data-stage-enter]').forEach(btn => bindPanelTap(btn, e => { if (e?.stopPropagation) e.stopPropagation(); enterStage(btn.dataset.stageEnter); }));
     p.querySelectorAll('[data-stage-sweep]').forEach(btn => bindPanelTap(btn, () => { stageSweepOpen = false; sweepStage(btn.dataset.stageSweep, btn.dataset.stageSweepCount || 1); }));
     p.querySelectorAll('[data-stage-material-source]').forEach(btn => bindPanelTap(btn, e => {
       if (e?.stopPropagation) e.stopPropagation();
