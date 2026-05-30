@@ -23,7 +23,7 @@ assert(combat.includes('攻击+${Math.round(buff.atkRatio * 100)}%'), 'self buff
 assert(main.includes('getEnemyAttackBuffMultiplier'), 'combat UI should display buff-aware enemy attack');
 assert(!html.includes('20260521bagequip1'), 'cachebuster should move past bag-equip token');
 assert(!html.includes('20260521monsterbuff1'), 'cachebuster should move past monster-buff token');
-assert(html.includes('20260527invfix1'), 'index.html should use secret-realm cachebuster');
+assert(html.includes('20260530ascguard1'), 'index.html should use secret-realm cachebuster');
 
 const context = {
   console,

@@ -12,7 +12,7 @@ assert(stages.includes('bestClearTurns'), 'best clear turns missing');
 assert(stages.includes('function canSweepStage'), 'sweep availability helper missing');
 assert(stages.includes('function calculateStageStars'), 'star calculation helper missing');
 assert(main.includes('function generateHomeMap'), 'home map/mainline entry missing');
-assert(main.includes("showStageSelectUI = true"), 'stage panel should open from home/entry');
+assert(main.includes('panelStack.push'), 'stage panel should open via panel stack (replaces direct showStageSelectUI = true)');
 assert(
   main.includes("const selectedStage = (typeof STAGES !== 'undefined' && STAGES) ? STAGES[selectedStageId] : null;"),
   'stage panel open should guard STAGES lookup so a missing data module cannot leave the mobile button dead'
@@ -45,5 +45,8 @@ const handleInputStart = main.indexOf('function handleInput()');
 const handleInputMovement = main.indexOf('player.x = newX;', handleInputStart);
 const handleInputTurn = main.indexOf(turnIncrement, handleInputStart);
 assert(handleInputStart >= 0 && handleInputMovement > handleInputStart && handleInputTurn > handleInputMovement, 'stage turn counter must not increment before dx/dy movement checks or idle frames will make stage entry look frozen');
-assert(index.includes('js/stages.js?v=20260527invfix1'), 'stage cachebuster missing');
+const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
+assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');
+assert(linkedTokens.every(token => token === '20260530ascguard1'), 'all linked assets should use current stage top overlay cachebuster');
+assert(!index.includes('20260530stageclose1'), 'index should not keep stale stage close cache token');
 console.log('stage static integration ok');

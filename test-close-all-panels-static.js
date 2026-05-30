@@ -23,7 +23,9 @@ assert(closeBlock.includes('.forEach(id => {') && closeBlock.includes('hideDomPa
 const openPanelStart = main.indexOf('function openPanel(panel)');
 const openPanelEnd = main.indexOf('function drawPanelFrame', openPanelStart);
 const openBlock = main.slice(openPanelStart, openPanelEnd);
-assert(openBlock.includes('closeAllPanels({ sync: false })'), 'openPanel should close stale panels without intermediate sync/render');
-assert(openBlock.includes('closeAllPanels({ sync: true })'), 'openPanel should still sync when toggling an already open panel closed');
+assert(openBlock.includes('pushPanelToStack(panel)'), 'openPanel should push the new panel through the stack helper');
+assert(openBlock.includes('syncBodyPanelState()'), 'openPanel should sync body/panel visibility after push');
+assert(openBlock.includes('popPanelFromStack(panel)'), 'openPanel should pop and close when toggling the top-of-stack panel');
+assert(!openBlock.includes('closeAllPanels({ sync: true })'), 'openPanel toggle must not clear the whole panel stack');
 
 console.log('closeAllPanels stale DOM cleanup static tests passed');

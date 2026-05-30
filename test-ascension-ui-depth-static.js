@@ -25,6 +25,6 @@ mustInclude(css, '.asc-status-grid', 'status grid style');
 mustInclude(css, '.asc-badge', 'badge style');
 mustInclude(css, '.asc-muted', 'muted status style');
 
-assert(index.includes('20260527invfix1'), 'cachebuster should bump to endgame3 for UI depth pass');
+assert(index.includes('20260530ascguard1'), 'cachebuster should bump to endgame3 for UI depth pass');
 assert(!index.includes('20260524endgame2'), 'index should not keep stale endgame2 token');
 console.log('ascension UI depth static assertions passed');

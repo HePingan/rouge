@@ -53,6 +53,34 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     let inventoryDetailScrollKey = '';
     let selectedSkillTreeNode = null;
     let skillDetailModalOpen = false;
+    // Panel stack: tracks open panels in order so ❌ closes them LIFO (last-opened first).
+    // Fixes bug where openPanel(closeAllPanels) destroyed previous panels.
+    let panelStack = [];
+    function updatePanelFlagsFromStack() {
+      showInventory = isPanelTypeInStack('inventory');
+      showCharacterPanel = isPanelTypeInStack('character');
+      showSkillTreeUI = isPanelTypeInStack('skills');
+      showArtifactUI = isPanelTypeInStack('artifact');
+      showAlchemyUI = isPanelTypeInStack('alchemy');
+      showBreakthroughUI = isPanelTypeInStack('breakthrough');
+      showSecretRealmUI = isPanelTypeInStack('secretRealm');
+      showStageSelectUI = isPanelTypeInStack('stages');
+      showTribulationUI = isPanelTypeInStack('tribulation');
+      showAscensionUI = isPanelTypeInStack('ascension');
+    }
+    function isPanelTypeInStack(type) {
+      return panelStack.includes(type);
+    }
+    function popPanelFromStack(type) {
+      const i = panelStack.lastIndexOf(type);
+      if (i >= 0) { panelStack.splice(i, 1); updatePanelFlagsFromStack(); }
+    }
+    function pushPanelToStack(type) {
+      const existing = panelStack.lastIndexOf(type);
+      if (existing >= 0) panelStack.splice(existing, 1);
+      panelStack.push(type);
+      updatePanelFlagsFromStack();
+    }
     let combatSkillDrawerOpen = false;
     let skillsLastTouchActionAt = 0;
     let selectedDaoFoundation = 'sword';
@@ -258,7 +286,7 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
      if (typeof resetDomMapCache === 'function') resetDomMapCache();
    }
   function isAnyPanelOpen() {
-    return showInventory || showCharacterPanel || showSkillTreeUI || showArtifactUI || showAlchemyUI || showBreakthroughUI || showSecretRealmUI || showStageSelectUI || showStageClearPanel || showTribulationUI || showAscensionUI;
+    return panelStack.length > 0 || showStageClearPanel;
   }
   function syncMainNavState() {
     if (typeof document === 'undefined') return;
@@ -280,25 +308,60 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     document.body.classList.toggle('panel-open', open);
     document.body.classList.toggle('stage-run-active', !!isInStageRun);
     document.body.classList.toggle('secret-realm-run-active', !!isInSecretRealm);
-    document.body.classList.toggle('inventory-open', !!showInventory);
-    document.body.classList.toggle('character-open', !!showCharacterPanel);
-    document.body.classList.toggle('skills-open', !!showSkillTreeUI);
-    document.body.classList.toggle('artifact-open', !!showArtifactUI);
-    document.body.classList.toggle('alchemy-open', !!showAlchemyUI);
-    document.body.classList.toggle('breakthrough-open', !!showBreakthroughUI);
-    document.body.classList.toggle('secretrealm-open', !!showSecretRealmUI);
-    document.body.classList.toggle('stage-open', !!showStageSelectUI || !!showStageClearPanel);
-    document.body.classList.toggle('tribulation-open', !!showTribulationUI);
-    document.body.classList.toggle('ascension-open', !!showAscensionUI);
+    /* Only the top panel in the stack is visually shown.
+       Previously all open-panel flags were toggled, which made stacked
+       panels overlap at the same z-index. Now we derive the top type
+       and only set its body class / clear its inline display:none. */
+    const topType = panelStack.length > 0 ? panelStack[panelStack.length - 1] : null;
+    const panelVisible = {
+      inventory: topType === 'inventory',
+      character: topType === 'character',
+      skills: topType === 'skills',
+      artifact: topType === 'artifact',
+      alchemy: topType === 'alchemy',
+      breakthrough: topType === 'breakthrough',
+      secretrealm: topType === 'secretRealm',
+      stage: topType === 'stages' || !!showStageClearPanel,
+      tribulation: topType === 'tribulation',
+      ascension: topType === 'ascension',
+    };
+    document.body.classList.toggle('inventory-open', panelVisible.inventory);
+    document.body.classList.toggle('character-open', panelVisible.character);
+    document.body.classList.toggle('skills-open', panelVisible.skills);
+    document.body.classList.toggle('artifact-open', panelVisible.artifact);
+    document.body.classList.toggle('alchemy-open', panelVisible.alchemy);
+    document.body.classList.toggle('breakthrough-open', panelVisible.breakthrough);
+    document.body.classList.toggle('secretrealm-open', panelVisible.secretrealm);
+    document.body.classList.toggle('stage-open', panelVisible.stage);
+    document.body.classList.toggle('tribulation-open', panelVisible.tribulation);
+    document.body.classList.toggle('ascension-open', panelVisible.ascension);
     /* Clear stale inline display styles so CSS class rules can control visibility.
        hideDomPanelById sets panel.style.display = 'none' which has higher priority
        than body.<panel>-open CSS selectors; removing it lets the stylesheet win. */
     if (open) {
-      [
-        'inventory-dom-panel', 'character-dom-panel', 'stage-dom-panel',
-        'secretrealm-dom-panel', 'tribulation-dom-panel', 'ascension-dom-panel',
+      const allPanelIds = [
+        'inventory-dom-panel', 'character-dom-panel', 'skills-dom-panel',
         'artifact-dom-panel', 'alchemy-dom-panel', 'breakthrough-dom-panel',
-      ].forEach(id => { const el = document.getElementById(id); if (el) el.style.removeProperty('display'); });
+        'secretrealm-dom-panel', 'stage-dom-panel', 'tribulation-dom-panel',
+        'ascension-dom-panel',
+      ];
+      const visibleIds = [];
+      if (panelVisible.inventory) visibleIds.push('inventory-dom-panel');
+      if (panelVisible.character) visibleIds.push('character-dom-panel');
+      if (panelVisible.skills) visibleIds.push('skills-dom-panel');
+      if (panelVisible.artifact) visibleIds.push('artifact-dom-panel');
+      if (panelVisible.alchemy) visibleIds.push('alchemy-dom-panel');
+      if (panelVisible.breakthrough) visibleIds.push('breakthrough-dom-panel');
+      if (panelVisible.secretrealm) visibleIds.push('secretrealm-dom-panel');
+      if (panelVisible.stage) visibleIds.push('stage-dom-panel');
+      if (panelVisible.tribulation) visibleIds.push('tribulation-dom-panel');
+      if (panelVisible.ascension) visibleIds.push('ascension-dom-panel');
+      visibleIds.forEach(id => { const el = document.getElementById(id); if (el) el.style.removeProperty('display'); });
+      /* Hide panels not in visible set — their inline display:'' would otherwise
+         override the CSS display:none default. */
+      allPanelIds.forEach(id => {
+        if (!visibleIds.includes(id)) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+      });
     }
     const moreMenu = document.getElementById('more-menu');
     if (moreMenu && open) {
@@ -327,13 +390,13 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     if (thumb) thumb.style.transform = 'translate(-50%, -50%)';
   }
   function closeBreakthroughPanel() {
-    showBreakthroughUI = false;
+    popPanelFromStack('breakthrough');
     clearTouchMovementState();
     syncBodyPanelState();
   }
   function openBreakthroughPanel() {
     if (isInCombat()) return;
-    showBreakthroughUI = true;
+    pushPanelToStack('breakthrough');
     clearTouchMovementState();
     syncBodyPanelState();
   }
@@ -354,6 +417,14 @@ function escapeHtml(value) {
     return /^[a-z0-9_-]+$/i.test(s) ? s : fallback;
   }
   const ITEM_RARITIES_DOM = ['普通', '魔法', '稀有', '传说', '神话'];
+  function getInventoryBulkSelectableRaritiesDom() {
+    const seen = new Set(ITEM_RARITIES_DOM);
+    for (const item of player?.inventory || []) {
+      const rarity = String(item?.rarity || '').trim();
+      if (rarity) seen.add(rarity);
+    }
+    return Array.from(seen);
+  }
   function rarityShortDom(rarity) {
     return ({ '普通': '普', '魔法': '魔', '稀有': '稀', '传说': '传', '神话': '神' }[rarity] || String(rarity || '?').slice(0, 1));
   }
@@ -951,8 +1022,8 @@ function escapeHtml(value) {
         const equipped = equipItem(player, Number(btn.dataset.confirmEquipIndex));
         clearDetail();
         if (equipped) {
-          showInventory = false;
-          showCharacterPanel = true;
+          popPanelFromStack('inventory');
+          pushPanelToStack('character');
           characterPanelLastHtml = '';
           characterEquipmentDetailSlot = null;
           showMessage('已装备！前往角色页一览全身修为', '#d4a0ff');
@@ -993,7 +1064,7 @@ function escapeHtml(value) {
       <div class="inv-hint">背包只管理库存；穿上装备后到「角色」页查看属性、套装与战力</div>`;
     const container = document.getElementById('game-container') || document.body;
     container.appendChild(panel);
-    const close = () => closeAllPanels();
+    const close = () => { popPanelFromStack('inventory'); syncBodyPanelState(); };
     panel.querySelector('.inv-close').addEventListener('click', e => { if (shouldIgnoreInventorySyntheticClickDom()) return; close(); });
     panel.querySelector('.inv-close').addEventListener('touchstart', e => { markInventoryTouchActionDom(); e.preventDefault(); e.stopPropagation(); close(); }, { passive: false });
     panel.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
@@ -1090,16 +1161,18 @@ function escapeHtml(value) {
     }
     panel.querySelectorAll('.inv-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.invTab === inventoryTab));
     panel.querySelectorAll('[data-tab-panel]').forEach(section => section.classList.toggle('active', section.dataset.tabPanel === inventoryTab));
-    const availableRarities = ITEM_RARITIES_DOM.filter(rarity => player.inventory.some(item => item?.rarity === rarity));
-    if (!availableRarities.includes(inventoryBulkRarity)) inventoryBulkRarity = availableRarities[0] || '普通';
+    const allRarities = getInventoryBulkSelectableRaritiesDom();
+    const availableRarities = allRarities.filter(rarity => player.inventory.some(item => item?.rarity === rarity));
+    if (!allRarities.includes(inventoryBulkRarity)) inventoryBulkRarity = allRarities[0] || '普通';
+    if (!availableRarities.includes(inventoryBulkRarity)) inventoryBulkRarity = availableRarities[0] || allRarities[0] || '普通';
     if (bulkSelect) {
-      bulkSelect.innerHTML = ITEM_RARITIES_DOM.map(rarity => `<option value="${escapeHtml(rarity)}"${rarity === inventoryBulkRarity ? ' selected' : ''}>${escapeHtml(rarity)}</option>`).join('');
+      bulkSelect.innerHTML = allRarities.map(rarity => `<option value="${escapeHtml(rarity)}"${rarity === inventoryBulkRarity ? ' selected' : ''}>${escapeHtml(rarity)}</option>`).join('');
     }
     const selectedEntries = inventoryItemsByRarityDom(inventoryBulkRarity);
     const selectedPreview = bulkPreviewDom(inventoryBulkRarity);
     const rarityChips = panel.querySelector('.bulk-rarity-chips');
     if (rarityChips) {
-      rarityChips.innerHTML = ITEM_RARITIES_DOM.map(rarity => {
+      rarityChips.innerHTML = allRarities.map(rarity => {
         const preview = bulkPreviewDom(rarity);
         const active = rarity === inventoryBulkRarity ? ' active' : '';
         const disabled = preview.count ? '' : ' disabled';
@@ -1152,9 +1225,8 @@ function escapeHtml(value) {
   }
   function closeAllPanels(options = {}) {
     const shouldSync = options.sync !== false;
+    panelStack = [];
     showStageClearPanel = false;
-    showInventory = false;
-    showCharacterPanel = false;
     characterPanelLastHtml = '';
     characterPanelTouchState = null;
     characterEquipmentDetailSlot = null;
@@ -1162,19 +1234,11 @@ function escapeHtml(value) {
     inventoryBulkConfirm = null;
     inventoryDetailScrollKey = '';
     invalidateInventoryListCacheDom();
-    showSkillTreeUI = false;
-    showArtifactUI = false;
     skillDetailModalOpen = false;
-    const skillLayer = document.getElementById('skill-detail-layer');
+    const skillLayer = typeof document !== 'undefined' ? document.getElementById('skill-detail-layer') : null;
     if (skillLayer) skillLayer.innerHTML = '';
-    showAlchemyUI = false;
-    showBreakthroughUI = false;
-    showSecretRealmUI = false;
-    showStageSelectUI = false;
-    showStageClearPanel = false;
-    showTribulationUI = false;
-    showAscensionUI = false;
     lastStageClearSummary = null;
+    updatePanelFlagsFromStack();
     [
       'inventory-dom-panel',
       'character-dom-panel',
@@ -1277,39 +1341,20 @@ function escapeHtml(value) {
   }
   function openPanel(panel) {
     if (isInCombat()) return;
-    const wasOpen = {
-      inventory: showInventory,
-      character: showCharacterPanel,
-      skills: showSkillTreeUI,
-      artifact: showArtifactUI,
-      alchemy: showAlchemyUI,
-      breakthrough: showBreakthroughUI,
-      secretRealm: showSecretRealmUI,
-      stages: showStageSelectUI || showStageClearPanel,
-      tribulation: showTribulationUI,
-      ascension: showAscensionUI,
-    }[panel];
-    closeAllPanels({ sync: false });
-    if (wasOpen) {
-      closeAllPanels({ sync: true });
+    /* Toggle: if this exact panel type is the top of the stack, close it. */
+    if (panelStack.length > 0 && panelStack[panelStack.length - 1] === panel) {
+      popPanelFromStack(panel);
+      syncBodyPanelState();
       return;
     }
-    if (panel === 'inventory') showInventory = true;
-    if (panel === 'character') showCharacterPanel = true;
-    if (panel === 'skills') showSkillTreeUI = true;
-    if (panel === 'artifact') showArtifactUI = true;
-    if (panel === 'alchemy') showAlchemyUI = true;
-    if (panel === 'secretRealm') showSecretRealmUI = true;
+    pushPanelToStack(panel);
     if (panel === 'stages') {
       const selectedStage = (typeof STAGES !== 'undefined' && STAGES) ? STAGES[selectedStageId] : null;
-      showStageSelectUI = true;
       stageTab = 'stages';
       stageDetailOpen = false;
       stageSweepOpen = false;
       selectedStageChapterId = selectedStage?.chapterId || selectedStageChapterId;
     }
-    if (panel === 'tribulation') showTribulationUI = true;
-    if (panel === 'ascension') showAscensionUI = true;
     if (panel === 'breakthrough') {
       openBreakthroughPanel();
       return;
@@ -2772,7 +2817,7 @@ function generateNewFloor() {
     p.id = 'character-dom-panel';
     p.addEventListener('click', e => {
       if (e.target.closest('.char-close')) {
-        showCharacterPanel = false;
+        popPanelFromStack('character');
         characterPanelLastHtml = '';
         closeCharacterDetailPopupDom();
         syncBodyPanelState();
@@ -2781,7 +2826,7 @@ function generateNewFloor() {
     p.addEventListener('touchstart', e => {
       if (e.target.closest('.char-close')) {
         e.preventDefault();
-        showCharacterPanel = false;
+        popPanelFromStack('character');
         characterPanelLastHtml = '';
         closeCharacterDetailPopupDom();
         syncBodyPanelState();
@@ -3193,10 +3238,10 @@ function generateNewFloor() {
       e.preventDefault?.();
       e.stopPropagation?.();
     }
-    showSkillTreeUI = false;
+    popPanelFromStack('skills');
     selectedSkillTreeNode = null;
     skillDetailModalOpen = false;
-    const layer = document.getElementById('skill-detail-layer');
+    const layer = typeof document !== 'undefined' ? document.getElementById('skill-detail-layer') : null;
     if (layer) layer.innerHTML = '';
     syncBodyPanelState();
   }
@@ -3213,14 +3258,17 @@ function generateNewFloor() {
     if (p) return p;
     p = document.createElement('div');
     p.id = 'skills-dom-panel';
-    p.addEventListener('click', e => {
-      if (e.target.closest('.pclose')) closeSkillsPanelDom(e);
-    });
+    const onCloseHit = e => {
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      closeSkillsPanelDom(e);
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     p.addEventListener('touchstart', e => {
-      if (e.target.closest('.pclose')) {
-        closeSkillsPanelDom(e);
-        return;
-      }
       if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn')) {
         e.stopPropagation();
       }
@@ -3479,7 +3527,17 @@ function generateNewFloor() {
     let p = document.getElementById('alchemy-dom-panel');
     if (p) return p;
     p = document.createElement('div'); p.id = 'alchemy-dom-panel';
-    p.addEventListener('click', e => { if (e.target.closest('.pclose')) { showAlchemyUI = false; syncBodyPanelState(); } });
+    const onCloseHit = e => {
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      popPanelFromStack('alchemy');
+      syncBodyPanelState();
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -3530,8 +3588,17 @@ function generateNewFloor() {
     let p = document.getElementById('artifact-dom-panel');
     if (p) return p;
     p = document.createElement('div'); p.id = 'artifact-dom-panel';
-    p.addEventListener('click', e => { if (e.target.closest('.pclose')) { showArtifactUI = false; syncBodyPanelState(); } });
-    p.addEventListener('touchstart', e => { if (e.target.closest('.pclose')) { e.preventDefault(); showArtifactUI = false; syncBodyPanelState(); } }, { passive: false });
+    const onCloseHit = e => {
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      popPanelFromStack('artifact');
+      syncBodyPanelState();
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -3798,8 +3865,16 @@ function generateNewFloor() {
     let p = document.getElementById('breakthrough-dom-panel');
     if (p) return p;
     p = document.createElement('div'); p.id = 'breakthrough-dom-panel';
-    p.addEventListener('click', e => { if (e.target.closest('.pclose')) closeBreakthroughPanel(); });
-    p.addEventListener('touchstart', e => { if (e.target.closest('.pclose')) { e.preventDefault(); closeBreakthroughPanel(); } }, { passive: false });
+    const onCloseHit = e => {
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      closeBreakthroughPanel();
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -4042,9 +4117,9 @@ function generateNewFloor() {
            const eventText = typeof applyStageRoomEvent === 'function' ? applyStageRoomEvent(activeStage, nextIdx) : '';
            showMessage(eventText || `进入${activeStage.name} · ${getStageRoomLabel(activeStage, nextIdx)}...`, activeStage.color || '#ff9944');
            autoSave();
-         } else {
-           showStageSelectUI = true;
-           stageTab = 'stages';
+        } else {
+          pushPanelToStack('stages');
+          stageTab = 'stages';
            stageDetailOpen = false;
            stageSweepOpen = false;
            selectedStageChapterId = STAGES[selectedStageId]?.chapterId || selectedStageChapterId;
@@ -4166,7 +4241,7 @@ function generateNewFloor() {
       </div>
     </div>`;
     const moreBtn = p.querySelector('.sr-result-more');
-    if (moreBtn) bindPanelTap(moreBtn, () => { secretRealmResultPanel = null; showSecretRealmUI = true; renderSecretRealmDomPanel(); });
+    if (moreBtn) bindPanelTap(moreBtn, () => { secretRealmResultPanel = null; renderSecretRealmDomPanel(); });
     const closeBtn = p.querySelector('.sr-result-close');
     if (closeBtn) bindPanelTap(closeBtn, closeSecretRealmPanel);
     return true;
@@ -4178,15 +4253,11 @@ function generateNewFloor() {
       e.stopPropagation();
     }
     secretRealmResultPanel = null;
-    showSecretRealmUI = false;
+    popPanelFromStack('secretRealm');
     const p = document.getElementById('secretrealm-dom-panel');
-    if (p) p.style.display = 'none'; // hide immediately before any broader state sync
+    if (p) p.style.display = 'none';
     clearTouchMovementState();
-    if (typeof document !== 'undefined') {
-      document.body.classList.toggle('secretrealm-open', false);
-      document.body.classList.toggle('panel-open', isAnyPanelOpen());
-      syncMainNavState();
-    }
+    syncBodyPanelState();
   }
 
   function ensureSecretRealmDomPanel() {
@@ -4194,11 +4265,15 @@ function generateNewFloor() {
     if (p) return p;
     p = document.createElement('div'); p.id = 'secretrealm-dom-panel';
     const onCloseHit = e => {
-      if (e.target.closest('.pclose') || e.target.closest('.sr-close')) closeSecretRealmPanel(e);
+      const closeTarget = e.target.closest('.pclose, .sr-close');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      closeSecretRealmPanel(e);
     };
-    p.addEventListener('pointerdown', onCloseHit, { passive: false });
-    p.addEventListener('touchstart', onCloseHit, { passive: false });
-    p.addEventListener('click', onCloseHit);
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -4412,7 +4487,6 @@ function generateNewFloor() {
     // Close selector for normal runs. Quick mode settles synchronously and renders the final result once;
     // rendering an intermediate “结算中” state still produces a visible one-frame flash on mobile.
     if (quickMode) {
-      showSecretRealmUI = true;
       const srp = document.getElementById('secretrealm-dom-panel');
       if (srp) srp.style.display = '';
       clearTouchMovementState();
@@ -4420,7 +4494,7 @@ function generateNewFloor() {
       return;
     }
 
-    showSecretRealmUI = false;
+    // Hide panel during combat (keep in stack — callbacks will re-render)
     const srp = document.getElementById('secretrealm-dom-panel');
     if (srp) srp.style.display = 'none';
     clearTouchMovementState();
@@ -4635,7 +4709,7 @@ function generateNewFloor() {
     }
 
     showMessage(msg, '#ffdd55');
-    showSecretRealmUI = true;
+    // secret realm panel stays in stack — just re-sync
     syncBodyPanelState();
     autoSave();
   };
@@ -4676,7 +4750,7 @@ function generateNewFloor() {
     }
 
     showMessage('🏞️ 秘境挑战失败，失去进入消耗但修为尚在。', '#ffdd44');
-    showSecretRealmUI = true;
+    // secret realm panel stays in stack — just re-sync
     syncBodyPanelState();
     autoSave();
   };
@@ -4712,7 +4786,7 @@ function generateNewFloor() {
     }
 
     showMessage('🏃 逃离秘境，挑战中断。', '#88ccff');
-    showSecretRealmUI = true;
+    // secret realm panel stays in stack — just re-sync
     syncBodyPanelState();
     autoSave();
   };
@@ -4721,12 +4795,13 @@ function generateNewFloor() {
   // ─── Stage Dungeon System ───
   function closeStagePanel(e) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    showStageSelectUI = false;
+    if (isInStageRun) { onStageFlee(); return; }
+    popPanelFromStack('stages');
     showStageClearPanel = false;
     lastStageClearSummary = null;
-    const p = document.getElementById('stage-dom-panel');
-    if (p) p.style.display = 'none';
     clearTouchMovementState();
+    const sp = typeof document !== 'undefined' ? document.getElementById('stage-dom-panel') : null;
+    if (sp) sp.style.display = 'none';
     syncBodyPanelState();
     if (!isInStageRun && typeof generateHomeMap === 'function') generateHomeMap();
   }
@@ -4736,11 +4811,17 @@ function generateNewFloor() {
     p = document.createElement('div');
     p.id = 'stage-dom-panel';
     const onCloseHit = e => {
-      if (e.target.closest('.pclose') || e.target.closest('[data-stage-close]')) closeStagePanel(e);
+      const closeTarget = e.target.closest('.pclose, [data-stage-close]');
+      if (!closeTarget) return;
+      // Close on the earliest real pointer/touch event so mobile users are not trapped
+      // if a later synthetic click is swallowed by panel tap suppression.
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      closeStagePanel(e);
     };
-    p.addEventListener('pointerdown', onCloseHit, { passive: false });
-    p.addEventListener('touchstart', onCloseHit, { passive: false });
-    p.addEventListener('click', onCloseHit);
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -4908,7 +4989,7 @@ function generateNewFloor() {
       const detailHtml = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-detail-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><div class="stage-detail-title"><span>${selected.icon || '🗺️'}</span><div><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><em>${escapeHtml(selected.desc || '副本详情')}</em></div></div><section class="stage-detail-section"><h4>基础</h4><div class="stage-detail-chip-grid"><span><b>推荐</b><em>${escapeHtml(REALMS?.[selected.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(selected.recommendedPower)}</em></span><span><b>房间</b><em>${escapeHtml(selected.roomCount)}间</em></span><span><b>地图</b><em>${escapeHtml(selectedTheme ? `${selectedTheme.icon || ''} ${selectedTheme.name}` : '默认秘境')}</em></span><span><b>三星</b><em>${escapeHtml(starCond)}</em></span></div></section><section class="stage-detail-section"><h4>战斗</h4><div class="stage-detail-line compact"><b>首领机制</b><span>${escapeHtml(bossText)}</span></div>${immortalMechanicCard}</section><section class="stage-detail-section"><h4>奖励</h4><div class="stage-detail-line compact"><b>掉落</b><span>${escapeHtml(getStageDropText(selected))}</span></div>${setText ? `<div class="stage-detail-line compact"><b>套装目标</b><span>${escapeHtml(setText)}</span></div>` : ''}<div class="stage-detail-line compact"><b>首通</b><span>${escapeHtml(firstText)}</span></div><div class="stage-detail-line compact"><b>重复</b><span>${escapeHtml(rewardText)}</span></div></section><section class="stage-detail-section"><h4>扫荡</h4><div class="stage-detail-line compact"><b>成本</b><span>每次💎${escapeHtml(sweepCost1)} · 推荐：${escapeHtml(recText)}</span></div></section>${materialSourcePanel}${chClaim.ok ? `<div class="stage-detail-alert">🔔 章节全通奖励可领：${escapeHtml(chBonusText)}</div>` : ''}<div class="stage-sheet-actions"><button class="stage-detail-btn" type="button" data-stage-sheet-close="1">关闭</button><button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入副本' : getStageLockedReason(player, selected.id)}</button></div></aside>`;
       const sweepPreview = getStageSweepPreview(selected, 1);
       const sweepSheet = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-sweep-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><b>扫荡 ${escapeHtml(selected.name)}</b><small>${sweepCheck.ok ? `每次消耗 💎${escapeHtml(sweepPreview.perCost)}，快速领取重复通关奖励` : escapeHtml(sweepCheck.reason)}</small><div class="stage-sweep-preview"><span><b>当前灵石</b><em class="${sweepPreview.maxRuns <= 0 ? 'lack' : ''}">💎${escapeHtml(sweepPreview.owned)}</em></span><span><b>最多可扫</b><em>${escapeHtml(sweepPreview.maxRuns)}次</em></span><span><b>基础收益</b><em>${escapeHtml(sweepPreview.rewardText)}</em></span><span><b>可能掉落</b><em>${escapeHtml(sweepPreview.dropText)}</em></span></div>${sweepCheck.ok ? `<div class="stage-sweep-options">${[1, 5, 10].map(n => { const pv = getStageSweepPreview(selected, n); return `<button class="stage-sweep-btn ${pv.enough ? '' : 'disabled'}" type="button" data-stage-sweep="${escapeHtml(selected.id)}" data-stage-sweep-count="${n}" ${pv.enough ? '' : 'disabled'}>扫荡${n}次<br><em>💎${pv.cost}</em></button>`; }).join('')}</div>${sweepPreview.maxRuns <= 0 ? `<span class="stage-sweep-hint warn">灵石不足，至少需要💎${escapeHtml(sweepPreview.perCost)}</span>` : ''}` : `<span class="stage-sweep-hint">${escapeHtml(sweepCheck.reason)}</span>`}</aside>`;
-p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-tabs"><button class="stage-tab${stageTab === 'stages' ? ' active' : ''}" type="button" data-stage-tab="stages">选关</button><button class="stage-tab${stageTab === 'codex' ? ' active' : ''}" type="button" data-stage-tab="codex">图鉴</button></div><button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×</button></div><div class="stage-body"${stageTab === 'stages' ? '' : ' style="display:none"'}><div class="stage-chapter-strip">${chapterTabs}</div><div class="stage-chapter-summary" style="--stage-color:${selectedChapter.color}"><b>${selectedChapter.icon} ${escapeHtml(selectedChapter.name)}</b><span>${chapterProgress.cleared}/${chapterProgress.total}关 · ${chapterProgress.stars}/${chapterProgress.total * 3}★</span><small>${escapeHtml(selectedChapter.desc || '')}</small></div><div class="stage-guide-strip"><b>下一步：</b><span>${escapeHtml(nextGuideText)}</span></div><div class="stage-card-grid">${cards}</div></div><div class="stage-body stage-codex-body"${stageTab === 'codex' ? '' : ' style="display:none"'}>${getStageCodexDom()}</div><div class="stage-foot">${stageTab === 'stages' ? `<div class="stage-foot-info" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><small>${escapeHtml(unlocked ? `${REALMS?.[selected.recommendedRealm]?.name || '练气期'} · 战力${selected.recommendedPower} · ${selected.roomCount}房` : getStageLockedReason(player, selected.id))}</small><em>${escapeHtml(setText || getStageDropText(selected) || '通关可获得经验、灵石与装备')}</em></div><div class="stage-foot-actions"><button class="stage-detail-btn ${stageDetailOpen ? 'active' : ''}" type="button" data-stage-detail-toggle="1">详情</button><button class="stage-detail-btn ${stageSweepOpen ? 'active' : ''}" type="button" data-stage-sweep-toggle="1" ${sweepCheck.ok ? '' : 'disabled'}>${sweepCheck.ok ? '扫荡' : sweepCheck.reason}</button>${chClaim.ok ? `<button class="stage-enter-btn" type="button" data-claim-chapter="${escapeHtml(chId)}">领奖</button>` : `<button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入' : '未解锁'}</button>`}</div>` : `<div class="stage-foot-info"><b>副本图鉴</b><small>查看全章节进度</small><em>点击推荐卡可跳转到对应章节与关卡</em></div>`}</div>${stageDetailOpen ? detailHtml : ''}${stageSweepOpen ? sweepSheet : ''}`;
+p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-tabs"><button class="stage-tab${stageTab === 'stages' ? ' active' : ''}" type="button" data-stage-tab="stages">选关</button><button class="stage-tab${stageTab === 'codex' ? ' active' : ''}" type="button" data-stage-tab="codex">图鉴</button></div><button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×</button></div><div class="stage-body stage-select-body"${stageTab === 'stages' ? '' : ' style="display:none"'}><div class="stage-chapter-strip">${chapterTabs}</div><div class="stage-chapter-summary" style="--stage-color:${selectedChapter.color}"><b>${selectedChapter.icon} ${escapeHtml(selectedChapter.name)}</b><span>${chapterProgress.cleared}/${chapterProgress.total}关 · ${chapterProgress.stars}/${chapterProgress.total * 3}★</span><small>${escapeHtml(selectedChapter.desc || '')}</small></div><div class="stage-guide-strip"><b>下一步：</b><span>${escapeHtml(nextGuideText)}</span></div><div class="stage-card-grid">${cards}</div></div><div class="stage-body stage-codex-body"${stageTab === 'codex' ? '' : ' style="display:none"'}>${getStageCodexDom()}</div><div class="stage-foot">${stageTab === 'stages' ? `<div class="stage-foot-info" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><small>${escapeHtml(unlocked ? `${REALMS?.[selected.recommendedRealm]?.name || '练气期'} · 战力${selected.recommendedPower} · ${selected.roomCount}房` : getStageLockedReason(player, selected.id))}</small><em>${escapeHtml(setText || getStageDropText(selected) || '通关可获得经验、灵石与装备')}</em></div><div class="stage-foot-actions"><button class="stage-detail-btn ${stageDetailOpen ? 'active' : ''}" type="button" data-stage-detail-toggle="1">详情</button><button class="stage-detail-btn ${stageSweepOpen ? 'active' : ''}" type="button" data-stage-sweep-toggle="1" ${sweepCheck.ok ? '' : 'disabled'}>${sweepCheck.ok ? '扫荡' : sweepCheck.reason}</button>${chClaim.ok ? `<button class="stage-enter-btn" type="button" data-claim-chapter="${escapeHtml(chId)}">领奖</button>` : `<button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入' : '未解锁'}</button>`}</div>` : `<div class="stage-foot-info"><b>副本图鉴</b><small>查看全章节进度</small><em>点击推荐卡可跳转到对应章节与关卡</em></div>`}</div>${stageDetailOpen ? detailHtml : ''}${stageSweepOpen ? sweepSheet : ''}`;
     }
     const restoreChapterScroll = () => {
       const chapterStrip = p.querySelector('.stage-chapter-strip');
@@ -4989,7 +5070,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       renderStageDomPanel();
     }));
     p.querySelectorAll('[data-claim-chapter]').forEach(btn => bindPanelTap(btn, () => claimChapterBonus(btn.dataset.claimChapter)));
-    p.querySelectorAll('[data-stage-back]').forEach(btn => bindPanelTap(btn, () => { showStageClearPanel = false; showStageSelectUI = true; stageTab = 'stages'; stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); syncBodyPanelState(); }));
+    p.querySelectorAll('[data-stage-back]').forEach(btn => bindPanelTap(btn, () => { showStageClearPanel = false; stageTab = 'stages'; stageDetailOpen = false; stageSweepOpen = false; renderStageDomPanel(); syncBodyPanelState(); }));
   }
   function pushStageEventLog(text) {
     if (!player?.stageProgress?.currentRun || !text) return;
@@ -5274,7 +5355,8 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     isInStageRun = false; stageRoomIndex = 0; stageRoomCount = 0;
     if (typeof document !== 'undefined') document.body.classList.remove('stage-run-active');
     showMessage('🏃 已退出副本。', '#88ccff');
-    showStageSelectUI = true; showStageClearPanel = false;
+    pushPanelToStack('stages');
+    showStageClearPanel = false;
     stageTab = 'stages';
     stageDetailOpen = false;
     stageSweepOpen = false;
@@ -5285,9 +5367,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
   // ─── Tribulation System ───
   function closeTribulationPanel(e) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    showTribulationUI = false;
-    const p = document.getElementById('tribulation-dom-panel');
-    if (p) p.style.display = 'none';
+    popPanelFromStack('tribulation');
     clearTouchMovementState();
     syncBodyPanelState();
   }
@@ -5296,6 +5376,16 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     if (p) return p;
     p = document.createElement('div');
     p.id = 'tribulation-dom-panel';
+    const onCloseHit = e => {
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      closeTribulationPanel(e);
+    };
+    p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
+    p.addEventListener('click', onCloseHit, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -5323,10 +5413,6 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       const check = getTribulationAvailability(player, selected.id);
       p.innerHTML = `<div class="trib-head"><b>⚡ 天劫</b><span>雷劫精华 ${Number(player?.tribulationEssence || 0)} · 淬体 ${Number(player?.bodyTemperLevel || 0)}</span><button class="pclose" type="button">×</button></div><div class="trib-body">${cards}</div><div class="trib-foot"><div>${escapeHtml(check.ok ? `准备挑战：${selected.name}` : check.reason)}</div><button class="trib-enter ${check.ok ? '' : 'disabled'}" type="button" data-trib-enter="${escapeHtml(selected.id)}" ${check.ok ? '' : 'disabled'}>${check.ok ? `挑战${selected.name}` : '条件不足'}</button></div>`;
     }
-    p.querySelectorAll('.pclose').forEach(btn => {
-      btn.addEventListener('pointerdown', closeTribulationPanel, { passive: false });
-      btn.addEventListener('click', closeTribulationPanel);
-    });
     p.querySelectorAll('[data-trib-id]').forEach(btn => {
       btn.addEventListener('click', e => { e.preventDefault(); selectedTribulationId = btn.dataset.tribId || 'minor'; renderTribulationDomPanel(); });
     });
@@ -5345,9 +5431,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     tribulationNodeIndex = 0;
     tribulationNodeCount = trial.waves;
     player.tribulationProgress = { tribulationId, waves: trial.waves };
-    showTribulationUI = false;
-    const tp = document.getElementById('tribulation-dom-panel');
-    if (tp) tp.style.display = 'none';
+    popPanelFromStack('tribulation');
     syncBodyPanelState();
     setTimeout(() => { advanceTribulationNode(); }, 300);
   }
@@ -5370,7 +5454,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     resetTemporaryCombatBuffs();
     player.hp = Math.min(player.maxHp, Math.max(1, player.hp + Math.floor(player.maxHp * 0.25)));
     showMessage(`⚡ ${trial.name} 成功！雷劫精华+${rewards.essence}，淬体+${rewards.bodyTemper}`, '#ffe27a');
-    showTribulationUI = true;
+    // tribulation panel stays in stack during combat
     syncBodyPanelState();
     autoSave();
   };
@@ -5385,7 +5469,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     resetTemporaryCombatBuffs();
     player.hp = Math.max(1, Math.floor(player.maxHp * 0.35));
     showMessage(`⚡ ${trial.name} 失败，但获得保底：雷劫精华+${rewards.essence}，淬体+${rewards.bodyTemper}`, '#ffdd88');
-    showTribulationUI = true;
+    // tribulation panel stays in stack during combat
     syncBodyPanelState();
     autoSave();
   };
@@ -5396,7 +5480,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     tribulationNodeCount = 0;
     resetTemporaryCombatBuffs();
     showMessage('🏃 中断天劫，本次消耗不返还。', '#88ccff');
-    showTribulationUI = true;
+    // tribulation panel stays in stack during combat
     syncBodyPanelState();
     autoSave();
   };
@@ -5404,9 +5488,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
   // ─── Ascension / Immortal World Panel ───
   function closeAscensionPanel(e) {
     if (e) { e.preventDefault(); e.stopPropagation(); }
-    showAscensionUI = false;
-    const p = document.getElementById('ascension-dom-panel');
-    if (p) p.style.display = 'none';
+    popPanelFromStack('ascension');
     clearTouchMovementState();
     syncBodyPanelState();
   }
@@ -5416,12 +5498,15 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     p = document.createElement('div');
     p.id = 'ascension-dom-panel';
     const onDelegatedAscensionClose = e => {
-      if (!e.target || !e.target.closest('.pclose')) return;
+      const closeTarget = e.target.closest('.pclose');
+      if (!closeTarget) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
       closeAscensionPanel(e);
     };
-    p.addEventListener('pointerdown', onDelegatedAscensionClose, { passive: false });
-    p.addEventListener('touchstart', onDelegatedAscensionClose, { passive: false });
-    p.addEventListener('click', onDelegatedAscensionClose);
+    p.addEventListener('pointerdown', onDelegatedAscensionClose, { passive: false, capture: true });
+    p.addEventListener('touchstart', onDelegatedAscensionClose, { passive: false, capture: true });
+    p.addEventListener('click', onDelegatedAscensionClose, { capture: true });
     document.body.appendChild(p);
     return p;
   }
@@ -5502,10 +5587,8 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     stageTab = 'stages';
     stageDetailOpen = true;
     stageSweepOpen = false;
-    showAscensionUI = false;
-    showStageSelectUI = true;
-    const ascPanel = document.getElementById('ascension-dom-panel');
-    if (ascPanel) ascPanel.style.display = 'none';
+    popPanelFromStack('ascension');
+    pushPanelToStack('stages');
     syncBodyPanelState();
   }
   function renderAscensionResourceGuide(items = []) {
@@ -5552,17 +5635,16 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     }
     r.enemy.x = Math.floor(Number(player.x || 0));
     r.enemy.y = Math.floor(Number(player.y || 0));
-    showAscensionUI = false;
-    const p = document.getElementById('ascension-dom-panel');
-    if (p) p.style.display = 'none';
+    popPanelFromStack('ascension');
     syncBodyPanelState();
     startCombat(r.enemy);
     showMessage(`⚔️ 飞升三劫：${r.enemy.name} 开战！`, '#c8f7ff');
   }
   function renderAscensionSkillTree() {
     const tree = ASCENSION_CLASS_TREES?.[player.ascension.classId || ''] || null;
-    if (!tree) return `<section class="asc-card"><h3>仙职技能</h3><p>请先选择仙职，再学习专属技能树。</p></section>`;
-    return `<div class="asc-skill-tree">${tree.nodes.map(n => `<button class="asc-choice ${player.ascension.classSkills?.[n.id] ? 'selected' : ''}" type="button" data-asc-skill="${n.id}"><b>${escapeHtml(n.name)}</b><span>仙玉x${n.cost}</span><small>${player.ascension.classSkills?.[n.id] ? '已习得' : '点击学习'}</small></button>`).join('')}</div>`;
+    const skillGuide = renderAscensionResourceGuide([{ id: 'immortal_jade_ascended', name: '仙玉', need: 4, source: '飞升仪式 / 仙界副本 / 仙魔战场' }]);
+    if (!tree) return `<section class="asc-card"><h3>仙职技能</h3><p>请先选择仙职，再学习专属技能树。</p>${skillGuide}</section>`;
+    return `<div class="asc-skill-tree">${tree.nodes.map(n => { const action = typeof getAscensionClassSkillActionState === 'function' ? getAscensionClassSkillActionState(player, n.id, playerMaterials) : { canLearn: false, reason: '技能数据未加载' }; return `<button class="asc-choice ${player.ascension.classSkills?.[n.id] ? 'selected' : ''}" type="button" data-asc-skill="${n.id}" title="${escapeHtml(action.reason || '')}" ${action.canLearn ? '' : 'aria-disabled="true"'}><b>${escapeHtml(n.name)}</b><span>仙玉x${escapeHtml(n.cost)}</span><small>${player.ascension.classSkills?.[n.id] ? '已习得' : escapeHtml(action.canLearn ? '点击学习' : (action.reason || '暂不可学'))}</small></button>`; }).join('')}${skillGuide}</div>`;
   }
   function renderAscensionEndgamePanel() {
     const dw = player.ascension.demonWar || { active: false, progress: 0, bestClear: 0, clears: 0, nodes: [] };
@@ -5612,9 +5694,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     }
     r.enemy.x = Math.floor(Number(player.x || 0));
     r.enemy.y = Math.floor(Number(player.y || 0));
-    showAscensionUI = false;
-    const p = document.getElementById('ascension-dom-panel');
-    if (p) p.style.display = 'none';
+    popPanelFromStack('ascension');
     syncBodyPanelState();
     startCombat(r.enemy);
     showMessage(`⚔️ 仙魔战场：${r.enemy.name} 开战！`, '#ffcc88');
@@ -5643,11 +5723,10 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     } else if (ascensionTab === 'trial') {
       body = renderAscensionTrialPanel();
     } else if (ascensionTab === 'body') {
-      const bodyNeed = nextBody ? Number(nextBody.cost || 1) : Math.max(1, Number(playerMaterials.immortal_marrow || 0));
-      const bodyReady = !!nextBody && player.ascension.ascended && Number(playerMaterials.immortal_marrow || 0) >= bodyNeed;
-      const bodyReason = nextBody ? (player.ascension.ascended ? (bodyReady ? '' : `需要仙髓（${Number(playerMaterials.immortal_marrow || 0)}/${bodyNeed}）`) : '飞升后可淬炼仙躯') : '仙躯已满';
+      const bodyAction = typeof getImmortalBodyActionState === 'function' ? getImmortalBodyActionState(player, playerMaterials) : { canUpgrade: false, reason: '仙躯数据未加载', next: nextBody, need: nextBody ? Number(nextBody.cost || 1) : 1 };
+      const bodyNeed = bodyAction.need || (nextBody ? Number(nextBody.cost || 1) : Math.max(1, Number(playerMaterials.immortal_marrow || 0)));
       const bodyGuide = renderAscensionResourceGuide([{ id: 'immortal_marrow', name: '仙髓', need: bodyNeed, source: '飞升仪式 / 仙界副本 / 仙界秘境' }]);
-      body = `<section class="asc-card"><h3>仙躯：${escapeHtml(bodyTier.name)}</h3><p>仙髓 ${Number(playerMaterials.immortal_marrow || 0)} · 当前加成：生命${Math.round((bonuses.maxHpPct || 0) * 100)}% / 仙力${Math.round(bonuses.immortalPower || 0)}</p>${bodyGuide}<button class="asc-action ${bodyReady ? '' : 'disabled'}" type="button" data-asc-body title="${escapeHtml(bodyReason)}" ${bodyReady ? '' : 'disabled aria-disabled="true"'}>${nextBody ? `消耗仙髓x${nextBody.cost} 升至${nextBody.name}` : '仙躯已满'}</button></section>`;
+      body = `<section class="asc-card"><h3>仙躯：${escapeHtml(bodyTier.name)}</h3><p>仙髓 ${Number(playerMaterials.immortal_marrow || 0)} · 当前加成：生命${Math.round((bonuses.maxHpPct || 0) * 100)}% / 仙力${Math.round(bonuses.immortalPower || 0)}</p>${bodyGuide}<button class="asc-action ${bodyAction.canUpgrade ? '' : 'disabled'}" type="button" data-asc-body title="${escapeHtml(bodyAction.reason || '')}" ${bodyAction.canUpgrade ? '' : 'disabled aria-disabled="true"'}>${nextBody ? `消耗仙髓x${nextBody.cost} 升至${nextBody.name}` : '仙躯已满'}</button></section>`;
     } else if (ascensionTab === 'class') {
       body = `<div class="asc-grid">${Object.values(ASCENSION_CLASSES).map(c => `<button class="asc-choice ${player.ascension.classId === c.id ? 'selected' : ''}" type="button" data-asc-class="${c.id}" style="--asc-color:${c.color}"><b>${c.icon} ${escapeHtml(c.name)}</b><span>${escapeHtml(c.desc)}</span><small>${player.ascension.classId === c.id ? '当前仙职' : (player.ascension.classId ? '已定仙职' : '选择')}</small></button>`).join('')}</div>`;
     } else if (ascensionTab === 'skills') {
@@ -5656,17 +5735,15 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       body = renderAscensionEndgamePanel();
     } else {
       body = `<div class="asc-grid laws">${Object.values(LAW_DEFINITIONS).map(law => {
-        const lv = player.ascension.laws[law.id] || 0;
-        const cost = getLawUpgradeCost(lv);
-        const owned = Number(playerMaterials[law.materialId] || 0);
-        const canUpgrade = player.ascension.ascended && lv < 10 && owned >= cost;
-        const reason = lv >= 10 ? '法则已圆满' : (player.ascension.ascended ? (canUpgrade ? '点击升级' : `需要${getStageMaterialName(law.materialId)}（${owned}/${cost}）`) : '飞升后可参悟法则');
+        const action = typeof getLawUpgradeActionState === 'function' ? getLawUpgradeActionState(player, law.id, playerMaterials) : { canUpgrade: false, reason: '法则数据未加载', level: player.ascension.laws[law.id] || 0, cost: getLawUpgradeCost(player.ascension.laws[law.id] || 0), owned: Number(playerMaterials[law.materialId] || 0) };
+        const lv = action.level;
+        const cost = action.cost;
+        const owned = action.owned;
         const guide = renderAscensionResourceGuide([{ id: law.materialId, name: getStageMaterialName(law.materialId), need: cost, source: law.source || '仙界副本 / 法则试炼 / 高阶仙域' }]);
-        return `<button class="asc-choice ${selectedAscensionLawId === law.id ? 'selected' : ''}" type="button" data-asc-law="${law.id}" style="--asc-color:${law.color}" title="${escapeHtml(reason)}" ${canUpgrade ? '' : 'aria-disabled="true"'}><b>${law.icon} ${escapeHtml(law.name)} Lv.${lv}</b><span>材料 ${escapeHtml(getStageMaterialName(law.materialId))}：${owned}/${cost}</span><small>${escapeHtml(reason)}</small>${guide}</button>`;
+        return `<button class="asc-choice ${selectedAscensionLawId === law.id ? 'selected' : ''}" type="button" data-asc-law="${law.id}" style="--asc-color:${law.color}" title="${escapeHtml(action.reason || '')}" ${action.canUpgrade ? '' : 'aria-disabled="true"'}><b>${law.icon} ${escapeHtml(law.name)} Lv.${lv}</b><span>材料 ${escapeHtml(getStageMaterialName(law.materialId))}：${owned}/${cost}</span><small>${escapeHtml(action.reason || '')}</small>${guide}</button>`;
       }).join('')}</div>`;
     }
     p.innerHTML = `<div class="asc-head"><b>☁️ 飞升仙界</b><span>${escapeHtml(REALMS?.[player.realmIndex]?.name || '修士')} · ${cls ? cls.icon + cls.name : '未选仙职'}</span><button class="pclose" type="button">×</button></div><div class="asc-tabs">${tabs}</div><div class="asc-body">${body}</div>`;
-    p.querySelectorAll('.pclose').forEach(btn => { btn.addEventListener('pointerdown', closeAscensionPanel, { passive: false }); btn.addEventListener('click', closeAscensionPanel); });
     p.querySelectorAll('[data-asc-tab]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); ascensionTab = btn.dataset.ascTab || 'overview'; renderAscensionDomPanel(); }));
     p.querySelector('[data-asc-perform]')?.addEventListener('click', e => { e.preventDefault(); const r = performAscension(player, playerMaterials); showMessage(r.message || r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
     p.querySelector('[data-asc-trial-start]')?.addEventListener('click', e => { e.preventDefault(); const r = startAscensionTrial(player, playerMaterials); showMessage(r.ok ? '飞升三劫已开启' : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });

@@ -11,9 +11,9 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const trib = fs.readFileSync('js/tribulation.js', 'utf8');
 
 assert(html.includes('id="btn-tribulation"'), 'more menu should expose tribulation entry');
-assert(/js\/tribulation\.js\?v=20260527invfix1/.test(html), 'tribulation.js should load before main with current cachebuster');
-assert(html.includes('css/style.css?v=20260527invfix1'), 'style cachebuster should be bumped');
-assert(html.includes('js/main.js?v=20260527invfix1'), 'main cachebuster should be bumped');
+assert(/js\/tribulation\.js\?v=20260530ascguard1/.test(html), 'tribulation.js should load before main with current cachebuster');
+assert(html.includes('css/style.css?v=20260530ascguard1'), 'style cachebuster should be bumped');
+assert(html.includes('js/main.js?v=20260530ascguard1'), 'main cachebuster should be bumped');
 assert(!html.includes('20260521secretrealm7'), 'old secret realm cachebuster should be removed from index');
 
 assert(trib.includes('const TRIBULATIONS'), 'tribulation data table should exist');

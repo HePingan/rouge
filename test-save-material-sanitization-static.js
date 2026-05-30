@@ -71,7 +71,7 @@ assert.strictEqual(context.SAVE_VERSION >= 6, true, 'SAVE_VERSION should bump fo
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
-const CURRENT_TOKEN = '20260527invfix1';
+const CURRENT_TOKEN = '20260530ascguard1';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
 assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');

@@ -17,7 +17,7 @@ assert(loot.includes("getActiveArtifact(p)?.id !== 'qiankun'"), 'treasure echo s
 assert(particles.includes('function spawnArtifactTriggerEffect'), 'particles should expose artifact trigger visual helper');
 
 for (const file of ['css/style.css', 'js/combat.js', 'js/loot.js', 'js/artifacts.js', 'js/particles.js', 'js/main.js']) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260527invfix1`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260530ascguard1`);
   assert(re.test(html), `${file} should use artifact feedback cachebuster`);
 }
 

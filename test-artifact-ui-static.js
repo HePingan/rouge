@@ -10,11 +10,11 @@ assert(html.includes('js/artifacts.js'), 'index.html should load artifact logic 
 assert(html.includes('id="hud-artifact"'), 'top-left HUD should be the artifact HUD, not equipment');
 assert(html.includes('artifact-icon-wrap') && html.includes('artifact-icon') && html.includes('artifact-name'), 'artifact HUD should expose icon, badge, and name nodes');
 assert(!html.includes('id="hud-weapon"'), 'top-left equipment HUD should be removed from the main screen');
-assert(main.includes("if (panel === 'artifact') showArtifactUI = true;"), 'openPanel should support artifact panel state');
+assert(main.includes('pushPanelToStack(panel)') && main.includes('panelStack.push(type)'), 'openPanel should push panel type through normalized stack helper (replaces direct showArtifactUI = true)');
 assert(main.includes("bindTap(document.getElementById('btn-artifact'), onArtifact);"), 'artifact button should be bound to onArtifact');
 assert(main.includes("bindTap(document.getElementById('hud-artifact'), onArtifact);"), 'top-left artifact HUD should open the artifact panel');
 assert(main.includes("if (showArtifactUI && typeof renderArtifactDomPanel === 'function') renderArtifactDomPanel();"), 'syncBodyPanelState should render artifact DOM panel');
-assert(main.includes("p.addEventListener('touchstart', e => { if (e.target.closest('.pclose'))"), 'artifact panel close button should handle mobile touch');
+assert(main.includes("p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true })"), 'artifact panel close button should handle mobile touch in capture phase');
 assert(main.includes("data-artifact-id"), 'artifact cards should expose activation action');
 assert(main.includes("data-artifact-upgrade"), 'artifact cards should expose upgrade action');
 assert(main.includes("data-artifact-off"), 'active artifact card should expose unequip action');
@@ -37,7 +37,7 @@ const mustBust = [
   'js/main.js',
 ];
 for (const file of mustBust) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260527invfix1`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260530ascguard1`);
   assert(re.test(html), `${file} should use the current cachebuster so mobile browsers do not keep stale artifact HUD/UI code`);
 }
 

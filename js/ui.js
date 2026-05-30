@@ -7,12 +7,19 @@ function getHudNextStepHint(player) {
   if (Number(player.xp || 0) >= Number(player.xpToNext || Infinity)) return '经验已满，点击「更多」→「突破」提升境界';
   const progress = player.stageProgress || {};
   const cleared = progress.clearedStages || {};
-  if (!Object.keys(cleared).length) return '点击「副本」选择青云山';
+  const asc = player.ascension || {};
   if (progress.currentRun?.stageId && typeof STAGES !== 'undefined' && STAGES[progress.currentRun.stageId]) {
     const stage = STAGES[progress.currentRun.stageId];
     const room = Number(progress.currentRun.roomIndex || 0) + 1;
     return `推进 ${stage.name} ${room}/${stage.roomCount}`;
   }
+  if (asc.ascended) {
+    if (!cleared.reception_platform) return '飞升后先战接引仙域，拿仙髓淬炼仙躯';
+    if (!cleared.immortal_spirit_trial) return '继续接引仙域，补仙髓/仙玉解锁仙躯与仙职';
+    if (!cleared.demon_lord_projection) return '推进仙界副本到仙魔战场，刷法则碎片与战旗';
+    return '仙界循环：仙魔战场刷战旗，法则/仙躯/仙职继续成长';
+  }
+  if (!Object.keys(cleared).length) return '点击「副本」选择青云山';
   if (typeof STAGES !== 'undefined') {
     const next = Object.values(STAGES).find(stage => stage && !cleared[stage.id]);
     if (next) return `下一步：挑战 ${next.name}`;

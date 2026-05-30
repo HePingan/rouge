@@ -6,12 +6,14 @@ const ui = fs.readFileSync('js/ui.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260527invfix1';
+const CURRENT_TOKEN = '20260530ascguard1';
 const PREVIOUS_TOKEN = '20260526ascsrc1';
 
 assert(html.includes('id="hud-next-step"'), 'index should include a lightweight next-step HUD hint');
 assert(/function getHudNextStepHint\s*\(player\)[\s\S]*点击「副本」选择青云山/.test(ui), 'HUD next-step helper should guide fresh saves to the stage selector');
 assert(/function getHudNextStepHint\s*\(player\)[\s\S]*突破/.test(ui), 'HUD next-step helper should mention breakthrough when XP is capped');
+assert(/function getHudNextStepHint\s*\(player\)[\s\S]*接引仙域[\s\S]*淬炼仙躯/.test(ui), '飞升后 HUD 应优先提示接引仙域/仙躯成长，而不是继续显示旧副本线');
+assert(/function getHudNextStepHint\s*\(player\)[\s\S]*仙魔战场[\s\S]*法则/.test(ui), '仙界后期 HUD 应提示仙魔战场/法则闭环');
 assert(/function updateHUD[\s\S]*document\.getElementById\('hud-next-step'\)[\s\S]*getHudNextStepHint\(player\)/.test(ui), 'updateHUD should refresh the next-step HUD text');
 assert(/#hud-next-step[\s\S]*pointer-events:\s*none[\s\S]*max-width:\s*min\(68vw, 300px\)/.test(css), 'next-step HUD should be compact and not block map/touch controls');
 

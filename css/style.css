@@ -4556,12 +4556,15 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 #stage-dom-panel {
+  display: none;
   position: fixed; z-index: 302; inset: 0;
   padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
   background: radial-gradient(circle at top, rgba(60,38,90,0.36), rgba(5,3,12,0.94));
   color: #e8dff0;
-  display: flex; flex-direction: column;
   backdrop-filter: blur(10px);
+}
+body.stage-open #stage-dom-panel {
+  display: flex; flex-direction: column;
 }
 #stage-dom-panel .stage-head { display: flex; align-items: center; gap: 8px; padding: 4px 2px 10px; }
 #stage-dom-panel .stage-head b { font-size: 17px; flex: 0 0 auto; }
@@ -6567,7 +6570,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
   #artifact-dom-panel .artifact-body { padding-bottom: calc(142px + env(safe-area-inset-bottom)); }
 }
 
-/* ─── Global Panel Close Right 20260527invfix1 ─── */
+/* ─── Global Panel Close Right 20260530ascguard1 ─── */
 .panel-head,
 #secretrealm-dom-panel .sr-head,
 #tribulation-dom-panel .trib-head,
@@ -6642,7 +6645,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Stage Header Layout 20260527invfix1 ─── */
+/* ─── Stage Header Layout 20260530ascguard1 ─── */
 #stage-dom-panel .stage-head {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) 34px;
@@ -6710,7 +6713,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Mobile Universal Interface Layout 20260527invfix1 ─── */
+/* ─── Mobile Universal Interface Layout 20260530ascguard1 ─── */
 @media (max-width: 620px), (pointer: coarse) {
   /* 所有功能面板统一为手机原生底部抽屉：上方留出地图/状态呼吸感，底部按钮固定，内容单独滚动。 */
   #character-dom-panel,
@@ -6749,12 +6752,19 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
     z-index: 9992;
   }
 
-  #stage-dom-panel,
   #secretrealm-dom-panel,
   #tribulation-dom-panel,
   #ascension-dom-panel {
-    display: flex;
+    display: none !important;
     flex-direction: column;
+  }
+
+  body.secretrealm-open #secretrealm-dom-panel,
+  body.tribulation-open #tribulation-dom-panel,
+  body.ascension-open #ascension-dom-panel {
+    display: flex !important;
+    flex-direction: column;
+    z-index: 10010 !important;
   }
 
   body.skills-open #skills-dom-panel,
@@ -7204,7 +7214,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 }
 
 
-/* ─── Ascension Resource Source Navigation 20260527invfix1 ─── */
+/* ─── Ascension Resource Source Navigation 20260530ascguard1 ─── */
 .asc-source-actions {
   grid-column: 1 / -1;
   display: grid;
@@ -7231,7 +7241,7 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
 .asc-source-btn em { color:#ffdd88; font-style:normal; font-size:10px; }
 .asc-source-btn:active { transform: translateY(1px); background: rgba(200,247,255,.13); }
 
-/* ─── Combat Mobile Bottom Sheet 20260527invfix1 ─── */
+/* ─── Combat Mobile Bottom Sheet 20260530ascguard1 ─── */
 @media (max-width: 767px) {
   body.combat-active #hud-bottom {
     top: calc(6px + var(--safe-top));
@@ -7284,5 +7294,309 @@ body.secret-realm-run-active:not(.combat-active):not(.panel-open) .secret-exit-b
     min-width: 64px;
     height: 34px;
     font-size: 12px;
+  }
+}
+/* ─── Mobile Stage Compact Layout 20260530ascguard1 ─── */
+#stage-dom-panel .stage-body.stage-select-body {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+  min-height: 0;
+  gap: 8px;
+}
+#stage-dom-panel .stage-card-grid {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding-bottom: 6px;
+  align-content: start;
+}
+#stage-dom-panel .stage-foot {
+  position: static;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 7px 8px;
+  gap: 6px 8px;
+  margin-top: 6px;
+}
+#stage-dom-panel .stage-foot-info {
+  grid-column: 1;
+  min-width: 0;
+}
+#stage-dom-panel .stage-foot-info em {
+  display: none;
+}
+#stage-dom-panel .stage-foot-actions {
+  grid-column: 2;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(58px, auto);
+  gap: 5px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  max-width: min(50vw, 210px);
+}
+#stage-dom-panel .stage-foot-actions::-webkit-scrollbar { display: none; }
+#stage-dom-panel .stage-enter-btn,
+#stage-dom-panel .stage-detail-btn,
+#stage-dom-panel .stage-sweep-btn {
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#stage-dom-panel .stage-card {
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+}
+#stage-dom-panel .stage-card-icon {
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+}
+#stage-dom-panel .stage-card-main {
+  gap: 2px;
+}
+#stage-dom-panel .stage-card-main small {
+  width: auto;
+  max-width: 100%;
+}
+#stage-dom-panel .stage-card strong {
+  position: static;
+  justify-self: end;
+  align-self: center;
+}
+@media (max-width: 620px), (pointer: coarse) {
+  #stage-dom-panel .stage-card-grid {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+  #stage-dom-panel .stage-chapter-summary {
+    padding: 8px 10px;
+  }
+  #stage-dom-panel .stage-guide-strip {
+    padding: 6px 9px;
+  }
+}
+@media (max-width: 380px) {
+  #stage-dom-panel .stage-foot {
+    grid-template-columns: 1fr;
+  }
+  #stage-dom-panel .stage-foot-actions {
+    grid-column: 1;
+    width: 100%;
+    max-width: none;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+/* ─── Mobile Stage Foot Override 20260530ascguard1 ─── */
+#stage-dom-panel .stage-foot .stage-foot-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  grid-auto-columns: minmax(58px, auto);
+  align-items: stretch;
+  max-width: min(52vw, 220px);
+  overflow-x: auto;
+}
+@media (max-width: 620px), (pointer: coarse) {
+  #stage-dom-panel .stage-foot {
+    grid-template-columns: minmax(0, 1fr) minmax(174px, auto);
+    padding: 6px 8px;
+    min-height: 50px;
+  }
+  #stage-dom-panel .stage-foot .stage-foot-actions {
+    grid-template-columns: none;
+    grid-auto-columns: minmax(58px, 1fr);
+    max-width: none;
+    overflow-x: auto;
+  }
+  #stage-dom-panel .stage-foot .stage-foot-actions > button {
+    min-height: 34px;
+    height: 34px;
+  }
+}
+/* ─── Mobile Stage Detail Sheet Safe Area 20260530ascguard1 ─── */
+#stage-dom-panel .stage-detail-sheet,
+#stage-dom-panel .stage-sweep-sheet {
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 8px);
+  max-height: min(calc(100dvh - max(24px, env(safe-area-inset-top)) - max(24px, env(safe-area-inset-bottom)) - 20px), 560px);
+}
+#stage-dom-panel .stage-detail-sheet {
+  scroll-padding-bottom: 66px;
+}
+#stage-dom-panel .stage-detail-sheet .stage-detail-title {
+  margin-bottom: 4px;
+}
+#stage-dom-panel .stage-detail-section {
+  padding: 8px;
+  gap: 6px;
+}
+#stage-dom-panel .stage-detail-section h4 {
+  margin-bottom: 1px;
+}
+#stage-dom-panel .stage-detail-line.compact {
+  padding: 6px 7px;
+}
+#stage-dom-panel .stage-detail-sheet .stage-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  margin-bottom: -10px;
+  background: linear-gradient(180deg, transparent, rgba(8,4,16,.99) 34%);
+}
+@media (max-height: 780px), (max-width: 420px) {
+  #stage-dom-panel .stage-detail-sheet,
+  #stage-dom-panel .stage-sweep-sheet {
+    padding: 9px;
+    max-height: min(calc(100dvh - max(18px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)) - 16px), 520px);
+  }
+  #stage-dom-panel .stage-detail-chip-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+  #stage-dom-panel .stage-material-source-list {
+    max-height: 112px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ─── Mobile Stage Footer Readability + Scroll Fix 20260530ascguard1 ─── */
+@media (max-width: 620px), (pointer: coarse) {
+  /* Keep dungeon/stage on the same top overlay contract as the bag: no hidden
+     lower click layer, no always-visible default flex, and above all game HUD. */
+  #stage-dom-panel {
+    display: none !important;
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: calc(50px + env(safe-area-inset-top)) !important;
+    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: auto !important;
+    max-height: none !important;
+    z-index: 10010 !important;
+    box-sizing: border-box;
+    padding: 12px !important;
+    border: 1.5px solid rgba(212,160,255,0.76);
+    border-radius: 16px !important;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(126,92,255,.18), transparent 38%),
+      linear-gradient(180deg, rgba(20,10,34,0.985), rgba(8,4,16,0.99)) !important;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.78), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+    overflow: hidden;
+  }
+  body.stage-open #stage-dom-panel {
+    display: flex !important;
+    flex-direction: column;
+  }
+  #stage-dom-panel .stage-body.stage-select-body {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+  #stage-dom-panel .stage-body.stage-select-body > .stage-card-grid {
+    min-height: 112px;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+  #stage-dom-panel .stage-body.stage-select-body > .stage-chapter-strip {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+  #stage-dom-panel .stage-body.stage-select-body > .stage-chapter-strip .stage-chapter-tab {
+    touch-action: pan-x;
+  }
+  #stage-dom-panel .stage-foot {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 5px;
+    padding: 6px 8px calc(7px + env(safe-area-inset-bottom));
+    min-height: 0;
+    margin-top: 5px;
+  }
+  #stage-dom-panel .stage-foot-info {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px 8px;
+  }
+  #stage-dom-panel .stage-foot-info b,
+  #stage-dom-panel .stage-foot-info small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  #stage-dom-panel .stage-foot-info b {
+    font-size: 12px;
+  }
+  #stage-dom-panel .stage-foot-info small {
+    justify-self: end;
+    max-width: 42vw;
+    font-size: 10px;
+  }
+  #stage-dom-panel .stage-foot-info em {
+    display: none;
+  }
+  #stage-dom-panel .stage-foot .stage-foot-actions {
+    grid-column: 1;
+    width: 100%;
+    max-width: none;
+    display: grid;
+    grid-auto-flow: initial;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-columns: initial;
+    gap: 6px;
+    overflow: visible;
+  }
+  #stage-dom-panel .stage-foot .stage-foot-actions > button,
+  #stage-dom-panel .stage-foot .stage-detail-btn,
+  #stage-dom-panel .stage-foot .stage-enter-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    height: 36px;
+    padding: 0 6px;
+    line-height: 1;
+    font-size: 12px;
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-radius: 11px;
+  }
+  #stage-dom-panel .stage-foot .stage-enter-btn {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  #stage-dom-panel .stage-foot .stage-foot-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  #stage-dom-panel .stage-foot .stage-enter-btn {
+    grid-column: auto;
   }
 }

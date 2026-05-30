@@ -24,6 +24,6 @@ for (const id of ['thunder_judicator', 'forge_spirit', 'nether_king', 'demon_lor
 
 mustInclude(css, '.stage-immortal-mechanic-card', 'immortal mechanic card styles missing');
 mustInclude(css, '.stage-card-mechanic', 'stage card mechanic badge styles missing');
-assert(index.includes('20260527invfix1'), 'cachebuster should bump to endgame5 for immortal boss stage UI');
+assert(index.includes('20260530ascguard1'), 'cachebuster should bump to endgame5 for immortal boss stage UI');
 assert(!index.includes('20260524endgame4'), 'index should not keep stale endgame4 token');
 console.log('immortal boss stage UI static assertions passed');

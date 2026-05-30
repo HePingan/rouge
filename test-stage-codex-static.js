@@ -18,6 +18,9 @@ assert(main.includes('<div class="stage-body stage-codex-body"') && main.include
 assert(css.includes('.stage-guide-strip'), 'stage next-step guide css missing');
 assert(css.includes('.stage-codex'), 'codex css missing');
 assert(css.includes('.codex-stats'), 'codex stat css missing');
-assert(index.includes('js/stages.js?v=20260527invfix1'), 'cachebuster missing');
+const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
+assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');
+assert(linkedTokens.every(token => token === '20260530ascguard1'), 'all linked assets should use current panel audit cachebuster');
+assert(!index.includes('20260527detailfix1'), 'index should not keep stale detailfix token');
 
 console.log('stage codex static ok');
