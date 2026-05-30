@@ -1,0 +1,140 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>panel stack browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260530ascguard1"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const PHONE_W = 390;
+  const PHONE_H = 844;
+  const PANEL_IDS = {
+    inventory: 'inventory-dom-panel',
+    character: 'character-dom-panel',
+    stages: 'stage-dom-panel',
+  };
+  const OPENERS = {
+    inventory: 'btn-bag',
+    character: 'btn-character',
+    stages: 'btn-stages',
+  };
+  const CLOSE_SELECTORS = {
+    inventory: '.inv-close',
+    character: '.char-close',
+    stages: '.pclose, [data-stage-close]',
+  };
+
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+
+  function gameWindow() { return document.getElementById('game').contentWindow; }
+  function gameDocument() { return gameWindow().document; }
+  function visible(panel) { return panel && panel.display !== 'none' && panel.w > 0 && panel.h > 0; }
+  function rectState(id) {
+    const w = gameWindow();
+    const e = gameDocument().getElementById(id);
+    if (!e) return null;
+    const cs = w.getComputedStyle(e);
+    const b = e.getBoundingClientRect();
+    return {
+      display: cs.display,
+      position: cs.position,
+      left: Math.round(b.left),
+      top: Math.round(b.top),
+      right: Math.round(b.right),
+      bottom: Math.round(b.bottom),
+      w: Math.round(b.width),
+      h: Math.round(b.height),
+      overflow: cs.overflow,
+    };
+  }
+  function inspectGame() {
+    const w = gameWindow();
+    const d = gameDocument();
+    const out = {
+      viewport: { w: w.innerWidth, h: w.innerHeight },
+      bodyClass: d.body.className,
+    };
+    ['hud-top','menu-bar','inventory-dom-panel','character-dom-panel','stage-dom-panel'].forEach(id => { out[id] = rectState(id); });
+    return out;
+  }
+  function click(selector) {
+    const d = gameDocument();
+    const el = d.querySelector(selector);
+    assert(el, `selector not found: ${selector}`);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: d.defaultView }));
+  }
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try {
+        last = predicate();
+        if (last) return last;
+      } catch (err) { last = err.message; }
+      await sleep(100);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function assertPanelGeometry(label, state) {
+    const panel = state[PANEL_IDS[label]];
+    assert(visible(panel), `${label} panel should be visible: ${JSON.stringify(panel)}`);
+    assert(state.viewport.w === PHONE_W, `iframe width should be ${PHONE_W}, got ${state.viewport.w}`);
+    assert(state.viewport.h === PHONE_H, `iframe height should be ${PHONE_H}, got ${state.viewport.h}`);
+    assert(state.bodyClass.includes('panel-open'), `${label} should set body.panel-open (${state.bodyClass})`);
+    assert(panel.w >= PHONE_W - 8, `${label} should span phone width, got ${panel.w}`);
+    assert(Math.abs(panel.bottom - PHONE_H) <= 16, `${label} bottom should align near viewport bottom/safe-area, got ${panel.bottom}`);
+    assert(panel.top >= 24 && panel.top <= 115, `${label} should leave compact map/status peek, top=${panel.top}`);
+    assert(!visible(state['menu-bar']), `${label} should hide bottom nav while panel-open`);
+  }
+
+  async function run() {
+    await waitFor(() => gameWindow().gameReady === true, 'gameReady');
+    await waitFor(() => gameDocument().getElementById('btn-bag'), 'menu buttons');
+    const initial = inspectGame();
+    assert(initial.viewport.w === PHONE_W && initial.viewport.h === PHONE_H, `phone viewport mismatch: ${JSON.stringify(initial.viewport)}`);
+    assert(!initial.bodyClass.includes('panel-open'), 'initial state should not be panel-open');
+
+    const stack = [];
+    for (const label of ['inventory', 'character', 'stages']) {
+      click(`#${OPENERS[label]}`);
+      stack.push(label);
+      await sleep(160);
+      const s = inspectGame();
+      assertPanelGeometry(label, s);
+      for (const older of stack.slice(0, -1)) {
+        assert(s[PANEL_IDS[older]] !== null, `${older} panel DOM should remain available in stack behind ${label}`);
+      }
+    }
+
+    for (const label of ['stages', 'character', 'inventory']) {
+      click(CLOSE_SELECTORS[label]);
+      await sleep(180);
+      const s = inspectGame();
+      assert(!visible(s[PANEL_IDS[label]]), `${label} should be hidden after top close`);
+      stack.splice(stack.lastIndexOf(label), 1);
+      const top = stack[stack.length - 1];
+      if (top) assertPanelGeometry(top, s);
+      else {
+        assert(!s.bodyClass.includes('panel-open'), 'closing final panel should clear body.panel-open');
+        assert(visible(s['menu-bar']), 'bottom nav should reappear after stack drains');
+      }
+    }
+    return { ok: true, message: 'panel stack browser smoke passed' };
+  }
+
+  run().then(result => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+    document.title = 'SMOKE_OK';
+  }).catch(err => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify({ ok:false, message: err.message, stack: err.stack, state: (() => { try { return inspectGame(); } catch (_) { return null; } })() });
+    document.title = 'SMOKE_FAIL';
+  });
+})();
+</script>
