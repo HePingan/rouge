@@ -841,6 +841,7 @@ function onDefeat() {
     const savedXp = player.xp;
     const savedSkills = [...learnedSkills];
     const savedSkillPoints = availableSkillPoints;
+    const savedStatPoints = availableStatPoints;
     const savedMaterials = {...playerMaterials};
     const savedBaseHp = player.baseHp;
     const savedBaseMp = player.baseMp;
@@ -870,6 +871,7 @@ function onDefeat() {
     player.recalcStats();
     learnedSkills = savedSkills;
     availableSkillPoints = savedSkillPoints;
+    availableStatPoints = savedStatPoints;
     playerMaterials = savedMaterials;
     // Reset dungeon level to 1
     dungeonLevel = 1;

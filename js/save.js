@@ -88,6 +88,7 @@ function migrateSave(data) {
   if (!Array.isArray(migrated.inventory)) migrated.inventory = [];
   migrated.inventory = migrated.inventory.filter(item => item && typeof item === 'object');
   migrated.skillPoints = normalizeNumber(migrated.skillPoints, 0);
+  migrated.statPoints = normalizeNumber(migrated.statPoints, migrated.skillPoints || 0);
   if (!Array.isArray(migrated.learnedSkills)) migrated.learnedSkills = [];
   migrated.learnedSkills = migrated.learnedSkills.filter(s => s && typeof s === 'object');
   if (!migrated.materials || typeof migrated.materials !== 'object' || Array.isArray(migrated.materials)) {
@@ -118,7 +119,7 @@ function validateSave(data) {
   const numericFields = [
     'realmIndex', 'xp', 'spiritStones', 'breakthroughFails', 'breakthroughChanceBonus',
     'breakthroughProtect', 'baseHp', 'baseMp', 'baseAtk', 'baseDef', 'hpRatio', 'mpRatio',
-    'skillPoints', 'floor', 'timestamp',
+    'skillPoints', 'statPoints', 'floor', 'timestamp',
   ];
   return numericFields.every(field => data[field] === undefined || Number.isFinite(Number(data[field])));
 }
@@ -161,8 +162,9 @@ function saveGame() {
       // Equipment & inventory
       equipment: Object.fromEntries((getEquipmentSlotOrder()).map(slot => [slot, player.equipment[slot] ? serializeItem(player.equipment[slot]) : null])),
       inventory: player.inventory.map(serializeItem),
-      // Skills
+      // Skills & growth points
       skillPoints: availableSkillPoints,
+      statPoints: availableStatPoints,
       learnedSkills: learnedSkills.map(s => ({ tree: s.tree, index: s.index })),
       // Materials
       materials: normalizeMaterialIds(playerMaterials),
@@ -259,6 +261,7 @@ function applySaveData(data) {
 
   // Restore skills
   availableSkillPoints = data.skillPoints ?? 0;
+  availableStatPoints = data.statPoints ?? data.skillPoints ?? 0;
   learnedSkills = (data.learnedSkills || []).map(s => ({
     tree: s.tree,
     index: s.index,

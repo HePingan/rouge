@@ -1840,7 +1840,7 @@ function escapeHtml(value) {
         });
       });
       // Attribute allocation zone (bottom of panel)
-      if (availableSkillPoints > 0) {
+      if (availableStatPoints > 0) {
         const attrY = canvasH - (compact ? 36 : 48);
         const attrH = 18;
         if (pos.y >= attrY - attrH && pos.y <= attrY) {
@@ -3049,8 +3049,8 @@ function generateNewFloor() {
         <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('crit') : (player.crit || 0))}</b><span>%</span><em>暴击</em></div>
         <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('dodge') : (player.dodge || 0))}</b><span>%</span><em>闪避</em></div>
         <div><b>${Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('speed') : (player.speed || 0))}</b><span></span><em>速度</em></div>
-        <div><b>${availableSkillPoints || 0}</b><span></span><em>技能点</em></div>
-        <div><b>${(player.inventory || []).length}</b><span></span><em>背包装备</em></div>
+        <div><b>${availableSkillPoints || 0}</b><span></span><em>悟道点</em></div>
+        <div><b>${availableStatPoints || 0}</b><span></span><em>炼体点</em></div>
       </div>
     </section>`;
     const bonusPanel = `<section class="char-tab-panel" data-char-tab-panel="bonus"><div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div></section>`;
@@ -3379,7 +3379,7 @@ function generateNewFloor() {
     const selectedData = SKILL_TREES[selectedTree];
     const selectedSkill = selectedState.skill;
     const selectedReqText = selectedState.prereqs?.length ? selectedState.prereqs.map(i => SKILL_TREES[selectedTree].skills[i]?.name).filter(Boolean).join(' / ') : '无';
-    const selectedStatus = selectedState.learned ? '已习得' : selectedState.locked ? `需${skillRealmName(selectedSkill.unlockRealm)}` : selectedState.blocked ? `前置：${selectedReqText}` : selectedState.canLearn ? '可学习' : '技能点不足';
+    const selectedStatus = selectedState.learned ? '已习得' : selectedState.locked ? `需${skillRealmName(selectedSkill.unlockRealm)}` : selectedState.blocked ? `前置：${selectedReqText}` : selectedState.canLearn ? '可学习' : '悟道点不足';
     const selectedKind = selectedSkill.kind || 'active';
     const selectedKindLabel = SKILL_KIND_LABELS[selectedKind] || '技能';
     const selectedSummary = getSkillEffectSummary(selectedSkill);
@@ -3409,7 +3409,7 @@ function generateNewFloor() {
         </div>`;
     let html = `<div class="panel-head skill-panel-head">
       <span class="ptitle" style="color:#d4a0ff">📜 星盘技能树</span>
-      <span class="psub">悟道点 ${availableSkillPoints} · 已悟 ${learnedCount}/${totalCount}</span>
+      <span class="psub">悟道 ${availableSkillPoints} · 炼体 ${availableStatPoints} · 已悟 ${learnedCount}/${totalCount}</span>
       <button class="pclose">×</button>
     </div>
     <div class="panel-body skills-panel-body">
@@ -3455,7 +3455,7 @@ function generateNewFloor() {
     for (let i = 0; i < attrBtns.length; i++) {
       const [k,label,clr] = attrBtns[i];
       const valText = attrValues[i];
-      const dis = availableSkillPoints <= 0 ? ' disabled' : '';
+      const dis = availableStatPoints <= 0 ? ' disabled' : '';
       html += `<button class="attr-btn${dis}" data-attr="${k}" style="--attr-color:${safeCssColor(clr)};border-color:${safeCssColor(clr)};color:${safeCssColor(clr)}">${escapeHtml(label)} <small>${escapeHtml(valText)}</small></button>`;
     }
     html += `</div></div>`;
@@ -3882,7 +3882,7 @@ function generateNewFloor() {
   function statDeltaListHtmlDom(delta) {
     if (!delta) return '';
     const items = [
-      ['生命', delta.hp], ['灵力', delta.mp], ['攻击', delta.atk], ['防御', delta.def], ['技能点', delta.skillPoints],
+      ['生命', delta.hp], ['灵力', delta.mp], ['攻击', delta.atk], ['防御', delta.def], ['悟道点', delta.skillPoints], ['炼体点', delta.statPoints],
     ].filter(([,v]) => Number(v || 0) !== 0);
     return items.map(([k,v]) => `<span><em>${escapeHtml(k)}</em><b>+${escapeHtml(v)}</b></span>`).join('');
   }
@@ -4967,7 +4967,7 @@ function generateNewFloor() {
       const unlocked = isStageUnlocked(player, selected.id);
       const sweepCheck = canSweepStage(player, selected.id);
       const rewardText = formatConfiguredRewards(selected.clearRewards);
-      const firstText = selected.firstClearSkillPoints ? `首通：技能点+${selected.firstClearSkillPoints} · ${formatConfiguredRewards(selected.firstClearRewards)}` : `首通：${formatConfiguredRewards(selected.firstClearRewards)}`;
+      const firstText = selected.firstClearSkillPoints ? `首通：悟道点+${selected.firstClearSkillPoints} · ${formatConfiguredRewards(selected.firstClearRewards)}` : `首通：${formatConfiguredRewards(selected.firstClearRewards)}`;
       const setText = getStageSetDropText(selected);
       const materialSourcePanel = renderStageMaterialSourcePanel(selected);
       const chId = selected.chapterId;
@@ -5337,7 +5337,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     if (typeof document !== 'undefined') document.body.classList.remove('stage-run-active');
     const gainedItems = [...(clearGain.items || []), ...(firstGain.items || [])].map(i => i.name).join('、');
     const fullWarn = clearGain.full || firstGain.full ? ' · 背包已满，部分装备未获得' : '';
-    lastStageClearSummary = { success: true, title: `${stage.name} 通关！ ${getStageStarText(stars)}`, desc: `${isFirst ? '首通奖励已领取，后续关卡已解锁。' : '重复通关奖励已发放。'}${eventLog.length ? ' 房间事件：' + eventLog.join('；') : ''}`, rewards: `${formatConfiguredRewards(stage.clearRewards)}${isFirst ? ' · ' + formatConfiguredRewards(stage.firstClearRewards) + (stage.firstClearSkillPoints ? ` · 技能点+${stage.firstClearSkillPoints}` : '') : ''}${gainedItems ? ' · 获得装备：' + gainedItems : ''}${fullWarn}` };
+    lastStageClearSummary = { success: true, title: `${stage.name} 通关！ ${getStageStarText(stars)}`, desc: `${isFirst ? '首通奖励已领取，后续关卡已解锁。' : '重复通关奖励已发放。'}${eventLog.length ? ' 房间事件：' + eventLog.join('；') : ''}`, rewards: `${formatConfiguredRewards(stage.clearRewards)}${isFirst ? ' · ' + formatConfiguredRewards(stage.firstClearRewards) + (stage.firstClearSkillPoints ? ` · 悟道点+${stage.firstClearSkillPoints}` : '') : ''}${gainedItems ? ' · 获得装备：' + gainedItems : ''}${fullWarn}` };
     showStageClearPanel = true; showStageSelectUI = false;
     syncBodyPanelState();
     autoSave();
