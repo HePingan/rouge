@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>inventory bulk combat guard browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<body><div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div><pre id="result"></pre>
+<script>
+(() => {
+  const out = document.getElementById('result');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fail = m => { throw new Error(m); };
+  const assert = (c, m) => { if (!c) fail(m); };
+  const w = () => document.getElementById('game').contentWindow;
+  const d = () => w().document;
+  async function waitFor(fn, label, timeout = 9000) {
+    const end = Date.now() + timeout; let last;
+    while (Date.now() < end) { try { last = fn(); if (last) return last; } catch(e) { last = e.message; } await sleep(80); }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function click(el) { assert(el, 'missing click target'); if (el.click) el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:w() })); }
+  async function run() {
+    await waitFor(() => w().gameReady === true, 'gameReady');
+    w().__bulkCombatGuardErrors = [];
+    w().addEventListener('error', e => w().__bulkCombatGuardErrors.push(e.message || 'error'));
+    w().addEventListener('unhandledrejection', e => w().__bulkCombatGuardErrors.push(String(e.reason || 'unhandledrejection')));
+    w().eval(`
+      player.inventory = [
+        { name:'普通剑一', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:1 }, floorLevel:1 },
+        { name:'普通剑二', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:2 }, floorLevel:1 },
+        { name:'普通甲三', slot:'armor', rarity:'普通', rarityColor:'#aaa', stats:{ def:1 }, floorLevel:1 },
+        { name:'普通靴四', slot:'boots', rarity:'普通', rarityColor:'#aaa', stats:{ dodge:0.01 }, floorLevel:1 },
+        { name:'普通盔五', slot:'helmet', rarity:'普通', rarityColor:'#aaa', stats:{ maxHp:3 }, floorLevel:1 },
+        { name:'稀有保留甲', slot:'armor', rarity:'稀有', rarityColor:'#ffdd44', stats:{ def:9 }, floorLevel:5 },
+        { name:'稀有保留剑', slot:'weapon', rarity:'稀有', rarityColor:'#ffdd44', stats:{ atk:9 }, floorLevel:5 }
+      ];
+      player.spiritStones = 100;
+      inventoryTab = 'process';
+      inventoryBulkMode = 'sell';
+      inventoryBulkRarity = '普通';
+      inventoryBulkConfirm = null;
+      if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    const initialStones = w().player.spiritStones;
+    await waitFor(() => typeof w().openPanel === 'function' && typeof w().renderInventoryDomPanel === 'function', 'panel functions');
+    w().eval(`openPanel('inventory'); renderInventoryDomPanel('bulk-combat-guard-smoke');`);
+    await waitFor(() => d().body.classList.contains('inventory-open'), 'inventory open');
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-inv-tab="process"]'), 'process tab'));
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-bulk-mode="sell"]'), 'sell mode'));
+    const chip = await waitFor(() => Array.from(d().querySelectorAll('#inventory-dom-panel [data-bulk-rarity-chip]')).find(btn => btn.dataset.bulkRarityChip === '普通'), 'normal rarity chip');
+    click(chip);
+    w().eval(`combatState = COMBAT_STATE.PLAYER_TURN; currentEnemy = { name:'守卫假人', hp:50, maxHp:50, atk:1, def:0 };`);
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-bulk-sell]'), 'bulk sell preview button'));
+    await sleep(250);
+    const names = w().player.inventory.map(item => item.name).sort();
+    const metrics = {
+      inventoryCount: w().player.inventory.length,
+      names,
+      stonesDelta: w().player.spiritStones - initialStones,
+      confirmGone: !d().querySelector('#inventory-dom-panel [data-bulk-confirm="sell"]'),
+      normalKept: w().player.inventory.filter(item => item.rarity === '普通').length === 5,
+      rareKept: names.includes('稀有保留剑') && names.includes('稀有保留甲'),
+      inCombat: w().eval('isInCombat()'),
+      overflowX: Math.max(0, d().documentElement.scrollWidth - d().documentElement.clientWidth),
+      errors: w().__bulkCombatGuardErrors.length,
+      fatal: w().fatalError || ''
+    };
+    assert(metrics.inCombat, `guard setup should be in combat: ${JSON.stringify(metrics)}`);
+    assert(metrics.inventoryCount === 7 && metrics.normalKept && metrics.rareKept, `combat guard should not remove items: ${JSON.stringify(metrics)}`);
+    assert(metrics.stonesDelta === 0, `combat guard should not add stones: ${JSON.stringify(metrics)}`);
+    assert(metrics.confirmGone, 'confirm sheet should not open during combat');
+    assert(metrics.overflowX === 0, `horizontal overflow: ${metrics.overflowX}`);
+    assert(metrics.errors === 0, `console errors: ${w().__bulkCombatGuardErrors.join(';')}`);
+    assert(!metrics.fatal, `fatal: ${metrics.fatal}`);
+    document.body.dataset.result = 'passed';
+    document.body.dataset.metrics = JSON.stringify(metrics);
+    out.textContent = 'inventory bulk combat guard browser smoke passed ' + JSON.stringify(metrics);
+  }
+  run().catch(err => { document.body.dataset.result = 'failed'; out.textContent = err && err.stack ? err.stack : String(err); });
+})();
+</script>
+</body>

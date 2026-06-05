@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>skill reward claim browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+  function gameWindow() { return document.getElementById('game').contentWindow; }
+  function gameDocument() { return gameWindow().document; }
+  function click(el) {
+    assert(el, 'click target missing');
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: gameWindow() }));
+  }
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try {
+        last = predicate();
+        if (last) return last;
+      } catch (err) { last = err.message; }
+      await sleep(100);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function inspect() {
+    const d = gameDocument();
+    const w = gameWindow();
+    const synergyBtn = d.querySelector('.synergy-claim-btn[data-synergy]');
+    const masteryBtn = d.querySelector('.mastery-claim-btn[data-tree][data-count]');
+    const codex = w.eval('typeof getSkillCodexSummary === "function" ? getSkillCodexSummary() : null');
+    return {
+      bodyClass: d.body.className,
+      synergyBtn: synergyBtn ? { text: synergyBtn.textContent.trim(), id: synergyBtn.dataset.synergy, disabled: synergyBtn.disabled } : null,
+      masteryBtn: masteryBtn ? { text: masteryBtn.textContent.trim(), tree: masteryBtn.dataset.tree, count: masteryBtn.dataset.count, disabled: masteryBtn.disabled } : null,
+      codexClaimable: codex?.claimableCount,
+      claimedSynergies: w.eval('typeof claimedSkillSynergies !== "undefined" ? claimedSkillSynergies : null'),
+      claimedMasteries: w.eval('typeof claimedSkillMasteries !== "undefined" ? claimedSkillMasteries : null'),
+      baseAtk: w.player?.baseAtk,
+      statPoints: w.eval('typeof availableStatPoints !== "undefined" ? availableStatPoints : undefined'),
+      consoleErrors: w.__skillRewardSmokeErrors || [],
+    };
+  }
+  async function run() {
+    const w = gameWindow();
+    await waitFor(() => w.gameReady === true, 'gameReady');
+    w.__skillRewardSmokeErrors = [];
+    w.addEventListener('error', e => w.__skillRewardSmokeErrors.push(e.message || 'error'));
+    w.addEventListener('unhandledrejection', e => w.__skillRewardSmokeErrors.push(String(e.reason || 'unhandledrejection')));
+
+    await waitFor(() => w.eval('typeof SKILL_TREES !== "undefined" && typeof SKILL_SYNERGIES !== "undefined" && typeof renderSkillsDomPanel === "function"'), 'skill globals');
+    w.eval(`
+      learnedSkills = [
+        { tree: 'fire', index: 0 }, { tree: 'fire', index: 1 }, { tree: 'fire', index: 2 },
+        { tree: 'thunder', index: 0 }, { tree: 'thunder', index: 1 },
+      ];
+      claimedSkillSynergies = {};
+      claimedSkillMasteries = {};
+      availableSkillPoints = 0;
+      availableStatPoints = 0;
+      openPanel('skills');
+    `);
+    await waitFor(() => gameDocument().body.classList.contains('skills-open'), 'skills panel open');
+    await waitFor(() => gameDocument().querySelector('.synergy-claim-btn[data-synergy="fire_thunder"]'), 'claimable fire thunder synergy');
+    await waitFor(() => gameDocument().querySelector('.mastery-claim-btn[data-tree="fire"][data-count="3"]'), 'claimable fire mastery');
+
+    const before = inspect();
+    assert(before.codexClaimable >= 2, `codex should count synergy + mastery rewards: ${JSON.stringify(before)}`);
+    const synergyButton = gameDocument().querySelector('.synergy-claim-btn[data-synergy="fire_thunder"]');
+    click(synergyButton);
+    await waitFor(() => w.eval('claimedSkillSynergies && claimedSkillSynergies.fire_thunder'), 'synergy claimed');
+    const afterSynergy = inspect();
+    const fireThunderRewardAtk = w.eval('SKILL_SYNERGIES.fire_thunder.reward.baseAtk');
+    assert(afterSynergy.baseAtk === before.baseAtk + fireThunderRewardAtk, `synergy reward should mutate base attack once: ${JSON.stringify({ before, afterSynergy })}`);
+    assert(gameDocument().querySelector('.synergy-card.claimed .synergy-claim-btn.claimed'), 'claimed synergy button should show claimed state');
+
+    const masteryButton = await waitFor(() => gameDocument().querySelector('.mastery-claim-btn[data-tree="fire"][data-count="3"]'), 'fire mastery still claimable after synergy render');
+    const statBefore = w.eval('availableStatPoints');
+    click(masteryButton);
+    await waitFor(() => w.eval('claimedSkillMasteries && claimedSkillMasteries.fire_3'), 'mastery claimed');
+    const afterMastery = inspect();
+    const masteryRewardStatPoints = w.eval('SKILL_MASTERY_MILESTONES[3].reward.statPoints');
+    assert(afterMastery.statPoints === statBefore + masteryRewardStatPoints, `mastery reward should mutate stat points once: ${JSON.stringify({ statBefore, afterMastery })}`);
+    assert(gameDocument().querySelector('.mastery-card.claimed .synergy-claim-btn.claimed'), 'claimed mastery button should show claimed state');
+    assert(!afterMastery.consoleErrors.length, `console should stay clean: ${afterMastery.consoleErrors.join('\n')}`);
+    return { ok: true, message: 'skill reward claim browser smoke passed', state: afterMastery };
+  }
+  run().then(result => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+    document.title = 'SMOKE_OK';
+  }).catch(err => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify({ ok:false, message: err.message, stack: err.stack, state: (() => { try { return inspect(); } catch (_) { return null; } })() });
+    document.title = 'SMOKE_FAIL';
+  });
+})();
+</script>

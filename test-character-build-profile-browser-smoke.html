@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>character build profile browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+  function gameWindow() { return document.getElementById('game').contentWindow; }
+  function gameDocument() { return gameWindow().document; }
+  function click(el) {
+    assert(el, 'click target missing');
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: gameWindow() }));
+  }
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try {
+        last = predicate();
+        if (last) return last;
+      } catch (err) { last = err.message; }
+      await sleep(100);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function inspect() {
+    const d = gameDocument();
+    const w = gameWindow();
+    const profile = d.querySelector('.char-build-profile');
+    const identity = d.querySelector('.char-identity-card');
+    const equipDiag = d.querySelector('.char-equip-diagnosis');
+    const jump = d.querySelector('[data-char-build-jump]');
+    const tabs = Array.from(d.querySelectorAll('#character-dom-panel .char-tab')).map(btn => btn.textContent.trim()).filter(Boolean);
+    const selected = d.querySelector('.skill-node.selected');
+    const bonus = d.querySelector('.char-bonus-overview');
+    const setProgress = d.querySelector('.char-set-progress');
+    const badges = Array.from(d.querySelectorAll('.eq-status-badge')).map(el => el.textContent.trim()).filter(Boolean);
+    const modalTitle = d.querySelector('#skill-detail-layer .detail-title');
+    return {
+      bodyClass: d.body.className,
+      equipDiagText: equipDiag?.textContent?.trim() || '',
+      identityText: identity?.textContent?.trim() || '',
+      tabs,
+      profileText: profile?.textContent?.trim() || '',
+      bonusText: bonus?.textContent?.trim() || '',
+      setText: setProgress?.textContent?.trim() || '',
+      badges,
+      jumpTree: jump?.dataset?.tree || '',
+      jumpIndex: jump?.dataset?.index || '',
+      selectedTree: selected?.dataset?.tree || '',
+      selectedIndex: selected?.dataset?.index || '',
+      modalTitle: modalTitle?.textContent?.trim() || '',
+      consoleErrors: w.__charBuildSmokeErrors || [],
+    };
+  }
+  async function run() {
+    const w = gameWindow();
+    await waitFor(() => w.gameReady === true, 'gameReady');
+    w.__charBuildSmokeErrors = [];
+    w.addEventListener('error', e => w.__charBuildSmokeErrors.push(e.message || 'error'));
+    w.addEventListener('unhandledrejection', e => w.__charBuildSmokeErrors.push(String(e.reason || 'unhandledrejection')));
+    const d = gameDocument();
+    w.eval(`
+      player.equipment.weapon = { name:'焚天剑', slot:'weapon', rarity:'稀有', rarityColor:'#ffdd44', setId:'flame', setName:'焚天', setIcon:'🔥', enhanceLevel:1, stats:{ atk:12, fireDmg:6 } };
+      player.equipment.helmet = { name:'焚天冠', slot:'helmet', rarity:'稀有', rarityColor:'#ffdd44', setId:'flame', setName:'焚天', setIcon:'🔥', stats:{ maxHp:30 } };
+      player.inventory = [{ name:'玄铁甲', slot:'armor', rarity:'魔法', rarityColor:'#55aaff', stats:{ def:8, maxHp:18 }, floorLevel:3 }];
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    await waitFor(() => d.getElementById('btn-character'), 'character button');
+    click(d.getElementById('btn-character'));
+    await waitFor(() => d.body.classList.contains('character-open'), 'character panel open');
+    const profile = await waitFor(() => d.querySelector('.char-build-profile'), 'character build profile');
+    const nextAction = await waitFor(() => d.querySelector('.char-next-action'), 'character next action card');
+    assert(nextAction.textContent.includes('下一步'), `next action should guide the player to a concrete action: ${nextAction.textContent}`);
+    const nextEquipButton = nextAction.querySelector('[data-char-tab-jump="equipment"]');
+    if (nextEquipButton) click(nextEquipButton);
+    else click(d.querySelector('#character-dom-panel .char-tab[data-char-tab="equipment"]'));
+    await waitFor(() => d.querySelector('.char-tab.active')?.dataset?.charTab === 'equipment', 'next action/equipment tab opens equipment');
+    const equipDiag = await waitFor(() => d.querySelector('.char-equip-diagnosis'), 'character equipment diagnosis');
+    assert(equipDiag.textContent.includes('装备') && equipDiag.textContent.includes('短板') && equipDiag.textContent.includes('焚天') && equipDiag.textContent.includes('下一档'), `equipment diagnosis should show equipped count/set/weakness/next breakpoint: ${equipDiag.textContent}`);
+    const badges = Array.from(d.querySelectorAll('.eq-status-badge')).map(el => el.textContent.trim()).filter(Boolean);
+    assert(badges.includes('套装') && badges.includes('未强') && badges.includes('空'), `equipment slot badges should show set/unupgraded/empty states: ${JSON.stringify(badges)}`);
+    const emptyCard = await waitFor(() => d.querySelector('.char-equip-card.empty[data-char-equip-slot]'), 'empty equipment slot card');
+    click(emptyCard);
+    const slotTip = await waitFor(() => d.querySelector('.char-equip-slot-tip'), 'empty slot hint');
+    assert(slotTip.textContent.includes('槽为空') && slotTip.textContent.includes('去背包'), `empty slot hint should guide to inventory: ${slotTip.textContent}`);
+    click(slotTip.querySelector('[data-char-open-inventory-slot]'));
+    await waitFor(() => d.body.classList.contains('inventory-open') && !d.body.classList.contains('character-open'), 'empty slot jumps to inventory');
+    const slotFilter = await waitFor(() => d.querySelector('#inventory-dom-panel .bag-slot-filter.active'), 'inventory slot filter');
+    assert(slotFilter.textContent.includes('筛选') && slotFilter.textContent.includes('护甲'), `inventory should filter by empty character slot: ${slotFilter.textContent}`);
+    assert(d.querySelector('#inventory-dom-panel .bag-list').textContent.includes('玄铁甲'), 'filtered inventory should show matching slot item');
+    click(slotFilter.querySelector('[data-clear-slot-filter]'));
+    await waitFor(() => !d.querySelector('#inventory-dom-panel .bag-slot-filter.active'), 'inventory slot filter clears');
+    click(d.getElementById('btn-character'));
+    await waitFor(() => d.body.classList.contains('character-open'), 'character panel reopens after inventory jump');
+    const weaponCard = await waitFor(() => d.querySelector('.char-equip-card[data-char-equip-slot="weapon"]'), 'weapon equipment slot card');
+    click(weaponCard);
+    const detail = await waitFor(() => d.querySelector('.char-detail-popup-layer .item-detail'), 'character equipment detail popup');
+    assert(detail.textContent.includes('战力') && detail.textContent.includes('强化') && detail.querySelector('.detail-summary-row') && detail.querySelector('.detail-stat-group'), `equipment detail should show summary and grouped stats: ${detail.textContent}`);
+    click(d.querySelector('#character-dom-panel [data-popup-close]'));
+    const identity = await waitFor(() => d.querySelector('.char-identity-card'), 'character identity overview');
+    assert(identity.textContent.includes('战力') && identity.textContent.includes('装备'), `identity overview should show power/equipment: ${identity.textContent}`);
+    const tabs = Array.from(d.querySelectorAll('#character-dom-panel .char-tab')).map(btn => btn.textContent.trim()).filter(Boolean);
+    assert(tabs.length === 5 && tabs.includes('称号'), `character tabs should show 5 compact tabs: ${JSON.stringify(tabs)}`);
+    const bonus = await waitFor(() => d.querySelector('.char-bonus-overview'), 'character bonus overview');
+    assert(bonus.textContent.includes('输出') || bonus.textContent.includes('暂无装备加成'), `bonus overview should show grouped summary or empty hint: ${bonus.textContent}`);
+    const setProgress = await waitFor(() => d.querySelector('.char-set-progress'), 'character set progress');
+    assert(setProgress.textContent.includes('焚天') && setProgress.textContent.includes('还差'), `set progress should show owned set and next breakpoint: ${setProgress.textContent}`);
+    assert(profile.textContent.includes('流派') || profile.textContent.includes('专精') || profile.textContent.includes('共鸣'), `profile should show build identity: ${profile.textContent}`);
+    const jump = await waitFor(() => d.querySelector('[data-char-build-jump]'), 'character build jump');
+    const tree = jump.dataset.tree;
+    const index = jump.dataset.index;
+    assert(tree && index !== '', `jump should expose tree/index: ${JSON.stringify({ tree, index })}`);
+    click(jump.matches('button') ? jump : jump.querySelector('button') || jump);
+    await waitFor(() => d.body.classList.contains('skills-open') && !d.body.classList.contains('character-open'), 'jump to skills panel');
+    await waitFor(() => d.querySelector('.skill-node.selected'), 'selected skill node');
+    const state = inspect();
+    assert(state.selectedTree === tree, `selected tree should match jump target: ${JSON.stringify(state)}`);
+    assert(String(state.selectedIndex) === String(index), `selected index should match jump target: ${JSON.stringify(state)}`);
+    assert(state.modalTitle.length > 0, `skill detail modal/title should be visible: ${JSON.stringify(state)}`);
+    assert(!state.consoleErrors.length, `console should stay clean: ${state.consoleErrors.join('\n')}`);
+    return { ok: true, message: 'character build profile browser smoke passed', state };
+  }
+  run().then(result => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+    document.title = 'SMOKE_OK';
+  }).catch(err => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify({ ok:false, message: err.message, stack: err.stack, state: (() => { try { return inspect(); } catch (_) { return null; } })() });
+    document.title = 'SMOKE_FAIL';
+  });
+})();
+</script>

@@ -13,8 +13,9 @@ function mustMatch(label, regex) {
 }
 
 // Cache token must be bumped when mobile layout changes.
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 assert(html.includes(CURRENT_TOKEN), 'index cachebuster should include current mobile layout token');
+assert(!html.includes('20260601skillstrip1'), 'index should not keep stale skill strip token');
 assert(!html.includes('20260530stageclose1'), 'index should not keep stale stage close token');
 
 const mobileVerify = fs.readFileSync('mobile-verify.html', 'utf8');
@@ -24,8 +25,9 @@ assert(
 );
 
 // Universal mobile sheet contract: panels should feel native on phones.
-mustInclude('mobile layout marker', 'Mobile Universal Interface Layout 20260530synergy7');
-mustInclude('stage top overlay marker', `Mobile Stage Footer Readability + Scroll Fix ${CURRENT_TOKEN}`);
+mustInclude('mobile layout marker', `Mobile Universal Interface Layout ${CURRENT_TOKEN}`);
+mustInclude('skill compact layout marker', 'Mobile Skill Compact Layout 20260601skillstrip1');
+mustInclude('stage top overlay marker', `Mobile Stage Footer Readability + Scroll Fix 20260531resonance1`);
 mustInclude('panel list includes character', '#character-dom-panel');
 mustInclude('panel list includes inventory', '#inventory-dom-panel');
 mustInclude('panel list includes skill', '#skills-dom-panel');
@@ -47,5 +49,15 @@ mustMatch('main nav bottom zone', /--main-nav-bottom:\s*calc\(12px \+ var\(--saf
 mustMatch('nav is four primary actions', /#menu-bar\s*\{[\s\S]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/);
 mustMatch('panel mode hides map controls', /body\.panel-open #menu-bar,[\s\S]*body\.panel-open #action-buttons[\s\S]*display:\s*none !important/);
 mustMatch('hud bottom has no implicit top stretch', /#hud-bottom\s*\{[\s\S]*top:\s*auto\s*!important[\s\S]*max-height:\s*calc\(100dvh - var\(--stats-bottom\) - 54px\)/);
+mustMatch('skill attr bar not sticky on mobile', /#skills-dom-panel \.skill-attr-bar\s*\{[^}]*position:\s*static !important[^}]*bottom:\s*auto !important[^}]*\}/);
+const mobileUniversalStart = css.indexOf(`Mobile Universal Interface Layout ${CURRENT_TOKEN}`);
+const mobileUniversalBlock = css.slice(mobileUniversalStart, css.indexOf('/* Ascension panel', mobileUniversalStart));
+const mobileSkillAttrMatch = mobileUniversalBlock.match(/#skills-dom-panel \.skill-attr-bar\s*\{[^}]*\}/);
+assert(mobileSkillAttrMatch, 'mobile skill attr bar override block missing');
+assert(!/position:\s*sticky/.test(mobileSkillAttrMatch[0]), 'mobile skill attr bar should not keep covering synergy claim buttons');
+
+mustMatch('recommended skill buttons use full readable touch rows', /#skills-dom-panel \.synergy-recommend-strip button\s*\{[^}]*min-height:\s*44px[^}]*white-space:\s*normal[^}]*touch-action:\s*manipulation/);
+mustMatch('recommended skill detail text wraps instead of clipping', /#skills-dom-panel \.synergy-recommend-strip button small\s*\{[^}]*white-space:\s*normal[^}]*overflow:\s*visible/);
+mustMatch('synergy title hint stays single-line compact on mobile', /#skills-dom-panel \.synergy-title small\s*\{[^}]*white-space:\s*nowrap[^}]*text-overflow:\s*ellipsis/);
 
 console.log('mobile layout static assertions passed');

@@ -105,6 +105,24 @@ const STAGE_CHAPTERS = {
   },
 };
 
+const STAGE_AFFINITY_PLANS = {
+  qingyun: { weaknesses: ['fire', 'sword'], resists: [], builds: ['火雷爆发', '剑系斩杀'], desc: '新手妖物血量低，火系爆发或剑系普攻都能快速清场。' },
+  blood_cave: { weaknesses: ['water', 'wood', 'sword'], resists: ['fire'], builds: ['水木续航', '土剑破甲'], desc: '血煞怪持续伤害多，水木续航更稳，剑系适合斩杀首领。' },
+  thunder_peak: { weaknesses: ['earth', 'water'], resists: ['thunder'], builds: ['土系护盾', '水系控制'], desc: '雷兽抗雷，土盾和水控更适合拖过爆发回合。' },
+  yaogu_valley: { weaknesses: ['fire', 'thunder'], resists: ['wood'], builds: ['火雷焚烧', '雷系暴击'], desc: '妖藤毒物惧火雷，尽量避免纯木系内战。' },
+  nether_palace: { weaknesses: ['wood', 'sword', 'thunder'], resists: ['water'], builds: ['木系净化', '剑系破魂'], desc: '魂体怕木雷与剑意，水系伤害会被削弱。' },
+  void_rift: { weaknesses: ['earth', 'sword'], resists: ['water', 'wood'], builds: ['土剑稳定', '破甲追伤'], desc: '虚空怪闪避/压制强，土剑路线更容易稳定打穿。' },
+  demon_battlefield: { weaknesses: ['water', 'wood'], resists: ['fire', 'sword'], builds: ['水木续航', '控制削弱'], desc: '天魔爆发高，水木续航与削弱能降低暴毙风险。' },
+  ascension_platform: { weaknesses: ['earth', 'sword'], resists: ['thunder'], builds: ['土剑破甲', '护盾反打'], desc: '登仙守卫护甲高，土剑破甲收益明显。' },
+  nine_thunder: { weaknesses: ['earth', 'water'], resists: ['thunder', 'fire'], builds: ['土盾抗雷', '水系续航'], desc: '九重雷劫强抗雷火，土水更适合生存与控场。' },
+  immortal_gate: { weaknesses: ['sword', 'thunder'], resists: ['wood'], builds: ['剑雷爆发', '单系专精'], desc: '真仙守门考验爆发窗口，剑雷路线更容易压血线。' },
+  reception_immortal_domain: { weaknesses: ['sword', 'wood'], resists: ['earth'], builds: ['剑木开荒', '木系回复'], desc: '仙域前期重视续航与斩杀，剑木路线容错高。' },
+  mystic_thunder_domain: { weaknesses: ['earth', 'water'], resists: ['thunder'], builds: ['土水抗雷', '土系专精'], desc: '玄雷怪天然抗雷，土水路线能稳定处理雷罚机制。' },
+  immortal_forge_palace: { weaknesses: ['water', 'thunder'], resists: ['fire', 'earth'], builds: ['水雷破炉', '雷系暴击'], desc: '仙炉火土抗性高，水雷能克制器灵与炉火。' },
+  nether_rift_domain: { weaknesses: ['wood', 'sword', 'fire'], resists: ['water'], builds: ['木剑破魂', '火雷压制'], desc: '幽都魂怪惧木剑与阳火，水系输出会吃亏。' },
+  immortal_demon_battlefield: { weaknesses: ['water', 'thunder'], resists: ['fire', 'sword'], builds: ['水雷压魔', '水木续航'], desc: '仙魔战场压制强，水雷克制与水木续航都很关键。' },
+};
+
 const STAGES = {
   qingyun_foot: {
     id: 'qingyun_foot', chapterId: 'qingyun', name: '青云山脚', icon: '🌿', color: '#8ed8ff',
@@ -599,6 +617,50 @@ function getStageRoomLabel(stage, roomIndex) {
   const event = getStageRoomEvent(stage, idx);
   if (idx === 0 && event.type === 'normal') return '入口';
   return `${event.icon || ''}${event.name || `房间${idx + 1}`}`;
+}
+
+function getStageAffinityPlan(stageOrChapterId) {
+  const maybeStage = typeof stageOrChapterId === 'string' ? (typeof STAGES !== 'undefined' ? STAGES[stageOrChapterId] : null) : stageOrChapterId;
+  const chapterId = maybeStage?.chapterId || (STAGE_AFFINITY_PLANS[stageOrChapterId] ? stageOrChapterId : null);
+  const plan = STAGE_AFFINITY_PLANS[chapterId] || STAGE_AFFINITY_PLANS.qingyun;
+  const uniq = arr => [...new Set((arr || []).filter(Boolean))];
+  return {
+    chapterId,
+    weaknesses: uniq(plan.weaknesses),
+    resists: uniq(plan.resists),
+    builds: uniq(plan.builds),
+    desc: plan.desc || '',
+  };
+}
+
+function getStageAffinityText(stageOrChapterId) {
+  const plan = getStageAffinityPlan(stageOrChapterId);
+  const label = t => (typeof ENEMY_AFFINITY_LABELS !== 'undefined' && ENEMY_AFFINITY_LABELS[t]) || t;
+  const weak = plan.weaknesses.length ? `弱 ${plan.weaknesses.map(label).join('/')}` : '';
+  const resist = plan.resists.length ? `抗 ${plan.resists.map(label).join('/')}` : '';
+  return [weak, resist, plan.builds.length ? `推荐 ${plan.builds.slice(0, 2).join('/')}` : ''].filter(Boolean).join(' · ');
+}
+
+function getStageRecommendedBuildText(stageOrChapterId, includePlayerMatch = false) {
+  const plan = getStageAffinityPlan(stageOrChapterId);
+  const tags = [];
+  if (plan.builds.length) tags.push(plan.builds.slice(0, 2).join(' / '));
+  const aff = getStageAffinityText(stageOrChapterId).replace(/ · 推荐 .+$/, '');
+  if (aff) tags.push(aff);
+  if (includePlayerMatch && typeof getSkillBuildAffinityMatch === 'function') {
+    const match = getSkillBuildAffinityMatch(stageOrChapterId);
+    if (match?.label) tags.push(`当前${match.label}`);
+  }
+  return tags.join(' · ') || '通用流派';
+}
+
+function getStageBossAffinity(stage, base = {}) {
+  const plan = getStageAffinityPlan(stage);
+  const boss = stage?.boss || {};
+  return {
+    weaknesses: [...new Set([...(boss.weaknesses || []), ...plan.weaknesses])],
+    resists: [...new Set([...(boss.resists || []), ...plan.resists])],
+  };
 }
 
 function getStageMaterialName(id) {

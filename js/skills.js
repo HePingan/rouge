@@ -287,6 +287,15 @@ const SKILL_SYNERGY_SHORT_LABELS = {
   burnCritBonus: '灼暴', critExtendBurn: '延烧', healGuardAmp: '续航', controlExtend: '控延', guardDefBreak: '盾破', defBreakExecute: '斩甲', armorPierceBonus: '破深',
 };
 
+const SKILL_COMBO_SEED_EFFECTS = {
+  burn: '灼烧',
+  defBreak: '破甲',
+  weaken: '削弱',
+  freeze: '冻结',
+  stunChance: '麻痹',
+  guard: '护盾破甲',
+};
+
 const SKILL_TREE_SHORT_LABELS = {
   fire: '火', water: '水', thunder: '雷', sword: '剑', wood: '木', earth: '土',
 };
@@ -836,7 +845,7 @@ function getActiveSkillSynergyTagsForSkill(skill) {
     const shortLabels = [];
     for (const eff of syn.effects || []) {
       const add = (label, short = null) => { labels.push(label); shortLabels.push(short || SKILL_SYNERGY_SHORT_LABELS[eff.type] || label.slice(0, 2)); };
-      if (eff.type === 'burnCritBonus' && (skill.tree === 'fire' || skill.tree === 'thunder')) add('灼烧暴击');
+      if (eff.type === 'burnCritBonus' && skill.tree === 'thunder') add('灼烧暴击');
       if (eff.type === 'critExtendBurn' && skill.tree === 'thunder') add('暴击延烧');
       if (eff.type === 'healGuardAmp' && skill?.effects?.some(e => e.type === 'healSelf' || e.type === 'guard')) add('续航强化');
       if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','defBreak'].includes(e.type))) add('控制延长');
@@ -860,12 +869,109 @@ function getSkillSynergyShortTagText(skill) {
     .join(' · ');
 }
 
+function getSkillSynergyCombatHint(skill, enemy = currentEnemy) {
+  const tags = getActiveSkillSynergyTagsForSkill(skill);
+  if (!tags.length) return null;
+  const details = [];
+  const readiness = [];
+  for (const syn of getActiveSkillSynergies()) {
+    if (!(syn.trees || []).includes(skill?.tree)) continue;
+    for (const eff of syn.effects || []) {
+      if (eff.type === 'burnCritBonus' && skill?.tree === 'thunder') {
+        const active = !!enemy?._statusEffects?.some(st => st.type === 'burn' && (st.turns || 0) > 0);
+        details.push(`${active ? '灼烧目标' : '对灼烧'}暴击+${Math.round((eff.value || 0) * 100)}%`);
+        readiness.push(active ? '当前可爆发' : '需先灼烧');
+      }
+      if (eff.type === 'critExtendBurn' && skill?.tree === 'thunder') {
+        const hasBurn = !!enemy?._statusEffects?.some(st => st.type === 'burn' && (st.turns || 0) > 0);
+        details.push(`暴击${Math.round((eff.chance ?? 0.3) * 100)}%延烧`);
+        if (!hasBurn) readiness.push('延烧需灼烧');
+      }
+      if (eff.type === 'healGuardAmp' && skill?.effects?.some(e => e.type === 'healSelf' || e.type === 'guard')) {
+        details.push(`治疗/护盾+${Math.round((eff.value || 0) * 100)}%`);
+        readiness.push('续航已增强');
+      }
+      if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','stunChance','defBreak'].includes(e.type))) {
+        const names = (skill.effects || []).filter(e => ['weaken','freeze','stunChance','defBreak'].includes(e.type)).map(e => SKILL_COMBO_SEED_EFFECTS[e.type] || SKILL_EFFECT_LABELS[e.type] || e.type);
+        details.push(`${names[0] || '控制'}+${eff.turns || 1}回合`);
+        readiness.push('控场已增强');
+      }
+      if (eff.type === 'guardDefBreak' && skill?.effects?.some(e => e.type === 'guard')) {
+        details.push('护盾附带破甲');
+        readiness.push('可起手破甲');
+      }
+      if (eff.type === 'defBreakExecute' && skill && (!eff.skillTrees || eff.skillTrees.includes(skill.tree))) {
+        const active = !!enemy?._statusEffects?.some(st => st.type === 'defBreak' && (st.turns || 0) > 0);
+        details.push(`${active ? '破甲目标' : '对破甲'}追伤${Math.round((eff.ratio || 0.08) * 100)}%`);
+        readiness.push(active ? '当前可斩甲' : '需先破甲');
+      }
+      if (eff.type === 'armorPierceBonus' && ['earth','sword'].includes(skill?.tree)) {
+        details.push(`破甲+${Math.round((eff.value || 0) * 100)}%`);
+        readiness.push('破防更强');
+      }
+    }
+  }
+  const text = tags.map(tag => `${tag.icon}${tag.labels.join('/')}`).join(' · ');
+  const shortText = tags.map(tag => `${tag.icon}${tag.shortLabels.join('/')}`).join(' · ');
+  const detailText = [...new Set(details)].join(' · ');
+  const readinessText = [...new Set(readiness)].slice(0, 2).join(' · ');
+  return { tags, text, shortText, detailText, readinessText, label: detailText || shortText || text };
+}
+
+function getCombatSkillComboPrimer(skill, enemy = currentEnemy, skills = null) {
+  if (!skill) return null;
+  const combatSkills = Array.isArray(skills) ? skills : (typeof getCombatSkills === 'function' ? getCombatSkills() : []);
+  const active = getActiveSkillSynergies();
+  const effects = skill.effects || [];
+  const statuses = enemy?._statusEffects || [];
+  const hasStatus = type => statuses.some(st => st.type === type && (st.turns || 0) > 0);
+  const hasThunderFollow = combatSkills.some(s => s !== skill && s.tree === 'thunder');
+  const hasSwordFollow = combatSkills.some(s => s !== skill && s.tree === 'sword');
+  const firstEffectLabel = () => {
+    const eff = effects.find(e => SKILL_COMBO_SEED_EFFECTS[e.type]);
+    return eff ? SKILL_COMBO_SEED_EFFECTS[eff.type] : '';
+  };
+  if (active.some(s => s.id === 'fire_thunder') && effects.some(e => e.type === 'burn') && !hasStatus('burn') && hasThunderFollow) {
+    return { label: '先灼烧，后接雷暴', detail: '为雷火焚天铺场：雷系命中灼烧目标暴击更高，并可延长灼烧。', followTree: 'thunder' };
+  }
+  if (active.some(s => s.id === 'earth_sword') && (effects.some(e => e.type === 'defBreak') || effects.some(e => e.type === 'guard')) && !hasStatus('defBreak') && hasSwordFollow) {
+    return { label: effects.some(e => e.type === 'guard') ? '开盾破甲，接剑斩' : '先破甲，接剑斩', detail: '为山河剑骨铺场：剑技命中破甲目标追加斩甲追伤。', followTree: 'sword' };
+  }
+  if (active.some(s => s.id === 'water_wood') && effects.some(e => ['weaken','freeze','stunChance','defBreak'].includes(e.type))) {
+    return { label: `${firstEffectLabel() || '控制'}延长控场`, detail: '水木长生会延长削弱/冻结/麻痹/破甲持续时间。', followTree: null };
+  }
+  return null;
+}
+
 function getSkillAffinityText(skill, enemy = currentEnemy) {
   if (!skill?.tree || !enemy || typeof getEnemyAffinityMultiplier !== 'function') return '';
   const mult = getEnemyAffinityMultiplier(enemy, skill.tree);
   if (mult > 1.001) return `克${SKILL_TREE_SHORT_LABELS[skill.tree] || skill.tree}+${Math.round((mult - 1) * 100)}%`;
   if (mult < 0.999) return `抗${SKILL_TREE_SHORT_LABELS[skill.tree] || skill.tree}-${Math.round((1 - mult) * 100)}%`;
   return '';
+}
+
+function getSkillAffinityCounterTrees(enemy = currentEnemy, currentTree = null, limit = 2) {
+  const profile = typeof getEnemyAffinityProfile === 'function'
+    ? getEnemyAffinityProfile(enemy)
+    : { weaknesses: enemy?.weaknesses || [], resists: enemy?.resists || [] };
+  return [...new Set((profile.weaknesses || []).filter(t => t && t !== currentTree && SKILL_TREES?.[t]))].slice(0, Math.max(1, limit || 2));
+}
+
+function getSkillAffinityMeta(skill, enemy = currentEnemy) {
+  const text = getSkillAffinityText(skill, enemy);
+  if (!text) return null;
+  const type = text.startsWith('克') ? 'hit' : (text.startsWith('抗') ? 'resist' : 'neutral');
+  const counterTrees = type === 'resist' ? getSkillAffinityCounterTrees(enemy, skill?.tree, 2) : [];
+  const counterText = counterTrees.length ? `建议换${counterTrees.map(t => SKILL_TREE_SHORT_LABELS[t] || t).join('/')}` : '';
+  return {
+    text,
+    type,
+    badge: type === 'resist' ? '抗' : '克',
+    counterTrees,
+    counterText,
+    tip: counterText ? `${text} · ${counterText}` : text,
+  };
 }
 
 function getSkillLearningImpact(tree, index) {
@@ -924,16 +1030,160 @@ function getRecommendedSkillNodesForBuild(limit = 4) {
   return out.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, limit);
 }
 
-function getSkillCombatBenefitSummary() {
+function getSkillCombatBenefitSummary(source = null) {
   const build = getActiveSkillBuildSummary();
   const parts = [];
   for (const s of build.synergies || []) parts.push(`${s.icon || '✦'}${s.name}`);
   for (const m of build.masteries || []) parts.push(`${SKILL_TREES[m.tree]?.icon || '✦'}${m.shortName}专精 伤害+${Math.round(m.damageBonus * 100)}%`);
+  const affinityMatch = source && typeof getSkillBuildAffinityMatch === 'function' ? getSkillBuildAffinityMatch(source) : null;
   return {
     labels: parts,
     text: parts.length ? parts.join(' · ') : (build.hint || '暂无成型流派'),
-    hint: build.hint || '',
+    hint: affinityMatch?.detail || build.hint || '',
+    affinity: affinityMatch,
   };
+}
+
+function getSkillAffinitySourceProfile(source = currentEnemy) {
+  if (!source) return { weaknesses: [], resists: [] };
+  if (typeof getEnemyAffinityProfile === 'function' && (source.weaknesses || source.resists || source.maxHp || source.hp)) {
+    return getEnemyAffinityProfile(source);
+  }
+  if (typeof getStageAffinityPlan === 'function' && (source.chapterId || source.id || typeof source === 'string')) {
+    const plan = getStageAffinityPlan(source);
+    return { weaknesses: plan.weaknesses || [], resists: plan.resists || [] };
+  }
+  const uniq = arr => [...new Set((arr || []).filter(Boolean))];
+  return { weaknesses: uniq(source.weaknesses), resists: uniq(source.resists) };
+}
+
+function getSkillBuildAffinityMatch(source = currentEnemy, overrideLearnedSkills = null) {
+  const profile = getSkillAffinitySourceProfile(source);
+  const counts = getLearnedSkillCountsByTree(overrideLearnedSkills);
+  const label = tree => SKILL_TREE_SHORT_LABELS?.[tree] || SKILL_TREES?.[tree]?.name || tree;
+  const weakTrees = (profile.weaknesses || []).filter(t => SKILL_TREES?.[t]);
+  const resistTrees = (profile.resists || []).filter(t => SKILL_TREES?.[t]);
+  const matchedTrees = weakTrees.filter(t => (counts[t] || 0) > 0);
+  const resistedTrees = resistTrees.filter(t => (counts[t] || 0) > 0);
+  const recommendedTrees = weakTrees.filter(t => (counts[t] || 0) <= 0).slice(0, 2);
+  const activeSynergies = getActiveSkillSynergies(overrideLearnedSkills).filter(syn => (syn.trees || []).some(t => weakTrees.includes(t)));
+  const activeMasteries = getActiveSkillMasteries(overrideLearnedSkills).filter(m => weakTrees.includes(m.tree));
+  const score = matchedTrees.reduce((n, t) => n + Math.min(3, counts[t] || 0), 0)
+    + activeSynergies.length * 2 + activeMasteries.length * 2
+    - resistedTrees.reduce((n, t) => n + Math.min(2, counts[t] || 0), 0);
+  const goodParts = [];
+  if (matchedTrees.length) goodParts.push(`克制已覆盖 ${matchedTrees.map(label).join('/')}`);
+  if (activeSynergies.length) goodParts.push(`共鸣 ${activeSynergies.slice(0, 2).map(s => s.name).join('/')}`);
+  if (activeMasteries.length) goodParts.push(`专精 ${activeMasteries.slice(0, 2).map(m => `${label(m.tree)}系`).join('/')}`);
+  const warnParts = [];
+  if (resistedTrees.length) warnParts.push(`被抗 ${resistedTrees.map(label).join('/')}`);
+  if (!matchedTrees.length && recommendedTrees.length) warnParts.push(`建议补 ${recommendedTrees.map(label).join('/')}`);
+  const status = score >= 3 ? 'good' : score <= -1 ? 'warn' : matchedTrees.length ? 'ok' : 'neutral';
+  const labelText = goodParts[0] || warnParts[0] || '流派相性一般';
+  const detail = [...goodParts, ...warnParts].slice(0, 3).join(' · ') || '可按当前最高伤害技能作战';
+  return {
+    status,
+    score,
+    label: labelText,
+    detail,
+    matchedTrees,
+    resistedTrees,
+    recommendedTrees,
+    activeSynergies,
+    activeMasteries,
+  };
+}
+
+function getSkillBuildAffinityText(source = currentEnemy, overrideLearnedSkills = null) {
+  const match = getSkillBuildAffinityMatch(source, overrideLearnedSkills);
+  return match.detail || match.label || '';
+}
+
+function getCombatSkillComboPlan(skills = null, enemy = currentEnemy) {
+  const combatSkills = Array.isArray(skills) ? skills : (typeof getCombatSkills === 'function' ? getCombatSkills() : []);
+  const out = [];
+  const statuses = enemy?._statusEffects || [];
+  const intent = enemy?._nextIntent || null;
+  const hasStatus = type => statuses.some(st => st.type === type && (st.turns || 0) > 0);
+  const canSeed = type => combatSkills.some(s => (s.effects || []).some(e => e.type === type || (type === 'defBreak' && e.type === 'guard')));
+  const hasEffect = (skill, types) => (skill.effects || []).some(e => types.includes(e.type));
+  const isControlSkill = skill => hasEffect(skill, ['weaken', 'freeze', 'stunChance', 'defBreak']);
+  const isGuardSkill = skill => hasEffect(skill, ['guard', 'healSelf']);
+  const isBurstSkill = skill => Number(skill.dmgMult || 0) >= 1.55 || Number(skill.hits || 0) >= 3 || Number(skill.critBonus || 0) >= 0.18 || hasEffect(skill, ['execute', 'refundOnKill']);
+  const addIntentScore = (skill, reasons) => {
+    if (!intent) return 0;
+    let score = 0;
+    const add = (points, label) => { score += points; if (label) reasons.unshift(label); };
+    if (intent.type === 'control') {
+      if (isBurstSkill(skill)) add(26, '敌受控，爆发');
+      else if (Number(skill.dmgMult || 0) >= 1.25) add(14, '敌受控，输出');
+      return score;
+    }
+    if (intent.type === 'boss') {
+      if (isControlSkill(skill)) add(24, '应对机制：控场');
+      if (isGuardSkill(skill)) add(22, '应对机制：护身');
+      if (isBurstSkill(skill)) add(16, '应对机制：爆发');
+      return score;
+    }
+    if (intent.type === 'attack' && intent.attackType === 'heavy') {
+      if (hasEffect(skill, ['guard'])) add(30, '克制重击：护盾');
+      if (hasEffect(skill, ['freeze', 'stunChance'])) add(28, '克制重击：控场');
+      if (hasEffect(skill, ['weaken'])) add(24, '克制重击：削攻');
+      if (hasEffect(skill, ['defBreak']) && isBurstSkill(skill)) add(10, '重击前抢攻');
+      return score;
+    }
+    if (intent.type === 'skill') {
+      const skillType = intent.skill?.type || '';
+      if (['damageStatus', 'damageDebuff'].includes(skillType) || ['施毒', '灼烧', '迟缓', '诅咒', '压制'].includes(intent.label)) {
+        if (hasEffect(skill, ['freeze', 'stunChance'])) add(26, '打断异常：控场');
+        if (isBurstSkill(skill)) add(18, '异常前速杀');
+        if (hasEffect(skill, ['guard', 'healSelf', 'weaken'])) add(14, '异常前稳血');
+      } else if (skillType === 'multiHit' || intent.label === '连击') {
+        if (isGuardSkill(skill)) add(24, '应对连击：护身');
+        if (isControlSkill(skill)) add(20, '应对连击：控场');
+      } else if (skillType === 'drain' || intent.label === '吸血') {
+        if (isBurstSkill(skill)) add(24, '吸血前速杀');
+        if (isControlSkill(skill)) add(18, '吸血前控场');
+      } else if (skillType === 'selfBuff' || intent.label === '蓄势') {
+        if (isControlSkill(skill)) add(24, '打断蓄势');
+        if (isBurstSkill(skill)) add(20, '蓄势前爆发');
+      }
+      return score;
+    }
+    return score;
+  };
+  for (let i = 0; i < combatSkills.length; i++) {
+    const skill = combatSkills[i];
+    const hint = typeof getSkillSynergyCombatHint === 'function' ? getSkillSynergyCombatHint(skill, enemy) : null;
+    const primer = typeof getCombatSkillComboPrimer === 'function' ? getCombatSkillComboPrimer(skill, enemy, combatSkills) : null;
+    const affinity = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(skill, enemy) : '';
+    let priority = 0;
+    const reasons = [];
+    priority += addIntentScore(skill, reasons);
+    if (affinity && affinity.startsWith('克')) { priority += 18; reasons.push(affinity); }
+    if (affinity && affinity.startsWith('抗')) {
+      const meta = typeof getSkillAffinityMeta === 'function' ? getSkillAffinityMeta(skill, enemy) : null;
+      priority -= 18;
+      reasons.push(`${affinity}，${meta?.counterText || '换系更稳'}`);
+    }
+    if (hint?.label) { priority += 12; reasons.push(hint.label); }
+    if (primer?.label) { priority += 14; reasons.unshift(primer.label); }
+    if (skill.tree === 'thunder' && hasStatus('burn')) { priority += 22; reasons.unshift('灼烧后接雷'); }
+    if (skill.tree === 'thunder' && !hasStatus('burn') && canSeed('burn')) { priority -= 8; reasons.push('先挂灼烧'); }
+    if (skill.tree === 'sword' && hasStatus('defBreak')) { priority += 20; reasons.unshift('破甲后斩击'); }
+    if (skill.tree === 'sword' && !hasStatus('defBreak') && canSeed('defBreak')) { priority -= 6; reasons.push('先破甲'); }
+    if (skill.effects?.some(e => e.type === 'guard') && getActiveSkillSynergies().some(s => s.id === 'earth_sword')) { priority += hasStatus('defBreak') ? 8 : 16; reasons.push('开盾破甲'); }
+    if (skill.effects?.some(e => ['weaken','freeze','stunChance','defBreak'].includes(e.type)) && getActiveSkillSynergies().some(s => s.id === 'water_wood')) { priority += 10; reasons.push('控场延长'); }
+    if (player && Number(skill.mpCost || 0) > Number(player.mp || 0)) { priority -= 30; reasons.push('灵力不足'); }
+    if (priority > 0 && reasons.length) {
+      out.push({ index: i, skill, priority, label: [...new Set(reasons)].slice(0, 3).join(' · '), hint, primer, affinity });
+    }
+  }
+  return out.sort((a, b) => b.priority - a.priority || a.index - b.index);
+}
+
+function getRecommendedCombatSkillCombo(skills = null, enemy = currentEnemy) {
+  return getCombatSkillComboPlan(skills, enemy)[0] || null;
 }
 
 function sumActiveSynergyEffect(type, field = 'value') {
@@ -969,7 +1219,7 @@ function applySynergyAfterPlayerHit(damage, crit, skill = null) {
   let triggered = 0;
   for (const syn of getActiveSkillSynergies()) {
     for (const eff of syn.effects || []) {
-      if (eff.type === 'critExtendBurn' && crit && Math.random() < (eff.chance ?? 0.3)) {
+      if (eff.type === 'critExtendBurn' && skill?.tree === 'thunder' && crit && Math.random() < (eff.chance ?? 0.3)) {
         if (extendEnemyStatus('burn', eff.turns || 1)) { combatLog(`🔥⚡ ${syn.name}：暴雷延长灼烧`, '#ffb347'); triggered++; }
       } else if (eff.type === 'guardDefBreak' && skill?.effects?.some(e => e.type === 'guard')) {
         addCombatStatus(currentEnemy, { type: 'defBreak', turns: eff.turns || 2, ratio: eff.ratio || 0.1 });
@@ -985,7 +1235,10 @@ function applySynergyAfterPlayerHit(damage, crit, skill = null) {
     }
   }
   const tag = skill && typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(skill) : '';
-  if (tag && triggered === 0 && Math.random() < 0.35) combatLog(`✦ 共鸣就绪：${tag}`, '#ffe28a');
+  if (tag && triggered === 0) {
+    const hint = typeof getSkillSynergyCombatHint === 'function' ? getSkillSynergyCombatHint(skill, currentEnemy) : null;
+    combatLog(`✦ 共鸣就绪：${hint?.label || tag}`, '#ffe28a');
+  }
 }
 
 // ─── Get combat-usable active skills ───
@@ -1003,7 +1256,7 @@ function getSkillEffectSummary(skill) {
     for (const eff of syn.effects || []) {
       if (eff.type === 'defBreakExecute' && skill && (!eff.skillTrees || eff.skillTrees.includes(skill.tree))) parts.push('斩甲追伤');
       if (eff.type === 'healGuardAmp' && skill?.effects?.some(e => e.type === 'healSelf' || e.type === 'guard')) parts.push('共鸣强化');
-      if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','defBreak'].includes(e.type))) parts.push('控制延长');
+      if (eff.type === 'controlExtend' && skill?.effects?.some(e => ['weaken','freeze','stunChance','defBreak'].includes(e.type))) parts.push('控制延长');
     }
   }
   return [...new Set(parts)].join(' · ');
@@ -1089,8 +1342,17 @@ function tickPlayerStatusesAfterHit() {
   player._statusEffects = player._statusEffects.filter(st => st.turns > 0);
 }
 
-function getPassiveCritBonus() { return sumLearnedEffect('critBonusPassive') + Number(getDoctrineStatBonuses().crit || 0) / 100 + (hasEnemyStatus('burn') ? sumActiveSynergyEffect('burnCritBonus') : 0); }
-function getPassiveArmorPierce() { return sumLearnedEffect('armorPiercePassive') + Number(getDoctrineStatBonuses().armorPen || 0) / 100 + sumActiveSynergyEffect('armorPierceBonus'); }
+function getPassiveCritBonus(skill = null) {
+  const base = sumLearnedEffect('critBonusPassive') + Number(getDoctrineStatBonuses().crit || 0) / 100;
+  const tree = skill?.tree || '';
+  const burnCrit = hasEnemyStatus('burn') && tree === 'thunder' ? sumActiveSynergyEffect('burnCritBonus') : 0;
+  return base + burnCrit;
+}
+function getPassiveArmorPierce(skill = null) {
+  const base = sumLearnedEffect('armorPiercePassive') + Number(getDoctrineStatBonuses().armorPen || 0) / 100;
+  const synergyPierce = (!skill || ['earth','sword'].includes(skill.tree)) ? sumActiveSynergyEffect('armorPierceBonus') : 0;
+  return base + synergyPierce;
+}
 function getPassiveBurnAmp() { return sumLearnedEffect('burnAmp'); }
 function getDoctrineSkillDamageBonus(skill) {
   const doctrine = player?.daoFoundation;
@@ -1138,8 +1400,9 @@ function applySkillEffects(skill, totalDamage, killed) {
         break;
       case 'stunChance':
         if (Math.random() < (eff.chance ?? 0.25)) {
-          addCombatStatus(currentEnemy, { type: 'stun', turns: eff.turns || 1 });
+          addCombatStatus(currentEnemy, { type: 'stun', turns: (eff.turns || 1) + controlExtendTurns });
           combatLog(`⚡ ${currentEnemy.name} 被麻痹！`, '#ffdd44');
+          if (controlExtendTurns > 0) combatLog(`💧🌿 水木长生：麻痹延长 ${controlExtendTurns} 回合`, '#aaddff');
         }
         break;
       case 'healSelf': {
@@ -1231,9 +1494,11 @@ function applyPassiveOnCombatStart() {
 function applyPassiveAfterEnemyHit(damage) {
   for (const skill of getLearnedSkillDefinitions('trigger')) {
     for (const eff of skill.effects || []) {
-      if (eff.type === 'lowHpHeal' && !player._combatTriggers?.lowHpHeal && player.hp > 0 && player.hp / player.maxHp <= (eff.threshold || 0.3)) {
+      if (eff.type === 'lowHpHeal' && player.hp > 0 && player.hp / player.maxHp <= (eff.threshold || 0.3)) {
         if (!player._combatTriggers) player._combatTriggers = {};
-        player._combatTriggers.lowHpHeal = true;
+        const triggerKey = `lowHpHeal:${skill.tree}:${skill.index}`;
+        if (player._combatTriggers[triggerKey]) continue;
+        player._combatTriggers[triggerKey] = true;
         const heal = Math.max(1, Math.floor(player.maxHp * (eff.healRatio || 0.15)));
         const before = player.hp;
         player.hp = Math.min(player.maxHp, player.hp + heal);
@@ -1267,6 +1532,8 @@ function playerUseSkill(skillIndex) {
   const skills = getCombatSkills();
   if (skillIndex < 0 || skillIndex >= skills.length) return;
   const skill = skills[skillIndex];
+  const comboBeforeUse = typeof getRecommendedCombatSkillCombo === 'function' ? getRecommendedCombatSkillCombo(skills, currentEnemy) : null;
+  const isRecommendedComboUse = comboBeforeUse?.index === skillIndex;
   const actualMpCost = Math.max(0, Math.floor((skill.mpCost || 0) * getDoctrineMpCostMultiplier(skill)));
   if (player.mp < actualMpCost) {
     combatLog('灵力不足！', '#ff4444');
@@ -1275,7 +1542,7 @@ function playerUseSkill(skillIndex) {
 
   player.mp -= actualMpCost;
   const hits = Math.max(1, skill.hits || 1);
-  const pierce = Math.min(0.85, (skill.armorPierce || 0) + getPassiveArmorPierce());
+  const pierce = Math.min(0.85, (skill.armorPierce || 0) + getPassiveArmorPierce(skill));
   const defMult = typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
   const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * defMult * (1 - pierce)));
   const affinityMult = typeof getEnemyAffinityMultiplier === 'function' ? getEnemyAffinityMultiplier(currentEnemy, skill.tree) : 1;
@@ -1286,7 +1553,7 @@ function playerUseSkill(skillIndex) {
   for (let i = 0; i < hits; i++) {
     const perHitMult = (skill.dmgMult * (1 + getDoctrineSkillDamageBonus(skill))) / hits;
     const baseDmg = Math.max(1, Math.floor(player.atk * perHitMult - effectiveDef));
-    const crit = Math.random() < (0.15 + (skill.critBonus || 0) + getPassiveCritBonus());
+    const crit = Math.random() < (0.15 + (skill.critBonus || 0) + getPassiveCritBonus(skill));
     anyCrit = anyCrit || crit;
     const variance = Math.floor((Math.random() - 0.5) * 6);
     const rawDmg = crit ? Math.floor(baseDmg * 2) : Math.max(1, baseDmg + variance);
@@ -1298,6 +1565,7 @@ function playerUseSkill(skillIndex) {
   skill._lastCrit = anyCrit;
 
   const detail = hits > 1 ? `（${hitDamages.join('+')}）` : '';
+  if (isRecommendedComboUse && comboBeforeUse?.label) combatLog(`🔗 连携命中：${skill.name} · ${comboBeforeUse.label}`, '#ffd65c');
   combatLog(`你使用【${skill.name}】，造成 ${totalDamage} 点伤害${detail}${anyCrit ? ' 💥暴击！' : ''}${affinityText ? `（${affinityText}）` : ''} (-${actualMpCost} 灵力)`, skill.treeColor);
 
   const wx = currentEnemy.x * CELL_SIZE + CELL_SIZE / 2;
@@ -1311,6 +1579,10 @@ function playerUseSkill(skillIndex) {
   if (typeof applySynergyAfterPlayerHit === 'function') applySynergyAfterPlayerHit(totalDamage, anyCrit, skill);
   killed = currentEnemy.hp <= 0;
 
+  const bossMechanicResult = currentEnemy.hp > 0 && typeof maybeTriggerBossMechanic === 'function' ? maybeTriggerBossMechanic('hp') : false;
+  if (typeof didBossMechanicTrigger === 'function' && didBossMechanicTrigger(bossMechanicResult)) return;
+  if (currentEnemy.hp <= 0) killed = true;
+
   if (killed) {
     currentEnemy.hp = 0;
     const refundEffect = (skill.effects || []).find(e => e.type === 'refundOnKill');
@@ -1320,12 +1592,16 @@ function playerUseSkill(skillIndex) {
       combatLog(`🌌 剑意回流，返还 ${refund} 灵力`, '#ddddff');
     }
     if (typeof applyPassiveOnVictory === 'function') applyPassiveOnVictory();
+    if (typeof applyEquipmentOnVictory === 'function') applyEquipmentOnVictory();
+    const artifactRecover = typeof applyArtifactVictoryEffects === 'function' ? applyArtifactVictoryEffects(player) : null;
+    if (artifactRecover?.ok) combatLog(`🏺 炼妖壶炼化妖力，恢复生命 ${artifactRecover.hp}、灵力 ${artifactRecover.mp}`, '#90ee90');
     combatLog(`✅ 你击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
     return;
   }
 
+  if (typeof renderCombatDomPanel === 'function') renderCombatDomPanel();
   combatState = COMBAT_STATE.ENEMY_TURN;
   setTimeout(enemyAttack, 500);
 }

@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>combat combo readability smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${msg}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 7000) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeout) {
+    try {
+      const value = fn();
+      if (value) return value;
+    } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [
+      { tree:'fire', index:0 }, { tree:'fire', index:1 },
+      { tree:'thunder', index:0 }, { tree:'thunder', index:1 },
+      { tree:'earth', index:0 }, { tree:'earth', index:1 },
+      { tree:'sword', index:0 }, { tree:'sword', index:1 }
+    ];
+    player.mp = player.maxMp || 90;
+    const enemy = { name:'长名魂妖用于测试提示换行', title:'长名魂妖用于测试提示换行', hp:88, maxHp:88, atk:8, def:2, realm:0, _statusEffects:[{type:'armorBreak', turns:2}], affinity:{ weak:['sword'], resist:[] } };
+    startCombat(enemy);
+    combatState = COMBAT_STATE.PLAYER_TURN;
+    renderCombatDomPanel();
+  `);
+  await waitFor(() => d.querySelector('#combat-dom-panel .cbt-combo-guide'), 'combo guide');
+  const metrics = w.eval(`(() => {
+    const panel = document.querySelector('#combat-dom-panel');
+    const combo = document.querySelector('.cbt-combo-guide');
+    const comboSpan = combo.querySelector('span');
+    const strip = document.querySelector('.cbt-resonance-strip');
+    const chip = strip && strip.querySelector('span');
+    const actions = document.querySelector('.cbt-actions-row');
+    const cs = getComputedStyle(comboSpan);
+    const chipCs = chip ? getComputedStyle(chip) : null;
+    const pr = panel.getBoundingClientRect();
+    const ar = actions.getBoundingClientRect();
+    const cr = combo.getBoundingClientRect();
+    return {
+      body: document.body.className,
+      comboText: comboSpan.textContent,
+      comboWhiteSpace: cs.whiteSpace,
+      comboClamp: cs.webkitLineClamp,
+      comboHeight: cr.height,
+      chipText: chip ? chip.textContent : '',
+      chipWhiteSpace: chipCs ? chipCs.whiteSpace : '',
+      chipClamp: chipCs ? chipCs.webkitLineClamp : '',
+      panelHeight: pr.height,
+      viewportHeight: innerHeight,
+      actionsBottom: ar.bottom,
+      panelBottom: pr.bottom,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      errors: (window.__errors || []).length
+    };
+  })()`);
+  if (metrics.errors) throw new Error('console errors in iframe');
+  if (metrics.comboWhiteSpace !== 'normal' || String(metrics.comboClamp) !== '2') throw new Error('combo guide still clips instead of wrapping: ' + JSON.stringify(metrics));
+  if (metrics.chipText && (metrics.chipWhiteSpace !== 'normal' || String(metrics.chipClamp) !== '2')) throw new Error('resonance chip still clips instead of wrapping: ' + JSON.stringify(metrics));
+  if (metrics.actionsBottom > metrics.panelBottom + 1) throw new Error('combat actions overflow panel: ' + JSON.stringify(metrics));
+  if (metrics.panelHeight > metrics.viewportHeight * 0.48) throw new Error('combat panel too tall after readability fix: ' + JSON.stringify(metrics));
+  if (metrics.overflowX > 2) throw new Error('horizontal overflow after readability fix: ' + JSON.stringify(metrics));
+  document.body.dataset.result = 'passed';
+  document.body.dataset.metrics = JSON.stringify(metrics);
+  out('combat combo readability smoke passed ' + JSON.stringify(metrics));
+})().catch(err => {
+  document.body.dataset.result = 'failed';
+  document.body.dataset.error = err && err.message ? err.message : String(err);
+  out('combat combo readability smoke failed ' + document.body.dataset.error);
+});
+</script>

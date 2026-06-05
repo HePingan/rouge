@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>skill codex claim badge browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${String(msg).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 9000) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeout) {
+    try {
+      const value = fn();
+      if (value) return value;
+    } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+function tapInFrame(frame, selector) {
+  const el = frame.contentDocument.querySelector(selector);
+  if (!el) throw new Error('missing tap target ' + selector);
+  el.dispatchEvent(new frame.contentWindow.PointerEvent('pointerdown', { bubbles:true, pointerId:1, clientX:10, clientY:10 }));
+  el.dispatchEvent(new frame.contentWindow.PointerEvent('pointerup', { bubbles:true, pointerId:1, clientX:10, clientY:10 }));
+  el.click();
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [
+      { tree:'fire', index:0 }, { tree:'fire', index:1 }, { tree:'fire', index:2 },
+      { tree:'thunder', index:0 }, { tree:'thunder', index:1 }
+    ];
+    claimedSkillSynergies = {};
+    claimedSkillMasteries = {};
+    availableSkillPoints = 0;
+    availableStatPoints = 0;
+    if (typeof updateHUD === 'function') updateHUD(player, dungeon?.level || 1);
+  `);
+  await waitFor(() => d.querySelector('#btn-skills.has-claim')?.dataset.claimCount === '2', 'skill menu claim badge');
+  tapInFrame(frame, '#btn-skills');
+  await waitFor(() => d.body.classList.contains('skills-open') && d.querySelector('.skill-codex-panel'), 'skills panel codex');
+  const before = w.eval(`(() => {
+    const btn = document.querySelector('#btn-skills');
+    const codex = getSkillCodexSummary();
+    const panel = document.querySelector('#skills-dom-panel');
+    const codexPanel = panel.querySelector('.skill-codex-panel');
+    const claimGuide = panel.querySelector('.codex-claim-guide')?.textContent.trim() || '';
+    const claimStat = panel.querySelector('.codex-stats-row span.claimable')?.textContent.trim() || '';
+    const synergyBtn = panel.querySelector('.synergy-claim-btn[data-synergy="fire_thunder"]');
+    const masteryBtn = panel.querySelector('.mastery-claim-btn[data-tree="fire"][data-count="3"]');
+    const synergyCard = synergyBtn?.closest('.synergy-card');
+    const masteryCard = masteryBtn?.closest('.mastery-card');
+    const panelRect = panel.getBoundingClientRect();
+    const codexRect = codexPanel.getBoundingClientRect();
+    return {
+      menuHasClaim: btn.classList.contains('has-claim'),
+      menuClaimCount: btn.dataset.claimCount || '',
+      codexClaimable: codex.claimableCount,
+      headline: codex.headline,
+      claimGuide,
+      claimStat,
+      synergyText: synergyCard?.textContent.trim() || '',
+      masteryText: masteryCard?.textContent.trim() || '',
+      codexVisibleTop: codexRect.top,
+      codexVisibleBottom: codexRect.bottom,
+      panelBottom: panelRect.bottom,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (before.errors || before.fatal) throw new Error('console/fatal errors before claim: ' + JSON.stringify(before));
+  if (!before.menuHasClaim || before.menuClaimCount !== '2') throw new Error('skill menu badge missing claim count: ' + JSON.stringify(before));
+  if (before.codexClaimable !== 2 || !before.headline.includes('2 个流派奖励待领取')) throw new Error('codex should summarize two claimable rewards: ' + JSON.stringify(before));
+  if (!before.claimGuide.includes('雷火焚天') || !before.claimGuide.includes('火系功法专精初成')) throw new Error('codex claim guide should name claimable rewards: ' + JSON.stringify(before));
+  if (!before.synergyText.includes('雷火焚天') || !before.synergyText.includes('领取')) throw new Error('claimable synergy card/button missing: ' + JSON.stringify(before));
+  if (!before.masteryText.includes('火系功法专精初成') || !before.masteryText.includes('领取')) throw new Error('claimable mastery card/button missing: ' + JSON.stringify(before));
+  if (before.overflowX > 2) throw new Error('skills codex has horizontal overflow before claim: ' + JSON.stringify(before));
+
+  tapInFrame(frame, '.synergy-claim-btn[data-synergy="fire_thunder"]');
+  await waitFor(() => w.eval('claimedSkillSynergies && claimedSkillSynergies.fire_thunder'), 'synergy claimed');
+  tapInFrame(frame, '.mastery-claim-btn[data-tree="fire"][data-count="3"]');
+  await waitFor(() => w.eval('claimedSkillMasteries && claimedSkillMasteries.fire_3'), 'mastery claimed');
+  w.eval(`if (typeof updateHUD === 'function') updateHUD(player, dungeon?.level || 1);`);
+  const after = w.eval(`(() => {
+    const btn = document.querySelector('#btn-skills');
+    const codex = getSkillCodexSummary();
+    const claimedButtons = [...document.querySelectorAll('.synergy-claim-btn.claimed')].map(el => el.textContent.trim());
+    return {
+      menuHasClaim: btn.classList.contains('has-claim'),
+      menuClaimCount: btn.dataset.claimCount || '',
+      codexClaimable: codex.claimableCount,
+      claimedSynergy: !!claimedSkillSynergies.fire_thunder,
+      claimedMastery: !!claimedSkillMasteries.fire_3,
+      claimedButtons,
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (after.errors || after.fatal) throw new Error('console/fatal errors after claim: ' + JSON.stringify(after));
+  if (!after.claimedSynergy || !after.claimedMastery) throw new Error('claim buttons did not mutate claimed state: ' + JSON.stringify(after));
+  if (after.codexClaimable !== 0 || after.menuHasClaim || after.menuClaimCount) throw new Error('claim badge/codex should clear after rewards claimed: ' + JSON.stringify(after));
+  if (after.claimedButtons.length < 2 || !after.claimedButtons.every(t => t.includes('已领'))) throw new Error('claimed buttons should rerender to 已领: ' + JSON.stringify(after));
+  const payload = 'skill codex claim badge browser smoke passed ' + JSON.stringify({ before, after });
+  out(payload);
+  document.body.setAttribute('data-result', 'passed');
+  console.log(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+  out(err.stack || err.message || err);
+});
+</script>

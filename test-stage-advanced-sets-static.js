@@ -36,6 +36,6 @@ for (const [stageId, setId] of Object.entries(stageSetPairs)) {
   assert(block.includes(`setId: '${setId}'`), `${stageId} should drop ${setId}`);
 }
 assert(loot.includes('thunderAffinity'), 'advanced thunder set should use thunder affinity');
-assert(index.includes('20260530synergy7'), 'cache version not bumped');
+assert(index.includes('20260605combatp3'), 'cache version not bumped');
 
 console.log('stage advanced sets static ok');

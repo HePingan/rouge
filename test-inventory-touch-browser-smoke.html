@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>inventory touch browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+  const w = () => document.getElementById('game').contentWindow;
+  const d = () => w().document;
+  const click = el => {
+    assert(el, 'click target missing');
+    if (typeof el.click === 'function') el.click();
+    else el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:w() }));
+  };
+  const pointer = (el, type, x, y) => {
+    assert(el, `pointer target missing for ${type}`);
+    const Ctor = w().PointerEvent || PointerEvent;
+    el.dispatchEvent(new Ctor(type, { bubbles:true, cancelable:true, pointerType:'touch', pointerId:7, clientX:x, clientY:y }));
+  };
+  const tap = el => {
+    assert(el, 'tap target missing');
+    const r = el.getBoundingClientRect();
+    const x = r.left + Math.max(4, Math.min(18, r.width / 2));
+    const y = r.top + Math.max(4, Math.min(18, r.height / 2));
+    pointer(el, 'pointerdown', x, y);
+    pointer(el, 'pointerup', x, y);
+  };
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try { last = predicate(); if (last) return last; } catch (err) { last = err.message; }
+      await sleep(80);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  async function run() {
+    await waitFor(() => w().gameReady === true, 'gameReady');
+    w().__inventoryTouchSmokeErrors = [];
+    w().addEventListener('error', e => w().__inventoryTouchSmokeErrors.push(e.message || 'error'));
+    w().addEventListener('unhandledrejection', e => w().__inventoryTouchSmokeErrors.push(String(e.reason || 'unhandledrejection')));
+    w().eval(`
+      player.equipment = player.equipment || {};
+      player.equipment.armor = null;
+      player.inventory = [
+        { name:'触摸测试甲', slot:'armor', rarity:'稀有', rarityColor:'#ffdd44', stats:{ def:12, maxHp:24 }, floorLevel:6 },
+        { name:'滑动误触剑', slot:'weapon', rarity:'魔法', rarityColor:'#55aaff', stats:{ atk:7 }, floorLevel:2 }
+      ];
+      if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    await waitFor(() => typeof w().openPanel === 'function' && typeof w().renderInventoryDomPanel === 'function', 'inventory panel functions');
+    w().eval(`openPanel('inventory'); renderInventoryDomPanel('smoke');`);
+    await waitFor(() => d().body.classList.contains('inventory-open'), 'inventory open');
+    const firstCard = await waitFor(() => d().querySelector('#inventory-dom-panel .bag-item-card[data-index="0"]'), 'first bag card');
+    const rect = firstCard.getBoundingClientRect();
+    pointer(firstCard, 'pointerdown', rect.left + 18, rect.top + 18);
+    pointer(firstCard, 'pointermove', rect.left + 18, rect.top + 52);
+    pointer(firstCard, 'pointerup', rect.left + 18, rect.top + 52);
+    await sleep(120);
+    assert(!d().querySelector('#inventory-dom-panel .inv-detail-layer.show'), 'scroll-like touch on bag card should not open detail');
+    click(firstCard);
+    await waitFor(() => d().querySelector('#inventory-dom-panel .inv-detail-layer.show'), 'detail opens on click');
+    assert(d().querySelector('#inventory-dom-panel .item-detail')?.textContent.includes('触摸测试甲'), 'detail should show selected armor');
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-equip-action-index="0"]'), 'equip action'));
+    await waitFor(() => d().querySelector('#inventory-dom-panel [data-confirm-equip-index="0"]'), 'confirm equip');
+    click(d().querySelector('#inventory-dom-panel [data-confirm-equip-index="0"]'));
+    await waitFor(() => w().player.equipment?.armor?.name === '触摸测试甲', 'armor equipped');
+    const invNames = w().player.inventory.map(item => item && item.name).filter(Boolean);
+    assert(invNames.length === 1 && invNames[0] === '滑动误触剑', `confirm equip should fire once and remove exactly one item: ${JSON.stringify(invNames)}`);
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel .bag-item-card[data-index="0"]'), 'remaining card'));
+    await waitFor(() => d().querySelector('#inventory-dom-panel .inv-detail-layer.show'), 'remaining detail opens');
+    await sleep(520);
+    const closeBtn = await waitFor(() => d().querySelector('#inventory-dom-panel [data-detail-close]'), 'detail close button');
+    tap(closeBtn);
+    click(closeBtn);
+    const closeAttempted = true;
+    const metrics = {
+      errors: w().__inventoryTouchSmokeErrors.length,
+      equipped: w().player.equipment?.armor?.name || '',
+      inventoryCount: w().player.inventory.length,
+      detailClosed: !d().querySelector('#inventory-dom-panel .inv-detail-layer.show'),
+      overflowX: Math.max(0, d().documentElement.scrollWidth - d().documentElement.clientWidth),
+      fatal: w().fatalError || ''
+    };
+    assert(metrics.errors === 0, `console errors: ${w().__inventoryTouchSmokeErrors.join(';')}`);
+    assert(!metrics.fatal, `fatal error: ${metrics.fatal}`);
+    assert(metrics.overflowX === 0, `horizontal overflow: ${metrics.overflowX}`);
+    document.body.dataset.result = 'passed';
+    document.body.dataset.metrics = JSON.stringify(metrics);
+    resultEl.textContent = `inventory touch smoke passed ${JSON.stringify(metrics)}`;
+  }
+  run().catch(err => {
+    document.body.dataset.result = 'failed';
+    resultEl.textContent = err && err.stack ? err.stack : String(err);
+  });
+})();
+</script>

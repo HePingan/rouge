@@ -1,0 +1,121 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stage performance budget smoke</title>
+<style>
+  html, body { margin:0; background:#101018; color:#eee; font:12px sans-serif; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+<script>
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (_) {}
+    await wait(80);
+  }
+  throw new Error('timeout waiting for ' + label);
+}
+function safePostMetrics(metrics) {
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    try { navigator.sendBeacon('/__stage_perf_metrics', JSON.stringify(metrics)); } catch (_) {}
+  }
+  try {
+    fetch('/__stage_perf_metrics', {
+      method: 'POST',
+      body: JSON.stringify(metrics),
+      keepalive: true,
+      headers: { 'content-type': 'application/json' }
+    }).catch(() => {});
+  } catch (_) {}
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  if (frame.contentWindow.__errors && frame.contentWindow.__errors.length) throw new Error('load errors before perf: ' + JSON.stringify(frame.contentWindow.__errors));
+  const w = frame.contentWindow;
+  await wait(300);
+  const metrics = await w.eval(`(() => {
+    window.__perfStartMarker = true;
+    closeAllPanels();
+    if (typeof combatState !== 'undefined') combatState = COMBAT_STATE.NONE;
+    if (!player.stageProgress) player.stageProgress = {};
+    const firstStageId = Object.keys(STAGES || {})[0] || 'qingyun_foot';
+    player.stageProgress.currentRun = { stageId: firstStageId, roomIndex: 0, turns: 0 };
+    isInStageRun = true;
+    syncBodyPanelState();
+    if (typeof generateNewFloor === 'function') generateNewFloor();
+    updateMapVisibilityIfNeeded(true);
+    const counters = { innerHTML: 0, textContent: 0, styleTransform: 0 };
+    const innerDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    const textDesc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+    const transformDesc = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'transform');
+    Object.defineProperty(Element.prototype, 'innerHTML', {
+      get: innerDesc.get,
+      set(v) { counters.innerHTML++; return innerDesc.set.call(this, v); },
+      configurable: true
+    });
+    Object.defineProperty(Node.prototype, 'textContent', {
+      get: textDesc.get,
+      set(v) { counters.textContent++; return textDesc.set.call(this, v); },
+      configurable: true
+    });
+    if (transformDesc && transformDesc.set && transformDesc.get) {
+      Object.defineProperty(CSSStyleDeclaration.prototype, 'transform', {
+        get: transformDesc.get,
+        set(v) { counters.styleTransform++; return transformDesc.set.call(this, v); },
+        configurable: true
+      });
+    }
+    const start = performance.now();
+    const startPos = { x: player.x, y: player.y };
+    joystick.active = true; joystick.dx = 1; joystick.dy = 0.08; joystick.distance = 1;
+    const frameCosts = [];
+    let i = 0;
+    return new Promise(resolve => {
+      function step() {
+        currentFrameDt = i === 60 ? 0.2 : 1 / 60;
+        const f0 = performance.now();
+        handleInput();
+        if (!isInCombat()) checkCombatTrigger();
+        updateCamera();
+        tickMessages();
+        drawDungeon();
+        drawParticlesDom(camera);
+        if (i % 4 === 0) { renderMessageLog(); updateHUD(player, dungeonLevel); }
+        frameCosts.push(performance.now() - f0);
+        i++;
+        if (i < 180) {
+          setTimeout(step, 0);
+          return;
+        }
+        if (typeof window.__resetMovementTouchInput === 'function') window.__resetMovementTouchInput('perf-smoke');
+        const totalMs = performance.now() - start;
+        const sorted = frameCosts.slice().sort((a, b) => a - b);
+        const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+        const avg = frameCosts.reduce((s, n) => s + n, 0) / frameCosts.length;
+        Object.defineProperty(Element.prototype, 'innerHTML', innerDesc);
+        Object.defineProperty(Node.prototype, 'textContent', textDesc);
+        if (transformDesc && transformDesc.set && transformDesc.get) Object.defineProperty(CSSStyleDeclaration.prototype, 'transform', transformDesc);
+        resolve({
+          totalMs: Number(totalMs.toFixed(2)),
+          avgFrameMs: Number(avg.toFixed(3)),
+          p95FrameMs: Number(p95.toFixed(3)),
+          movedX: Number((player.x - startPos.x).toFixed(3)),
+          counters,
+          mapChildren: document.getElementById('map-layer')?.querySelectorAll('*').length || 0,
+          errors: (window.__errors || []).length
+        });
+      }
+      step();
+    });
+  })()`);
+  if (metrics.errors) throw new Error('iframe errors: ' + JSON.stringify(metrics));
+  if (metrics.movedX <= 0) throw new Error('stage movement did not move: ' + JSON.stringify(metrics));
+  document.body.setAttribute('data-result', 'stage performance budget smoke passed');
+  document.body.setAttribute('data-metrics', JSON.stringify(metrics));
+  safePostMetrics(metrics);
+  console.log('stage performance budget smoke passed ' + JSON.stringify(metrics));
+  setTimeout(() => window.close(), 50);
+})();
+</script>

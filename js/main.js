@@ -14,8 +14,15 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
      let mapRenderCache = {
        floorKey: '', boundsKey: '', visibilityKey: '', entityKey: '', hintKey: '', miniKey: '',
        lastPx: NaN, lastPy: NaN, tilesEl: null, entitiesEl: null, hintsEl: null, miniEl: null, playerEl: null,
-       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: ''
+       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: '',
+       layerCellSize: NaN, layerW: '', layerH: '', layerTransform: '',
+       hintTileKey: '', hintVisibilityKey: '', miniTileKey: '', miniVisibilityKey: '',
+       playerTransform: '', hiddenMiniMap: false
      };
+     let runBodyClassCache = { combat: null, stage: null, secret: null };
+     let lastInteractionTileKey = '';
+     const MAP_HINT_UPDATE_INTERVAL = 8;
+     const MAP_MINIMAP_UPDATE_INTERVAL = 12;
      const MAP_VISION_RADIUS = 8;
      const MAP_MEMORY_RADIUS = 11;
      // Character panel state. Must be declared before gameLoop/openPanel reads it;
@@ -24,12 +31,14 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
      let characterPanelTouchState = null;
      let characterPanelLastHtml = '';
      let characterEquipmentDetailSlot = null;
+     let characterEquipmentSlotHint = null;
      let characterTab = 'attributes';
     let showArtifactUI = false;
     let selectedArtifactId = null;
     let inventoryBulkRarity = '普通';
     let inventoryBulkMode = 'sell';
     let inventorySortMode = 'power';
+    let inventorySlotFilter = '';
     let inventoryListHtmlCacheKeyDom = '';
     let inventoryListHtmlCacheDom = '';
     let inventoryMaterialHtmlCacheKeyDom = '';
@@ -47,6 +56,8 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     let showAscensionUI = false;
     let ascensionTab = 'overview';
     let selectedAscensionLawId = 'sword';
+    let ascensionDelegatedTouchUntil = 0;
+    let tribulationDelegatedTouchUntil = 0;
     let selectedTribulationId = 'minor';
     let inventoryTab = 'equipment';
     let inventoryBulkConfirm = null;
@@ -82,7 +93,23 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
       updatePanelFlagsFromStack();
     }
     let combatSkillDrawerOpen = false;
+    let combatDomRenderCacheKey = '';
+    let combatDelegatedTouchUntil = 0;
+    let combatActionFeedback = { id: '', until: 0 };
+    function markCombatActionFeedback(id, skillIndex = null) {
+      if (!id) return;
+      combatActionFeedback = { id: String(id), skillIndex, until: Date.now() + 260 };
+      const panel = typeof document !== 'undefined' ? document.getElementById('combat-dom-panel') : null;
+      if (panel) {
+        panel.classList.remove('feedback-attack', 'feedback-defend', 'feedback-skill', 'feedback-flee', 'feedback-toggle', 'feedback-mp');
+        panel.classList.add(`feedback-${cssClassToken(id)}`);
+        window.setTimeout(() => panel.classList.remove(`feedback-${cssClassToken(id)}`), 280);
+      }
+    }
     let skillsLastTouchActionAt = 0;
+    let skillPanelTapState = null;
+    let skillPanelSuppressClickUntil = 0;
+    let skillDetailCloseSwallowUntil = 0;
     let selectedDaoFoundation = 'sword';
     let inventoryLastTouchActionAt = 0;
     const INVENTORY_TAP_MOVE_THRESHOLD = 12;
@@ -276,7 +303,7 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
      window.player = player;
      window.dungeon = dungeon;
      window.gameReady = true;
-     setInterval(gameLoop, 1000 / 30);  // 30 FPS
+     startGameLoop();
    }
    function resizeCanvas() {
      canvasW = window.innerWidth;
@@ -305,9 +332,12 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
   function syncBodyPanelState() {
     if (typeof document === 'undefined') return;
     const open = isAnyPanelOpen();
+    runBodyClassCache.combat = isInCombat();
+    runBodyClassCache.stage = !!isInStageRun;
+    runBodyClassCache.secret = !!isInSecretRealm;
     document.body.classList.toggle('panel-open', open);
-    document.body.classList.toggle('stage-run-active', !!isInStageRun);
-    document.body.classList.toggle('secret-realm-run-active', !!isInSecretRealm);
+    document.body.classList.toggle('stage-run-active', runBodyClassCache.stage);
+    document.body.classList.toggle('secret-realm-run-active', runBodyClassCache.secret);
     /* Only the top panel in the stack is visually shown.
        Previously all open-panel flags were toggled, which made stacked
        panels overlap at the same z-index. Now we derive the top type
@@ -386,8 +416,40 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     joystick.dx = 0;
     joystick.dy = 0;
     joystick.distance = 0;
-    const thumb = document.getElementById('joystick-thumb');
+    if (typeof window !== 'undefined' && typeof window.__resetMovementTouchInput === 'function') {
+      window.__resetMovementTouchInput('external-clear');
+    }
+    const thumb = typeof document !== 'undefined' ? document.getElementById('joystick-thumb') : null;
     if (thumb) thumb.style.transform = 'translate(-50%, -50%)';
+  }
+  function hasVisibleBlockingPanel() {
+    if (typeof document === 'undefined') return false;
+    const panelIds = [
+      'inventory-dom-panel',
+      'character-dom-panel',
+      'skills-dom-panel',
+      'artifact-dom-panel',
+      'alchemy-dom-panel',
+      'breakthrough-dom-panel',
+      'secret-realm-dom-panel',
+      'stage-dom-panel',
+      'tribulation-dom-panel',
+      'ascension-dom-panel',
+    ];
+    return panelIds.some(id => {
+      const el = document.getElementById(id);
+      if (!el) return false;
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none' || Number(style.opacity) === 0) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 2 && rect.height > 2;
+    });
+  }
+  function isMovementBlockedByUi() {
+    if (isInCombat() || combatState === COMBAT_STATE.DEFEAT) return true;
+    if (hasVisibleBlockingPanel()) return true;
+    if (!isInStageRun && !isInSecretRealm && isAnyPanelOpen()) return true;
+    return false;
   }
   function closeBreakthroughPanel() {
     popPanelFromStack('breakthrough');
@@ -484,13 +546,13 @@ function escapeHtml(value) {
     ].join('|');
   }
   function inventoryItemsVersionDom() {
-    return `${inventorySortMode}:${(player?.inventory || []).map(inventoryItemStableKeyDom).join('~')}`;
+    return `${inventorySortMode}:${inventorySlotFilter || 'all'}:${(player?.inventory || []).map(inventoryItemStableKeyDom).join('~')}`;
   }
   function sortedInventoryEntriesDom() {
     return (player?.inventory || []).map((item, index) => {
       if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
       return { item, index, power: itemPowerDom(item), rarityRank: rarityRankDom(item?.rarity), floor: Number(item?.floorLevel) || 0 };
-    }).sort((a, b) => {
+    }).filter(entry => !inventorySlotFilter || entry.item?.slot === inventorySlotFilter).sort((a, b) => {
       if (inventorySortMode === 'rarity') {
         const rarityDiff = b.rarityRank - a.rarityRank;
         if (rarityDiff) return rarityDiff;
@@ -510,11 +572,12 @@ function escapeHtml(value) {
     const key = `${inventoryItemsVersionDom()}:${inventoryDetailTarget?.type || ''}:${inventoryDetailTarget?.index ?? ''}`;
     if (key === inventoryListHtmlCacheKeyDom) return inventoryListHtmlCacheDom;
     inventoryListHtmlCacheKeyDom = key;
-    inventoryListHtmlCacheDom = sortedInventoryEntriesDom().map(({ item, index }) => {
+    const rows = sortedInventoryEntriesDom();
+    inventoryListHtmlCacheDom = rows.length ? rows.map(({ item, index }) => {
       const targetIndex = Number(inventoryDetailTarget?.index);
       const active = (inventoryDetailTarget?.type === 'bag' || inventoryDetailTarget?.type === 'compare') && targetIndex === index;
       return drawBagItemCardDom(item, index, active);
-    }).join('');
+    }).join('') : `<div class="empty-note">${escapeHtml(inventorySlotFilter ? `暂无${SLOT_NAMES?.[inventorySlotFilter]?.name || inventorySlotFilter}装备` : '暂无装备，击败怪物可掉落')}</div>`;
     return inventoryListHtmlCacheDom;
   }
   function invalidateInventoryListCacheDom() {
@@ -901,6 +964,45 @@ function escapeHtml(value) {
       </div>
     </div>`;
   }
+  function itemDetailSummaryHtmlDom(item, detail = {}) {
+    if (!item) return '';
+    const level = equipmentEnhanceLevelDom(item);
+    const maxLevel = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
+    const set = item.setId && typeof getEquipmentSet === 'function' ? getEquipmentSet(item.setId) : null;
+    const setText = item.setId ? `${set?.icon || '◇'} ${set?.name || item.setName || '套装'}` : '无套装';
+    const typeText = detail.label || SLOT_NAMES?.[item.slot]?.name || item.slot || '装备';
+    const chips = [
+      { label: '战力', value: String(itemPowerDom(item)) },
+      { label: '强化', value: `+${level}/${maxLevel}` },
+      { label: '部位', value: typeText },
+      { label: '套装', value: setText },
+    ];
+    return `<div class="detail-summary-row">${chips.map(chip => `<span><b>${escapeHtml(chip.value)}</b><em>${escapeHtml(chip.label)}</em></span>`).join('')}</div>`;
+  }
+  function itemGroupedStatsHtmlDom(item) {
+    const stats = item?.stats || {};
+    const groups = [
+      { title: '核心', keys: ['atk','def','maxHp','hp','maxMp','mp','speed'] },
+      { title: '战斗', keys: ['crit','critRate','dodge','dodgeRate','lifesteal','armorPen'] },
+      { title: '元素', keys: ['fireDmg','iceDmg','poisonDmg','lightningDmg','allRes'] },
+      { title: '成长', keys: ['goldFind','xpBonus','hpRegen','mpRegen'] },
+    ];
+    const seen = new Set();
+    const renderChip = (key) => {
+      const value = Number(stats[key] || 0);
+      if (!value) return '';
+      seen.add(key);
+      const [label, suffix] = getCharacterStatMeta(key);
+      return `<span class="stat-chip"><em>${escapeHtml(label)}</em><b>${formatCharStatValue(value, suffix)}</b></span>`;
+    };
+    const sections = groups.map(group => {
+      const chips = group.keys.map(renderChip).filter(Boolean).join('');
+      return chips ? `<div class="detail-stat-group"><h4>${escapeHtml(group.title)}</h4><div>${chips}</div></div>` : '';
+    }).filter(Boolean);
+    const extra = Object.keys(stats).filter(key => !seen.has(key) && Number(stats[key] || 0)).map(renderChip).filter(Boolean).join('');
+    if (extra) sections.push(`<div class="detail-stat-group"><h4>其他</h4><div>${extra}</div></div>`);
+    return sections.length ? `<div class="detail-stats grouped">${sections.join('')}</div>` : `<div class="detail-stats">${itemStatsHtmlDom(item)}</div>`;
+  }
   function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上') {
     if (!detail?.item) return `<div class="item-detail empty">${escapeHtml(emptyText)}</div>`;
     if (detail.type === 'compare') return itemCompareHtmlDom(detail);
@@ -927,7 +1029,8 @@ function escapeHtml(value) {
           <div class="detail-meta">${escapeHtml(typeText)} · ${escapeHtml(item.rarity || '未知')} · 强化 +${level} · 战力 ${itemPowerDom(item)}</div>
         </div>
       </div>
-      <div class="detail-stats">${itemStatsHtmlDom(item)}</div>
+      ${itemDetailSummaryHtmlDom(item, detail)}
+      ${itemGroupedStatsHtmlDom(item)}
       ${itemEnhanceHtmlDom(item)}
       ${itemAffixesHtmlDom(item)}
       ${itemSetHtmlDom(item)}
@@ -1009,6 +1112,11 @@ function escapeHtml(value) {
       renderCharacterDomPanel();
     }
   }
+  function closeInventoryDetailDom() {
+    inventoryDetailTarget = null;
+    renderInventoryDomPanel();
+    return true;
+  }
   function bindInventoryDetailActionsDom(root, detailWrap, getDetail = () => inventoryDetailItemDom(), rerender = () => renderInventoryDomPanel(), clearDetail = () => { inventoryDetailTarget = null; }) {
     if (!detailWrap) return;
     detailWrap.querySelectorAll('[data-detail-close]').forEach(btn => {
@@ -1056,7 +1164,7 @@ function escapeHtml(value) {
         <div class="inv-tabs" role="tablist"><button class="inv-tab" type="button" data-inv-tab="equipment">装备</button><button class="inv-tab" type="button" data-inv-tab="materials">材料</button><button class="inv-tab" type="button" data-inv-tab="process">处理</button></div>
       </div>
       <div class="inv-body">
-        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="bag-toolbar"><div class="section-title bag-title">装备库存 0/36</div><div class="bag-sort-toggle" role="group" aria-label="装备排序"><button class="bag-sort-btn" type="button" data-bag-sort="power">战力</button><button class="bag-sort-btn" type="button" data-bag-sort="rarity">品质</button></div></div><div class="bag-list"></div></section>
+        <section class="inv-section bag-section" data-tab-panel="equipment"><div class="bag-toolbar"><div class="section-title bag-title">装备库存 0/36</div><div class="bag-sort-toggle" role="group" aria-label="装备排序"><button class="bag-sort-btn" type="button" data-bag-sort="power">战力</button><button class="bag-sort-btn" type="button" data-bag-sort="rarity">品质</button></div></div><div class="bag-slot-filter"></div><div class="bag-list"></div></section>
         <section class="inv-section material-section" data-tab-panel="materials"><div class="section-title">材料库存</div><div class="material-list"></div></section>
         <section class="inv-section process-section" data-tab-panel="process"><div class="section-title">处理 · 售卖/分解</div><div class="bulk-panel"><div class="bulk-tabs"><button class="bulk-tab sell" type="button" data-bulk-mode="sell">💰 售卖</button><button class="bulk-tab decompose" type="button" data-bulk-mode="decompose">🔧 分解</button></div><div class="bulk-quality-row"><span>品质</span><div class="bulk-rarity-chips"></div></div><select class="bulk-rarity" aria-label="选择品质"></select><div class="bulk-summary"></div></div></section>
       </div>
@@ -1064,9 +1172,23 @@ function escapeHtml(value) {
       <div class="inv-hint">背包只管理库存；穿上装备后到「角色」页查看属性、套装与战力</div>`;
     const container = document.getElementById('game-container') || document.body;
     container.appendChild(panel);
-    const close = () => { popPanelFromStack('inventory'); syncBodyPanelState(); };
-    panel.querySelector('.inv-close').addEventListener('click', e => { if (shouldIgnoreInventorySyntheticClickDom()) return; close(); });
-    panel.querySelector('.inv-close').addEventListener('touchstart', e => { markInventoryTouchActionDom(); e.preventDefault(); e.stopPropagation(); close(); }, { passive: false });
+    const close = (e = null) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      markInventoryTouchActionDom();
+      popPanelFromStack('inventory');
+      syncBodyPanelState();
+    };
+    const closeFallback = e => {
+      if (!e.target.closest('.inv-close')) return;
+      if (e.type === 'click' && shouldIgnoreInventorySyntheticClickDom()) return;
+      close(e);
+    };
+    panel.addEventListener('pointerdown', closeFallback, { passive: false, capture: true });
+    panel.addEventListener('touchstart', closeFallback, { passive: false, capture: true });
+    panel.addEventListener('click', closeFallback, { capture: true });
     panel.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     panel.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
     panel.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
@@ -1077,12 +1199,22 @@ function escapeHtml(value) {
         if (e.target !== detailLayer && !e.target.closest('[data-detail-close]')) return;
         e.preventDefault();
         e.stopPropagation();
-        inventoryDetailTarget = null;
-        renderInventoryDomPanel();
+        closeInventoryDetailDom();
       };
       detailLayer.addEventListener('click', closeDetail);
       detailLayer.addEventListener('touchstart', closeDetail, { passive: false });
       detailLayer.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+      const closeDetailButtonFallback = e => {
+        if (!e.target.closest('[data-detail-close]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        markInventoryTouchActionDom();
+        closeInventoryDetailDom();
+      };
+      detailLayer.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') closeDetailButtonFallback(e); }, { passive: false, capture: true });
+      detailLayer.addEventListener('click', closeDetailButtonFallback, { capture: true });
+      panel.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') closeDetailButtonFallback(e); }, { passive: false, capture: true });
+      panel.addEventListener('click', closeDetailButtonFallback, { capture: true });
     }
     if (detailCard) {
       detailCard.addEventListener('click', e => e.stopPropagation());
@@ -1134,6 +1266,7 @@ function escapeHtml(value) {
     const target = e.target;
     const closest = sel => target.closest(sel);
     if (closest('[data-inv-tab]')) { e.preventDefault(); e.stopPropagation(); inventoryTab = closest('[data-inv-tab]').dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
+    if (closest('[data-clear-slot-filter]')) { e.preventDefault(); e.stopPropagation(); inventorySlotFilter = ''; inventoryDetailTarget = null; invalidateInventoryListCacheDom(); renderInventoryDomPanel(); return; }
     if (closest('[data-bag-sort]')) { e.preventDefault(); e.stopPropagation(); const mode = closest('[data-bag-sort]').dataset.bagSort || 'power'; if (inventorySortMode === mode) return; inventorySortMode = mode; inventoryDetailTarget = null; scheduleInventoryRenderDom('sort'); return; }
     if (closest('[data-bulk-rarity-chip]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkRarity = closest('[data-bulk-rarity-chip]').dataset.bulkRarityChip || inventoryBulkRarity; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
     if (closest('[data-bulk-mode]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkMode = closest('[data-bulk-mode]').dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
@@ -1153,6 +1286,12 @@ function escapeHtml(value) {
     const inventoryCapacity = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
     const nextCapacityUnlock = typeof getNextInventoryCapacityUnlock === 'function' ? getNextInventoryCapacityUnlock(player) : null;
     panel.querySelector('.bag-title').innerHTML = `装备库存 <span class="cap-num">${player.inventory.length}</span>/<span class="cap-max">${inventoryCapacity}</span><span class="cap-bar"><span class="cap-fill${player.inventory.length >= inventoryCapacity ? ' full' : ''}" style="width:${Math.min(100, (player.inventory.length / inventoryCapacity) * 100).toFixed(1)}%"></span></span>`;
+    const filterWrap = panel.querySelector('.bag-slot-filter');
+    if (filterWrap) {
+      const filterName = inventorySlotFilter ? (SLOT_NAMES?.[inventorySlotFilter]?.name || inventorySlotFilter) : '';
+      filterWrap.innerHTML = inventorySlotFilter ? `<span>筛选：${escapeHtml(filterName)}</span><button type="button" data-clear-slot-filter="1" aria-label="清除${escapeHtml(filterName)}筛选" title="清除筛选，显示全部装备">全部装备</button>` : '';
+      filterWrap.classList.toggle('active', !!inventorySlotFilter);
+    }
     const invSub = panel.querySelector('.inv-sub');
     if (invSub) {
       invSub.textContent = nextCapacityUnlock
@@ -1230,7 +1369,9 @@ function escapeHtml(value) {
     characterPanelLastHtml = '';
     characterPanelTouchState = null;
     characterEquipmentDetailSlot = null;
+    characterEquipmentSlotHint = null;
     inventoryDetailTarget = null;
+    inventorySlotFilter = '';
     inventoryBulkConfirm = null;
     inventoryDetailScrollKey = '';
     invalidateInventoryListCacheDom();
@@ -1459,7 +1600,27 @@ function escapeHtml(value) {
    
    // Joystick state
    let joystick = { active: false, dx: 0, dy: 0, distance: 0 };
-   let playerSpeed = 6.6;
+   let playerSpeed = 5.2;
+   let lastFrameTime = 0;
+   let gameLoopStarted = false;
+   let currentFrameDt = 1 / 60;
+   const MAX_MOVEMENT_DT = 1 / 30;
+   const TARGET_FRAME_DT = 1 / 60;
+   function startGameLoop() {
+     if (gameLoopStarted) return;
+     gameLoopStarted = true;
+     lastFrameTime = 0;
+     const tick = timestamp => {
+       if (!lastFrameTime) lastFrameTime = timestamp;
+       const rawDt = Math.max(0, (timestamp - lastFrameTime) / 1000);
+       lastFrameTime = timestamp;
+       currentFrameDt = Math.min(MAX_MOVEMENT_DT, rawDt || TARGET_FRAME_DT);
+       gameLoop();
+       requestAnimationFrame(tick);
+     };
+     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tick);
+     else setInterval(() => { currentFrameDt = MAX_MOVEMENT_DT; gameLoop(); }, 1000 / 30);
+   }
    function setupTouchControls() {
      // ─── Full-screen floating joystick ───
      const touchControls = document.getElementById('touch-controls');
@@ -1467,26 +1628,53 @@ function escapeHtml(value) {
      const joystickBase = document.getElementById('joystick-base');
      const joystickThumb = document.getElementById('joystick-thumb');
      if (!touchControls || !joystickZone || !joystickBase || !joystickThumb) return;
-     let jsTouchId = null;
-     let joystickOrigin = null;
-     const resetJoystickVisual = () => {
-       joystick.active = false;
-       joystick.dx = 0;
-       joystick.dy = 0;
-       joystick.distance = 0;
-       joystickOrigin = null;
-       joystickZone.classList.remove('active');
-       joystickZone.style.left = '';
-       joystickZone.style.top = '';
-       joystickZone.style.bottom = '';
-       joystickZone.style.right = '';
-       joystickThumb.style.transform = 'translate(-50%, -50%)';
-     };
-     function canStartMovement(e) {
-       if (isInCombat() || isAnyPanelOpen()) return false;
-       if (e.target.closest('#menu-bar, #more-menu, #action-buttons, button, .menu-btn, .more-menu-btn, .act-btn, input, select, textarea, a')) return false;
-       return true;
-     }
+    let jsTouchId = null;
+    let jsPointerMode = null;
+    let joystickOrigin = null;
+    let lastJoystickMoveAt = 0;
+    const joystickMetrics = {
+      zoneW: 96,
+      zoneH: 96,
+      baseSize: 86,
+      maxR: 31,
+    };
+    function refreshJoystickMetrics() {
+      joystickMetrics.zoneW = joystickZone.offsetWidth || 96;
+      joystickMetrics.zoneH = joystickZone.offsetHeight || 96;
+      joystickMetrics.baseSize = joystickBase.offsetWidth || 86;
+      joystickMetrics.maxR = Math.max(18, joystickMetrics.baseSize / 2 - 12);
+    }
+    refreshJoystickMetrics();
+    const resetJoystickVisual = () => {
+      joystick.active = false;
+      joystick.dx = 0;
+      joystick.dy = 0;
+      joystick.distance = 0;
+      joystickOrigin = null;
+      jsTouchId = null;
+      jsPointerMode = null;
+      lastJoystickMoveAt = 0;
+      joystickZone.classList.remove('active');
+      joystickZone.style.left = '';
+      joystickZone.style.top = '';
+      joystickZone.style.bottom = '';
+      joystickZone.style.right = '';
+      joystickThumb.style.transform = 'translate(-50%, -50%)';
+    };
+    if (typeof window !== 'undefined') {
+      window.__resetMovementTouchInput = () => resetJoystickVisual();
+      window.addEventListener('blur', resetJoystickVisual);
+      window.addEventListener('resize', refreshJoystickMetrics);
+      window.addEventListener('orientationchange', refreshJoystickMetrics);
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) resetJoystickVisual();
+      });
+    }
+    function canStartMovement(e) {
+      if (isMovementBlockedByUi()) return false;
+      if (e.target.closest('#menu-bar, #more-menu, #action-buttons, button, .menu-btn, .more-menu-btn, .act-btn, input, select, textarea, a')) return false;
+      return true;
+    }
      function pointFromEvent(e, wantedId = jsTouchId) {
        const list = e.changedTouches || e.touches;
        if (list && list.length) {
@@ -1499,8 +1687,8 @@ function escapeHtml(value) {
        return e;
      }
      function placeJoystickAt(touch) {
-       const zoneW = joystickZone.offsetWidth || 96;
-       const zoneH = joystickZone.offsetHeight || 96;
+       const zoneW = joystickMetrics.zoneW;
+       const zoneH = joystickMetrics.zoneH;
        const margin = 8;
        const x = Math.max(margin + zoneW / 2, Math.min(window.innerWidth - margin - zoneW / 2, touch.clientX));
        const y = Math.max(margin + zoneH / 2, Math.min(window.innerHeight - margin - zoneH / 2, touch.clientY));
@@ -1513,11 +1701,10 @@ function escapeHtml(value) {
      }
      function updateJoystickPos(touch) {
        if (!joystickOrigin) placeJoystickAt(touch);
-       const rect = joystickBase.getBoundingClientRect();
-       const maxR = Math.max(18, Math.min(rect.width, rect.height) / 2 - 12);
-       let dx = touch.clientX - joystickOrigin.x;
-       let dy = touch.clientY - joystickOrigin.y;
-       let dist = Math.sqrt(dx * dx + dy * dy);
+      const maxR = joystickMetrics.maxR;
+      let dx = touch.clientX - joystickOrigin.x;
+      let dy = touch.clientY - joystickOrigin.y;
+      let dist = Math.sqrt(dx * dx + dy * dy);
        if (dist > maxR) {
          dx = (dx / dist) * maxR;
          dy = (dy / dist) * maxR;
@@ -1534,58 +1721,74 @@ function escapeHtml(value) {
          joystickThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
        }
      }
-     touchControls.addEventListener('touchstart', e => {
-       if (jsTouchId !== null || !canStartMovement(e)) return;
-       const t = e.changedTouches[0];
-       jsTouchId = t.identifier;
-       joystick.active = true;
-       placeJoystickAt(t);
-       updateJoystickPos(t);
-       e.preventDefault();
-     }, { passive: false });
-     touchControls.addEventListener('touchmove', e => {
-       if (jsTouchId === null) return;
-       const t = pointFromEvent(e);
-       if (t) updateJoystickPos(t);
-       e.preventDefault();
-     }, { passive: false });
-     touchControls.addEventListener('touchend', e => {
-       const t = pointFromEvent(e);
-       if (!t) return;
-       if (t.identifier === jsTouchId) {
-         jsTouchId = null;
-         resetJoystickVisual();
-       }
-     }, { passive: true });
-     touchControls.addEventListener('touchcancel', () => {
-       jsTouchId = null;
-       resetJoystickVisual();
-     }, { passive: true });
-     touchControls.addEventListener('pointerdown', e => {
-       if (e.pointerType === 'mouse' || jsTouchId !== null || !canStartMovement(e)) return;
-       jsTouchId = 'pointer';
-       joystick.active = true;
-       placeJoystickAt(e);
-       updateJoystickPos(e);
-       e.preventDefault();
-     });
-     touchControls.addEventListener('pointermove', e => {
-       if (jsTouchId !== 'pointer') return;
-       updateJoystickPos(e);
-       e.preventDefault();
-     });
-     touchControls.addEventListener('pointerup', () => {
-       if (jsTouchId === 'pointer') {
-         jsTouchId = null;
-         resetJoystickVisual();
-       }
-     });
-     touchControls.addEventListener('pointercancel', () => {
-       if (jsTouchId === 'pointer') {
-         jsTouchId = null;
-         resetJoystickVisual();
-       }
-     });
+    touchControls.addEventListener('touchstart', e => {
+      if (jsPointerMode === 'pointer') return;
+      if (jsTouchId !== null || !canStartMovement(e)) return;
+      const t = e.changedTouches[0];
+      jsPointerMode = 'touch';
+      jsTouchId = t.identifier;
+      joystick.active = true;
+      lastJoystickMoveAt = performance.now();
+      refreshJoystickMetrics();
+      placeJoystickAt(t);
+      updateJoystickPos(t);
+      e.preventDefault();
+    }, { passive: false });
+    touchControls.addEventListener('touchmove', e => {
+      if (jsPointerMode !== 'touch' || jsTouchId === null) return;
+      const t = pointFromEvent(e);
+      if (t) {
+        lastJoystickMoveAt = performance.now();
+        updateJoystickPos(t);
+      }
+      e.preventDefault();
+    }, { passive: false });
+    touchControls.addEventListener('touchend', e => {
+      if (jsPointerMode !== 'touch') return;
+      const t = pointFromEvent(e);
+      if (!t) return;
+      if (t.identifier === jsTouchId) resetJoystickVisual();
+    }, { passive: true });
+    touchControls.addEventListener('touchcancel', e => {
+      if (jsPointerMode === 'touch') resetJoystickVisual();
+    }, { passive: true });
+    touchControls.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' || jsTouchId !== null || !canStartMovement(e)) return;
+      jsPointerMode = 'pointer';
+      jsTouchId = e.pointerId;
+      joystick.active = true;
+      lastJoystickMoveAt = performance.now();
+      refreshJoystickMetrics();
+      placeJoystickAt(e);
+      updateJoystickPos(e);
+      if (typeof touchControls.setPointerCapture === 'function' && e.pointerId != null) {
+        try { touchControls.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+      e.preventDefault();
+    }, { passive: false });
+    touchControls.addEventListener('pointermove', e => {
+      if (jsPointerMode !== 'pointer' || e.pointerId !== jsTouchId) return;
+      lastJoystickMoveAt = performance.now();
+      updateJoystickPos(e);
+      e.preventDefault();
+    }, { passive: false });
+    touchControls.addEventListener('pointerup', e => {
+      if (jsPointerMode === 'pointer' && e.pointerId === jsTouchId) resetJoystickVisual();
+    }, { passive: true });
+    touchControls.addEventListener('pointercancel', e => {
+      if (jsPointerMode === 'pointer' && e.pointerId === jsTouchId) resetJoystickVisual();
+    }, { passive: true });
+    touchControls.addEventListener('lostpointercapture', e => {
+      // Some mobile browsers fire lostpointercapture immediately after touchstart
+      // during scrolling/overlay changes even though pointermove events still arrive
+      // on the full-screen touch plane. Do not clear the active joystick here;
+      // pointerup/pointercancel/blur/visibilitychange remain the authoritative reset paths.
+    }, { passive: true });
+    setInterval(() => {
+      if (!joystick.active || jsTouchId === null) return;
+      if (isMovementBlockedByUi()) { resetJoystickVisual(); return; }
+      if (performance.now() - lastJoystickMoveAt > 4500) resetJoystickVisual();
+    }, 1000);
      // Action buttons
      document.getElementById('btn-attack').addEventListener('touchstart', e => {
        e.preventDefault();
@@ -1698,7 +1901,20 @@ function escapeHtml(value) {
     function onBag() { closeMoreMenu(); openPanel('inventory'); }
     function onCharacter() { closeMoreMenu(); openPanel('character'); }
     function onSkills() { closeMoreMenu(); openPanel('skills'); }
-    function onStages() { closeMoreMenu(); openPanel('stages'); }
+    function onStages() {
+      closeMoreMenu();
+      if (isInStageRun && !isInCombat()) {
+        popPanelFromStack('stages');
+        showStageSelectUI = false;
+        showStageClearPanel = false;
+        const sp = document.getElementById('stage-dom-panel');
+        if (sp) sp.style.display = 'none';
+        syncBodyPanelState();
+        showMessage('已在副本中，点击右下“离开”可退出当前副本。', '#ffdd66');
+        return;
+      }
+      openPanel('stages');
+    }
     function onArtifact() { closeMoreMenu(); openPanel('artifact'); }
     function onAlchemy() { closeMoreMenu(); openPanel('alchemy'); }
     function onBreakthrough() { closeMoreMenu(); openPanel('breakthrough'); }
@@ -1918,7 +2134,8 @@ function spawnStageMonsters(dungeonObj, stage, roomIndex = 0) {
     const bx = Math.floor(room.x + room.w / 2), by = Math.floor(room.y + room.h / 2);
     const base = pickStageMonsterTemplate(stage, roomIndex) || MONSTERS[0];
     const bossDef = stage.boss;
-    const boss = createScaledEnemy({ ...base, name: bossDef.name, title: bossDef.name, symbol: bossDef.symbol || '首', color: bossDef.color || stage.color, isBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null, skillIds: bossDef.skillIds || ['bossEnrage'], hp: Math.floor((base.hp || 40) * (bossDef.hpMult || 1.8)), atk: Math.floor((base.atk || 10) * (bossDef.atkMult || 1.3)), def: Math.floor((base.def || 3) * (bossDef.defMult || 1.15)), xp: Math.floor((base.xp || 20) * 3), stones: Math.floor((base.stones || 5) * 3) }, level, biomeMult, bx, by, { isBoss: true, isStageBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null });
+    const bossAffinity = typeof getStageBossAffinity === 'function' ? getStageBossAffinity(stage, base) : { weaknesses: bossDef.weaknesses || base.weaknesses || [], resists: bossDef.resists || base.resists || [] };
+    const boss = createScaledEnemy({ ...base, name: bossDef.name, title: bossDef.name, symbol: bossDef.symbol || '首', color: bossDef.color || stage.color, isBoss: true, isStageBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null, skillIds: bossDef.skillIds || ['bossEnrage'], weaknesses: bossAffinity.weaknesses, resists: bossAffinity.resists, hp: Math.floor((base.hp || 40) * (bossDef.hpMult || 1.8)), atk: Math.floor((base.atk || 10) * (bossDef.atkMult || 1.3)), def: Math.floor((base.def || 3) * (bossDef.defMult || 1.15)), xp: Math.floor((base.xp || 20) * 3), stones: Math.floor((base.stones || 5) * 3) }, level, biomeMult, bx, by, { isBoss: true, isStageBoss: true, stageId: stage.id, bossMechanicId: bossDef.mechanicId || null, weaknesses: bossAffinity.weaknesses, resists: bossAffinity.resists });
     dungeonObj._monsters.set(`${bx},${by}`, boss);
     return;
   }
@@ -1994,6 +2211,7 @@ function generateHomeMap(options = {}) {
      dungeon._chests = [];
      discoveredMap = new Set();
      visibleMap = new Set();
+     lastInteractionTileKey = '';
      resetDomMapCache();
      window.dungeon = dungeon;
      const r = dungeon.spawnRoom;
@@ -2013,6 +2231,7 @@ function generateNewFloor() {
      dungeon._chests = [];
      discoveredMap = new Set();
      visibleMap = new Set();
+     lastInteractionTileKey = '';
      resetDomMapCache();
      window.dungeon = dungeon;
      if (activeStage) {
@@ -2045,8 +2264,12 @@ function generateNewFloor() {
      };
    }
   function handleInput() {
-    if (isInCombat() || isAnyPanelOpen() || combatState === COMBAT_STATE.DEFEAT) return;
-    let dx = 0, dy = 0;
+    if (isMovementBlockedByUi()) {
+      if (joystick?.active && typeof clearTouchMovementState === 'function') clearTouchMovementState();
+      return;
+    }
+     let dx = 0, dy = 0;
+     let movingWithJoystick = false;
      // Keyboard input
      if (keys['ArrowUp'] || keys['w']) dy = -1;
      if (keys['ArrowDown'] || keys['s']) dy = 1;
@@ -2056,6 +2279,7 @@ function generateNewFloor() {
      if (joystick.active && (joystick.dx !== 0 || joystick.dy !== 0)) {
        dx = joystick.dx;
        dy = joystick.dy;
+       movingWithJoystick = true;
      }
      // Normalize diagonal movement
      if (dx !== 0 && dy !== 0) {
@@ -2063,9 +2287,19 @@ function generateNewFloor() {
        dx /= len;
        dy /= len;
      }
-     if (dx === 0 && dy === 0) return;
-     // Continuous movement (cells per frame, 30 FPS -> speed / 30)
-     const speed = playerSpeed / 30;
+     if (dx === 0 && dy === 0) {
+      // Keep an active joystick alive while the finger is still inside the dead zone.
+      // Mobile browsers often deliver rAF between touchstart and the first touchmove;
+      // clearing here makes the following drag get ignored, which feels like the
+      // movement button was touched but never grabbed.
+      return;
+    }
+     // Continuous movement based on real frame delta. The old fixed 30 FPS
+     // step made mobile movement feel sticky and then jump when frames were
+     // delayed by DOM work/browser throttling.
+     const frameDt = Math.min(MAX_MOVEMENT_DT, Math.max(0, Number.isFinite(currentFrameDt) ? currentFrameDt : TARGET_FRAME_DT));
+     const analogBoost = movingWithJoystick ? Math.max(0.62, Math.min(1, Number(joystick.distance || 1))) : 1;
+     const speed = playerSpeed * frameDt * analogBoost;
      const stepX = dx * speed;
      const stepY = dy * speed;
      let newX = player.x + stepX;
@@ -2105,8 +2339,10 @@ function generateNewFloor() {
    function updateCamera() {
      const targetX = player.x * CELL_SIZE - canvasW / 2;
      const targetY = player.y * CELL_SIZE - canvasH / 2;
-     camera.x += (targetX - camera.x) * 0.15;
-     camera.y += (targetY - camera.y) * 0.15;
+     const frameDt = Math.min(MAX_MOVEMENT_DT, Math.max(0, Number.isFinite(currentFrameDt) ? currentFrameDt : TARGET_FRAME_DT));
+     const follow = Math.min(0.68, 1 - Math.pow(0.68, frameDt / TARGET_FRAME_DT));
+     camera.x += (targetX - camera.x) * follow;
+     camera.y += (targetY - camera.y) * follow;
      // Clamp camera to dungeon bounds (prevent black borders)
      const mapW = dungeon.width * CELL_SIZE;
      const mapH = dungeon.height * CELL_SIZE;
@@ -2250,13 +2486,23 @@ function generateNewFloor() {
        }
      }
    }
-
-
+   function updateMapVisibilityIfNeeded(force = false) {
+     if (!dungeon || !player) return;
+     const px = Math.floor(player.x);
+     const py = Math.floor(player.y);
+     if (!force && mapRenderCache.lastPx === px && mapRenderCache.lastPy === py && mapRenderCache.visibilityKey) return;
+     updateMapVisibility();
+     mapRenderCache.lastPx = px;
+     mapRenderCache.lastPy = py;
+   }
    function resetDomMapCache() {
      mapRenderCache = {
        floorKey: '', boundsKey: '', visibilityKey: '', entityKey: '', hintKey: '', miniKey: '',
        lastPx: NaN, lastPy: NaN, tilesEl: null, entitiesEl: null, hintsEl: null, miniEl: null, playerEl: null,
-       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: ''
+       canvasFloorKey: '', canvasBoundsKey: '', canvasVisibilityKey: '',
+       layerCellSize: NaN, layerW: '', layerH: '', layerTransform: '',
+       hintTileKey: '', hintVisibilityKey: '', miniTileKey: '', miniVisibilityKey: '',
+       playerTransform: '', hiddenMiniMap: false
      };
      const layer = document.getElementById('map-layer');
      if (layer) layer.innerHTML = '';
@@ -2319,41 +2565,65 @@ function generateNewFloor() {
      return `<div class="map-tile ${floorCls} ${fog}" style="transform:translate3d(${left}px,${top}px,0)">${inner}</div>`;
    }
 
-   function renderDomMapOverlay() {
+   function renderDomMapOverlay(force = false) {
      if (!dungeon || !player || !camera) return;
      const layer = document.getElementById('map-layer');
      if (!layer) return;
      const px = Math.floor(player.x);
      const py = Math.floor(player.y);
-     const cellChanged = px !== mapRenderCache.lastPx || py !== mapRenderCache.lastPy;
-     if (cellChanged || !mapRenderCache.visibilityKey) {
-       updateMapVisibility();
-       mapRenderCache.lastPx = px;
-       mapRenderCache.lastPy = py;
-     }
+     updateMapVisibilityIfNeeded();
      const biome = dungeon.biome || getBiomeForLevel?.(dungeonLevel) || {};
      const floorKey = `${dungeonLevel}:${biome.id || ''}:${dungeon.width}x${dungeon.height}:${CELL_SIZE}`;
      if (floorKey !== mapRenderCache.floorKey) {
        resetDomMapCache();
        mapRenderCache.floorKey = floorKey;
+       force = true;
      }
      ensureDomMapLayers(layer);
-     layer.style.setProperty('--cs', `${CELL_SIZE}px`);
-     layer.style.width = `${dungeon.width * CELL_SIZE}px`;
-     layer.style.height = `${dungeon.height * CELL_SIZE}px`;
-     layer.style.transform = `translate3d(${-Math.round(camera.x)}px,${-Math.round(camera.y)}px,0)`;
+     const layerW = `${dungeon.width * CELL_SIZE}px`;
+     const layerH = `${dungeon.height * CELL_SIZE}px`;
+     if (mapRenderCache.layerCellSize !== CELL_SIZE) {
+       layer.style.setProperty('--cs', `${CELL_SIZE}px`);
+       mapRenderCache.layerCellSize = CELL_SIZE;
+     }
+     if (mapRenderCache.layerW !== layerW) {
+       layer.style.width = layerW;
+       mapRenderCache.layerW = layerW;
+     }
+     if (mapRenderCache.layerH !== layerH) {
+       layer.style.height = layerH;
+       mapRenderCache.layerH = layerH;
+     }
+     const transform = `translate3d(${-Math.round(camera.x)}px,${-Math.round(camera.y)}px,0)`;
+     if (mapRenderCache.layerTransform !== transform) {
+       layer.style.transform = transform;
+       mapRenderCache.layerTransform = transform;
+     }
      const grid = dungeon.grid;
      const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 3);
      const endCol = Math.min(grid[0].length, startCol + Math.ceil(canvasW / CELL_SIZE) + 6);
      const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 3);
      const endRow = Math.min(grid.length, startRow + Math.ceil(canvasH / CELL_SIZE) + 6);
      const boundsKey = `${startCol},${endCol},${startRow},${endRow}`;
-     const visibilityKey = `${boundsKey}:${discoveredMap.size}:${visibleMap.size}:${px},${py}`;
-     mapRenderCache.boundsKey = boundsKey;
-     mapRenderCache.visibilityKey = visibilityKey;
-     renderDomMapEntities(startCol, endCol, startRow, endRow);
-     renderDomMapHints(startCol, endCol, startRow, endRow);
-     renderDomMiniMap(px, py);
+     const tileKey = `${px},${py}`;
+     const visibilityKey = `${boundsKey}:${discoveredMap.size}:${visibleMap.size}:${tileKey}`;
+    const shouldRefreshEntities = force || visibilityKey !== mapRenderCache.visibilityKey || boundsKey !== mapRenderCache.boundsKey || !mapRenderCache.playerEl?.isConnected;
+    mapRenderCache.boundsKey = boundsKey;
+    mapRenderCache.visibilityKey = visibilityKey;
+    if (shouldRefreshEntities) renderDomMapEntities(startCol, endCol, startRow, endRow, px, py);
+    updateDomMapPlayerTransform();
+     const shouldRefreshHints = force || tileKey !== mapRenderCache.hintTileKey || visibilityKey !== mapRenderCache.hintVisibilityKey || (gameTicks % MAP_HINT_UPDATE_INTERVAL === 0);
+     if (shouldRefreshHints) {
+       renderDomMapHints(startCol, endCol, startRow, endRow);
+       mapRenderCache.hintTileKey = tileKey;
+       mapRenderCache.hintVisibilityKey = visibilityKey;
+     }
+     const shouldRefreshMiniMap = force || tileKey !== mapRenderCache.miniTileKey || visibilityKey !== mapRenderCache.miniVisibilityKey || (gameTicks % MAP_MINIMAP_UPDATE_INTERVAL === 0);
+     if (shouldRefreshMiniMap) {
+       renderDomMiniMap(px, py);
+       mapRenderCache.miniTileKey = tileKey;
+       mapRenderCache.miniVisibilityKey = visibilityKey;
+     }
    }
 
    function renderDomMap() {
@@ -2361,7 +2631,7 @@ function generateNewFloor() {
    }
 
 
-   function renderDomMapEntities(startCol, endCol, startRow, endRow) {
+   function renderDomMapEntities(startCol, endCol, startRow, endRow, px = Math.floor(player?.x ?? 0), py = Math.floor(player?.y ?? 0)) {
      const parts = [];
      if (dungeon._materials) {
        for (const mat of dungeon._materials) {
@@ -2392,12 +2662,23 @@ function generateNewFloor() {
      parts.push(`<div id="map-player"><i class="map-player-glow"></i><i class="map-player-body"></i><i class="map-player-head"></i><i class="map-player-eyes"><b></b><b></b></i></div>`);
      const entityKey = `${parts.length}:${dungeon._materials?.length || 0}:${dungeon._chests?.length || 0}:${dungeon._monsters?.size || 0}:${isInCombat() ? 1 : 0}:${mapRenderCache.visibilityKey}`;
      if (entityKey !== mapRenderCache.entityKey || !mapRenderCache.playerEl?.isConnected) {
-       mapRenderCache.entitiesEl.innerHTML = parts.join('');
-       mapRenderCache.playerEl = mapRenderCache.entitiesEl.querySelector('#map-player');
-       mapRenderCache.entityKey = entityKey;
+      mapRenderCache.entitiesEl.innerHTML = parts.join('');
+      mapRenderCache.playerEl = mapRenderCache.entitiesEl.querySelector('#map-player');
+      // A DOM rebuild creates a fresh player node with no inline transform. Reset
+      // the cached transform so entering a dungeon (or changing floor/visibility)
+      // always positions the character immediately instead of reusing the prior
+      // string and leaving the new marker at its default/offscreen position.
+      mapRenderCache.playerTransform = '';
+      mapRenderCache.entityKey = entityKey;
      }
-     if (mapRenderCache.playerEl) {
-       mapRenderCache.playerEl.style.transform = `translate3d(${player.x * CELL_SIZE}px,${player.y * CELL_SIZE}px,0)`;
+   }
+
+   function updateDomMapPlayerTransform() {
+     if (!mapRenderCache.playerEl) return;
+     const playerTransform = `translate3d(${player.x * CELL_SIZE}px,${player.y * CELL_SIZE}px,0)`;
+     if (mapRenderCache.playerTransform !== playerTransform) {
+       mapRenderCache.playerEl.style.transform = playerTransform;
+       mapRenderCache.playerTransform = playerTransform;
      }
    }
 
@@ -2434,11 +2715,26 @@ function generateNewFloor() {
 
    function renderDomMiniMap(px, py) {
      if (!mapRenderCache.miniEl) return;
-     if (!dungeon || canvasW < 320) { mapRenderCache.miniEl.innerHTML = ''; return; }
+     if (!dungeon || canvasW < 320) {
+       if (!mapRenderCache.hiddenMiniMap) {
+         mapRenderCache.miniEl.innerHTML = '';
+         mapRenderCache.miniKey = '';
+         mapRenderCache.hiddenMiniMap = true;
+       }
+       return;
+     }
      const scale = Math.max(2, Math.min(4, Math.floor(canvasW / 140)));
      const w = dungeon.width * scale;
      const h = dungeon.height * scale;
-     if (w + 18 > canvasW || h > canvasH * 0.36) { mapRenderCache.miniEl.innerHTML = ''; return; }
+     if (w + 18 > canvasW || h > canvasH * 0.36) {
+       if (!mapRenderCache.hiddenMiniMap) {
+         mapRenderCache.miniEl.innerHTML = '';
+         mapRenderCache.miniKey = '';
+         mapRenderCache.hiddenMiniMap = true;
+       }
+       return;
+     }
+     mapRenderCache.hiddenMiniMap = false;
      const miniKey = `${discoveredMap.size}:${visibleMap.size}:${dungeon._monsters?.size || 0}:${px},${py}:${scale}:${canvasW}x${canvasH}`;
      if (miniKey === mapRenderCache.miniKey) return;
      const cells = [];
@@ -2504,12 +2800,8 @@ function generateNewFloor() {
      const floorB = biome.floor2 || '#30243d';
      ctx.fillStyle = alt ? floorB : floorA;
      ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
-     const grad = ctx.createLinearGradient(sx, sy, sx, sy + CELL_SIZE);
-     grad.addColorStop(0, 'rgba(255,255,255,0.075)');
-     grad.addColorStop(0.58, 'rgba(255,255,255,0)');
-     grad.addColorStop(1, 'rgba(0,0,0,0.16)');
-     ctx.fillStyle = grad;
-     ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
+     // Avoid per-tile CanvasGradient allocation during movement frames. The small
+     // top/bottom strips below preserve depth while keeping drawDungeon() cheap.
      const tint = roomTint(type);
      if (tint) { ctx.fillStyle = tint; ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE); }
      ctx.fillStyle = 'rgba(255,255,255,0.045)';
@@ -2550,7 +2842,7 @@ function generateNewFloor() {
 
    function drawDungeon() {
      if (!dungeon || !player || !camera) return;
-     updateMapVisibility();
+     updateMapVisibilityIfNeeded();
      const biome = dungeon.biome || getBiomeForLevel?.(dungeonLevel) || {};
      const grid = dungeon.grid;
      const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 2);
@@ -2815,21 +3107,27 @@ function generateNewFloor() {
     if (p) return p;
     p = document.createElement('div');
     p.id = 'character-dom-panel';
+    const closeCharacterPanelDom = e => {
+      if (!e?.target?.closest?.('.char-close,[data-char-close-panel]')) return false;
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      popPanelFromStack('character');
+      characterPanelLastHtml = '';
+      closeCharacterDetailPopupDom();
+      syncBodyPanelState();
+      return true;
+    };
+    p.addEventListener('pointerdown', closeCharacterPanelDom, { passive: false, capture: true });
+    p.addEventListener('touchstart', closeCharacterPanelDom, { passive: false, capture: true });
+    p.addEventListener('click', closeCharacterPanelDom, { capture: true });
     p.addEventListener('click', e => {
       if (e.target.closest('.char-close')) {
-        popPanelFromStack('character');
-        characterPanelLastHtml = '';
-        closeCharacterDetailPopupDom();
-        syncBodyPanelState();
+        closeCharacterPanelDom(e);
       }
     });
     p.addEventListener('touchstart', e => {
       if (e.target.closest('.char-close')) {
-        e.preventDefault();
-        popPanelFromStack('character');
-        characterPanelLastHtml = '';
-        closeCharacterDetailPopupDom();
-        syncBodyPanelState();
+        closeCharacterPanelDom(e);
         return;
       }
       const body = e.target.closest('.char-body');
@@ -2919,12 +3217,38 @@ function generateNewFloor() {
     p.querySelectorAll('.char-equip-card[data-char-equip-slot]').forEach(card => {
       bindInventoryTapDom(card, () => {
         const slot = card.dataset.charEquipSlot;
-        if (!player.equipment?.[slot]) return;
+        if (!player.equipment?.[slot]) {
+          characterEquipmentDetailSlot = null;
+          characterEquipmentSlotHint = slot;
+          characterPanelLastHtml = '';
+          renderCharacterDomPanel();
+          const hint = document.querySelector('#character-dom-panel .char-equip-slot-tip');
+          if (hint) hint.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          return;
+        }
+        characterEquipmentSlotHint = null;
         characterEquipmentDetailSlot = slot;
         p.querySelectorAll('.char-equip-card.active').forEach(el => el.classList.remove('active'));
         card.classList.add('active');
         showCharacterDetailPopupDom();
       });
+    });
+    p.querySelectorAll('[data-char-build-jump]').forEach(btn => {
+      bindInventoryTapDom(btn, () => {
+        openCharacterBuildSkillTargetDom({ tree: btn.dataset.tree, index: parseInt(btn.dataset.index, 10) || 0, label: btn.textContent?.replace(/去技能页/g, '').trim() || '推荐技能' });
+      });
+    });
+    p.querySelectorAll('[data-char-open-inventory-slot]').forEach(btn => {
+      bindInventoryTapDom(btn, () => openInventoryForCharacterSlotDom(btn.dataset.charOpenInventorySlot));
+    });
+    p.querySelectorAll('[data-char-tab-jump]').forEach(btn => {
+      bindInventoryTapDom(btn, () => { characterTab = btn.dataset.charTabJump || 'attributes'; characterPanelLastHtml = ''; closeCharacterDetailPopupDom(); renderCharacterDomPanel(); });
+    });
+    p.querySelectorAll('[data-char-open-skills]').forEach(btn => {
+      bindInventoryTapDom(btn, () => { popPanelFromStack('character'); pushPanelToStack('skills'); syncBodyPanelState(); });
+    });
+    p.querySelectorAll('[data-char-close-panel]').forEach(btn => {
+      bindInventoryTapDom(btn, () => { popPanelFromStack('character'); syncBodyPanelState(); });
     });
     p.querySelectorAll('[data-equip-title]').forEach(btn => {
       // 称号卡片位于可滚动列表内：使用移动阈值 tap 绑定，避免 touchstart preventDefault 抢走纵向滑动。
@@ -2974,19 +3298,236 @@ function generateNewFloor() {
     }).join('');
     return `<div class="title-grid">${rows}</div>`;
   }
-  function getEquipmentBonusRows() {
+  function getEquipmentBonusTotals() {
     const totals = {};
     Object.values(player.equipment || {}).forEach(item => {
       if (!item || !item.stats) return;
       Object.entries(item.stats).forEach(([k, v]) => { totals[k] = (totals[k] || 0) + Number(v || 0); });
     });
+    return totals;
+  }
+  function getEquipmentBonusRows(totals = null) {
+    const source = totals || getEquipmentBonusTotals();
     const order = ['atk','def','maxHp','hp','maxMp','mp','speed','crit','dodge','lifesteal','armorPen','fireDmg','iceDmg','poisonDmg','lightningDmg','hpRegen','mpRegen','allRes','goldFind','xpBonus'];
-    const entries = Object.entries(totals).filter(([, v]) => Number(v || 0) !== 0)
+    const entries = Object.entries(source).filter(([, v]) => Number(v || 0) !== 0)
       .sort(([a], [b]) => (order.indexOf(a) < 0 ? 999 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 999 : order.indexOf(b)) || a.localeCompare(b));
     return entries.map(([k, v]) => {
       const [label, suffix] = getCharacterStatMeta(k);
       return `<span class="bonus-chip"><em>${escapeHtml(label)}</em><b>${formatCharStatValue(v, suffix)}</b></span>`;
     }).join('') || '<span class="muted">暂无装备加成</span>';
+  }
+  function getCharacterBonusOverviewDom() {
+    const totals = getEquipmentBonusTotals();
+    const hasBonus = Object.values(totals).some(v => Number(v || 0) !== 0);
+    if (!hasBonus) return '<div class="char-bonus-overview empty">暂无装备加成，先穿戴装备提升战力</div>';
+    const score = (keys, weights) => Math.round(keys.reduce((sum, key, i) => sum + Number(totals[key] || 0) * (weights?.[i] || 1), 0));
+    const pillars = [
+      { label: '输出', value: score(['atk','crit','armorPen','fireDmg','iceDmg','poisonDmg','lightningDmg'], [3,2,2,1,1,1,1]) },
+      { label: '生存', value: score(['def','maxHp','hp','dodge','allRes'], [3,.35,.25,2,1.5]) },
+      { label: '续航', value: score(['lifesteal','hpRegen','mpRegen','maxMp','mp'], [3,2,2,.2,.15]) },
+    ];
+    const groups = [
+      { title: '核心', keys: ['atk','def','maxHp','maxMp','speed'] },
+      { title: '战斗', keys: ['crit','dodge','lifesteal','armorPen'] },
+      { title: '元素', keys: ['fireDmg','iceDmg','poisonDmg','lightningDmg','allRes'] },
+      { title: '成长', keys: ['goldFind','xpBonus','hpRegen','mpRegen'] },
+    ].map(group => {
+      const chips = group.keys.filter(k => Number(totals[k] || 0) !== 0).map(k => {
+        const [label, suffix] = getCharacterStatMeta(k);
+        return `<span class="bonus-chip"><em>${escapeHtml(label)}</em><b>${formatCharStatValue(totals[k], suffix)}</b></span>`;
+      }).join('');
+      return chips ? `<div class="char-bonus-group"><h4>${escapeHtml(group.title)}</h4><div>${chips}</div></div>` : '';
+    }).filter(Boolean).join('');
+    return `<div class="char-bonus-overview">
+      <div class="char-bonus-pillars">${pillars.map(p => `<span><b>${escapeHtml(p.value)}</b><em>${escapeHtml(p.label)}</em></span>`).join('')}</div>
+      <div class="char-bonus-groups">${groups || `<div class="char-bonus-group"><div>${getEquipmentBonusRows(totals)}</div></div>`}</div>
+    </div>`;
+  }
+  function getCharacterBuildJumpTargetDom() {
+    const recs = typeof getRecommendedSkillNodesForBuild === 'function' ? getRecommendedSkillNodesForBuild(1) : [];
+    const rec = recs && recs[0];
+    if (rec?.tree && Number.isFinite(Number(rec.index))) return { tree: rec.tree, index: Number(rec.index), label: rec.skill?.name || '推荐技能' };
+    const treeNames = Object.keys(typeof SKILL_TREES !== 'undefined' ? SKILL_TREES : {});
+    for (const tree of treeNames) {
+      const skills = SKILL_TREES[tree]?.skills || [];
+      for (let index = 0; index < skills.length; index++) {
+        const st = typeof skillNodeState === 'function' ? skillNodeState(tree, index) : null;
+        if (st?.canLearn || st?.learned) return { tree, index, label: skills[index]?.name || '技能节点' };
+      }
+    }
+    return null;
+  }
+  function openCharacterBuildSkillTargetDom(target = null) {
+    const jump = target || getCharacterBuildJumpTargetDom();
+    if (jump?.tree) selectedSkillTreeNode = { tree: jump.tree, index: Number(jump.index) || 0 };
+    skillDetailModalOpen = !!jump;
+    popPanelFromStack('character');
+    characterPanelLastHtml = '';
+    closeCharacterDetailPopupDom();
+    pushPanelToStack('skills');
+    syncBodyPanelState();
+    if (jump?.label && typeof showMessage === 'function') showMessage(`已定位：${jump.label}`, '#ffe28a');
+  }
+  function getCharacterBuildProfileDom() {
+    const build = typeof getActiveSkillBuildSummary === 'function' ? getActiveSkillBuildSummary() : null;
+    const codex = typeof getSkillCodexSummary === 'function' ? getSkillCodexSummary() : null;
+    const activeSynergies = build?.synergies || (typeof getActiveSkillSynergies === 'function' ? getActiveSkillSynergies() : []);
+    const activeMasteries = build?.masteries || (typeof getActiveSkillMasteries === 'function' ? getActiveSkillMasteries() : []);
+    const next = build?.next || (typeof getNextSkillSynergyRecommendation === 'function' ? getNextSkillSynergyRecommendation() : null);
+    const jumpTarget = getCharacterBuildJumpTargetDom();
+    const headline = activeSynergies.length
+      ? activeSynergies.slice(0, 2).map(s => `${s.icon || '✦'}${s.name}`).join(' · ')
+      : (activeMasteries.length ? activeMasteries.slice(0, 2).map(m => `${SKILL_TREES?.[m.tree]?.icon || '✦'}${m.shortName || SKILL_TREES?.[m.tree]?.name || '专精'}专精`).join(' · ') : '流派未成型');
+    const tags = [];
+    activeSynergies.slice(0, 3).forEach(s => tags.push({ label: s.name, icon: s.icon || '✦', tone: 'synergy' }));
+    activeMasteries.slice(0, 3).forEach(m => tags.push({ label: `${m.shortName || SKILL_TREES?.[m.tree]?.name || '单系'}专精`, icon: SKILL_TREES?.[m.tree]?.icon || '✦', tone: 'mastery' }));
+    if (!tags.length && next) tags.push({ label: next.name || '路线推荐', icon: next.icon || '✦', tone: 'next' });
+    const progressRows = (codex?.treeSummaries || []).filter(row => row.learned > 0 || row.mastery?.active)
+      .sort((a, b) => (b.learned - a.learned) || (a.shortName || '').localeCompare(b.shortName || ''))
+      .slice(0, 3);
+    const progressHtml = progressRows.length ? progressRows.map(row => {
+      const pct = row.total ? Math.min(100, Math.round(row.learned / row.total * 100)) : 0;
+      return `<div class="char-build-row"><span>${escapeHtml(row.shortName || row.name || row.tree)}</span><i><b style="width:${pct}%"></b></i><em>${row.learned}/${row.total}</em></div>`;
+    }).join('') : '<div class="char-build-empty">尚未领悟技能，先去「技能」选择路线</div>';
+    return {
+      headline,
+      subline: build?.activeLabels?.length ? `已成型 ${build.activeLabels.length} 项` : (next?.hint || '继续领悟技能可解锁共鸣与专精'),
+      tags,
+      nextHint: next?.hint || build?.hint || '',
+      progressHtml,
+      claimableCount: codex?.claimableCount || 0,
+      jumpTarget,
+    };
+  }
+  function getCharacterBuildProfileHtmlDom(profile = null) {
+    const data = profile || getCharacterBuildProfileDom();
+    const tagHtml = (data.tags || []).map(tag => `<span class="char-build-tag ${escapeHtml(tag.tone || '')}">${escapeHtml(tag.icon || '✦')} ${escapeHtml(tag.label || '')}</span>`).join('') || '<span class="char-build-tag empty">未成型</span>';
+    const claimHtml = data.claimableCount ? `<span class="char-build-claim">待领 ${data.claimableCount}</span>` : '';
+    const jump = data.jumpTarget;
+    const jumpAttrs = jump ? ` data-char-build-jump="1" data-tree="${escapeHtml(jump.tree)}" data-index="${escapeHtml(jump.index)}"` : '';
+    const jumpCta = jump ? `<button class="char-build-jump" type="button"${jumpAttrs}>去技能页</button>` : '';
+    return `<section class="char-section char-build-profile${jump ? ' actionable' : ''}">
+      <div class="char-build-main"><div><b>${escapeHtml(data.headline)}</b><small>${escapeHtml(data.subline || '')}</small></div><div class="char-build-actions">${claimHtml}${jumpCta}</div></div>
+      <div class="char-build-tags">${tagHtml}</div>
+      <div class="char-build-progress">${data.progressHtml}</div>
+      ${data.nextHint ? `<div class="char-build-next">下一步：${escapeHtml(data.nextHint)}${jump?.label ? ` · 点「去技能页」定位「${escapeHtml(jump.label)}」` : ''}</div>` : ''}
+    </section>`;
+  }
+  function getCharacterIdentityOverviewDom(options = {}) {
+    const slotKeys = Array.isArray(options.slotKeys) ? options.slotKeys : (typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {}));
+    const equippedCount = slotKeys.filter(slot => !!player.equipment?.[slot]).length;
+    const crit = Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('crit') : (player.crit || 0));
+    const dodge = Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('dodge') : (player.dodge || 0));
+    const speed = Number(typeof getEquipmentAbility === 'function' ? getEquipmentAbility('speed') : (player.speed || 0));
+    const power = Math.max(1, Math.round(
+      Number(player.atk || 0) * 4 + Number(player.def || 0) * 3 +
+      Number(player.maxHp || 0) * 0.35 + Number(player.maxMp || 0) * 0.22 +
+      crit * 2 + dodge * 2 + speed + equippedCount * 18
+    ));
+    const title = options.equippedTitle;
+    const buildProfile = options.buildProfile || getCharacterBuildProfileDom();
+    const realm = options.realm || player.realm?.name || '炼气期';
+    const titleText = title ? `${title.icon || '🏷️'} ${title.name}` : buildProfile.headline;
+    return `<section class="char-section char-identity-card">
+      <div class="char-identity-main"><div class="char-avatar">👤</div><div><b>${escapeHtml(realm)}</b><small>${escapeHtml(titleText || '未佩戴称号')}</small></div><em>战力 ${power}</em></div>
+      <div class="char-identity-grid">
+        <span><b>${escapeHtml(player.hp)}/${escapeHtml(player.maxHp)}</b><em>生命</em></span>
+        <span><b>${escapeHtml(player.mp)}/${escapeHtml(player.maxMp)}</b><em>灵力</em></span>
+        <span><b>${escapeHtml(player.atk)}</b><em>攻击</em></span>
+        <span><b>${escapeHtml(player.def)}</b><em>防御</em></span>
+      </div>
+      <div class="char-identity-foot">装备 ${equippedCount}/${slotKeys.length} · 悟道 ${availableSkillPoints || 0} · 炼体 ${availableStatPoints || 0} · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div>
+    </section>`;
+  }
+  function getCharacterNextActionDom(options = {}) {
+    const slotKeys = Array.isArray(options.slotKeys) ? options.slotKeys : (typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {}));
+    const buildProfile = options.buildProfile || getCharacterBuildProfileDom();
+    const action = typeof getSharedNextActionRecommendation === 'function'
+      ? getSharedNextActionRecommendation(player, { slotKeys, buildProfile })
+      : { title: '推进下一场战斗', reason: '角色养成暂无明显短板，继续刷怪/章节获取装备与材料', cta: '关闭面板', kind: 'close' };
+    const jump = buildProfile.jumpTarget;
+    const kind = action.kind || 'close';
+    const attrs = kind === 'skills' && jump ? ` data-char-build-jump="1" data-tree="${escapeHtml(jump.tree)}" data-index="${escapeHtml(jump.index)}"` : (kind === 'skills' ? ' data-char-open-skills="1"' : (kind === 'close' || kind === 'stages' || kind === 'breakthrough' ? ' data-char-close-panel="1"' : ` data-char-tab-jump="${escapeHtml(kind)}"`));
+    return `<section class="char-section char-next-action"><div><small>下一步</small><b>${escapeHtml(action.title)}</b><span>${escapeHtml(action.reason)}</span></div><button type="button"${attrs}>${escapeHtml(action.cta || '关闭面板')}</button></section>`;
+  }
+  function getCharacterEquipmentSlotBadgeDom(slot, item, level = null) {
+    const rankOf = eq => (typeof rarityRank === 'function' ? rarityRank(eq?.rarity) : ({ '普通':1, '魔法':2, '稀有':3, '传说':4, '神话':5 }[eq?.rarity] || 1));
+    let state = { label: '空', tone: 'empty' };
+    if (item) {
+      const lv = Number.isFinite(Number(level)) ? Number(level) : equipmentEnhanceLevelDom(item);
+      if (rankOf(item) <= 2) state = { label: '低品', tone: 'low' };
+      else if (lv <= 0) state = { label: '未强', tone: 'unupgraded' };
+      else if (item.setId) state = { label: '套装', tone: 'set' };
+      else state = { label: `+${lv}`, tone: 'enhanced' };
+    }
+    return `<i class="eq-status-badge ${escapeHtml(state.tone)}">${escapeHtml(state.label)}</i>`;
+  }
+  function getCharacterEquipmentDiagnosisDom(slotKeys = null) {
+    const keys = Array.isArray(slotKeys) ? slotKeys : (typeof equipmentSlotKeys === 'function' ? equipmentSlotKeys() : Object.keys(SLOT_NAMES || {}));
+    const equipped = keys.map(slot => ({ slot, item: player.equipment?.[slot] || null }));
+    const equippedItems = equipped.filter(row => !!row.item);
+    const emptySlots = equipped.filter(row => !row.item);
+    const maxEnhance = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
+    const rankOf = item => (typeof rarityRank === 'function' ? rarityRank(item?.rarity) : ({ '普通':1, '魔法':2, '稀有':3, '传说':4, '神话':5 }[item?.rarity] || 1));
+    const lowQuality = equippedItems.filter(row => rankOf(row.item) <= 2);
+    const enhanceable = equippedItems.filter(row => equipmentEnhanceLevelDom(row.item) < maxEnhance);
+    const setCounts = typeof equipmentSetCounts === 'function' ? equipmentSetCounts(player.equipment || {}) : {};
+    const topSet = Object.entries(setCounts).sort(([, a], [, b]) => Number(b || 0) - Number(a || 0))[0] || null;
+    const topSetObj = topSet ? (typeof getEquipmentSet === 'function' ? getEquipmentSet(topSet[0]) : null) : null;
+    const topSetCount = topSet ? Number(topSet[1] || 0) : 0;
+    const topSetText = topSet ? `${topSetObj?.icon || '◇'}${topSetObj?.name || '套装'} ${topSetCount}件` : '套装未成型';
+    const topSetNext = topSetObj ? (topSetObj.bonuses || []).slice().sort((a, b) => Number(a.count || 0) - Number(b.count || 0)).find(b => topSetCount < Number(b.count || 0)) : null;
+    const setGapText = topSet ? (topSetNext ? `${topSetObj?.name || '套装'}下一档：还差 ${Math.max(0, Number(topSetNext.count || 0) - topSetCount)} 件解锁 ${topSetNext.count}件` : `${topSetObj?.name || '套装'}已激活满档`) : '套装未成型：优先保留同名套装装备';
+    const weaknessRows = [
+      ...emptySlots.map(row => ({ row, priority: 0, reason: '空' })),
+      ...lowQuality.map(row => ({ row, priority: 1, reason: '低品' })),
+      ...enhanceable.filter(row => equipmentEnhanceLevelDom(row.item) <= 0).map(row => ({ row, priority: 2, reason: '未强' })),
+    ];
+    const seen = new Set();
+    const weakness = weaknessRows.sort((a, b) => a.priority - b.priority).filter(item => {
+      if (seen.has(item.row.slot)) return false;
+      seen.add(item.row.slot);
+      return true;
+    }).slice(0, 3);
+    const weaknessText = weakness.length ? weakness.map(item => `${SLOT_NAMES?.[item.row.slot]?.name || item.row.slot}${item.reason !== '空' ? `·${item.reason}` : ''}`).join(' / ') : '暂无明显短板';
+    const chips = [
+      { label: '装备', value: `${equippedItems.length}/${keys.length}` },
+      { label: '套装', value: topSetText },
+      { label: '可强化', value: `${enhanceable.length}件` },
+      { label: '低品', value: `${lowQuality.length}件` },
+    ];
+    return `<div class="char-equip-diagnosis">
+      <div class="char-equip-diag-main">${chips.map(chip => `<span><b>${escapeHtml(chip.value)}</b><em>${escapeHtml(chip.label)}</em></span>`).join('')}</div>
+      <div class="char-equip-diag-foot"><b>短板</b><span>${escapeHtml(weaknessText)}</span></div>
+      <div class="char-equip-diag-setgap"><b>套装</b><span>${escapeHtml(setGapText)}</span></div>
+    </div>`;
+  }
+  function getCharacterSetProgressDom() {
+    if (!player || typeof equipmentSetCounts !== 'function') return '<div class="char-set-progress empty">暂无套装进度</div>';
+    const counts = equipmentSetCounts(player.equipment || {});
+    const entries = Object.entries(counts).filter(([, count]) => Number(count || 0) > 0);
+    if (!entries.length) return '<div class="char-set-progress empty">暂无套装装备，穿戴同名套装可激活额外效果</div>';
+    const slotLabelForSet = (setId) => Object.entries(player.equipment || {}).filter(([, item]) => item?.setId === setId).map(([slot]) => SLOT_NAMES?.[slot]?.name || slot).slice(0, 4).join('、');
+    const cards = entries.sort(([, a], [, b]) => Number(b || 0) - Number(a || 0)).map(([setId, countRaw]) => {
+      const count = Number(countRaw || 0);
+      const set = typeof getEquipmentSet === 'function' ? getEquipmentSet(setId) : null;
+      const bonuses = (set?.bonuses || []).slice().sort((a, b) => Number(a.count || 0) - Number(b.count || 0));
+      const maxCount = Math.max(8, ...bonuses.map(b => Number(b.count || 0)));
+      const active = bonuses.filter(b => count >= Number(b.count || 0));
+      const next = bonuses.find(b => count < Number(b.count || 0));
+      const current = active.length ? active[active.length - 1] : null;
+      const pct = Math.min(100, Math.max(4, Math.round(count / maxCount * 100)));
+      const nextText = next ? `还差 ${Math.max(0, Number(next.count || 0) - count)} 件解锁 ${next.count}件` : '已激活满档';
+      const ownedSlots = slotLabelForSet(setId) || '已装备';
+      return `<div class="char-set-card" style="--set-color:${escapeHtml(set?.color || '#d4a0ff')}">
+        <div class="char-set-card-head"><span>${escapeHtml(set?.icon || '◇')} ${escapeHtml(set?.name || '套装')}</span><b>${count}/${maxCount}</b></div>
+        <div class="char-set-meter"><i style="width:${pct}%"></i></div>
+        <div class="char-set-owned">${escapeHtml(ownedSlots)}</div>
+        <div class="char-set-next"><b>${escapeHtml(current ? `${current.count}件已激活` : '未激活')}</b><span>${escapeHtml(current?.label || '先凑齐 2 件套')}</span></div>
+        <div class="char-set-gap">${escapeHtml(nextText)}</div>
+      </div>`;
+    }).join('');
+    return `<div class="char-set-progress">${cards}</div>`;
   }
   function getEquipmentSetRowsDom() {
     if (!player || typeof getActiveSetBonuses !== 'function') return '<div class="set-summary empty">暂无套装效果</div>';
@@ -3002,6 +3543,24 @@ function generateNewFloor() {
       <div class="set-summary-title"><span>${escapeHtml(set.icon)} ${escapeHtml(set.name)}</span><small>${Math.max(...set.rows.map(r => Number(r.owned || 0)))}/8</small></div>
       ${set.rows.map(row => `<div class="set-summary-row ${row.active ? 'active' : ''}"><b>${row.count}件</b><span>${escapeHtml(row.label || '')}</span></div>`).join('')}
     </div>`).join('');
+  }
+  function getCharacterEquipmentSlotHintDom() {
+    if (!characterEquipmentSlotHint) return '';
+    const slotName = SLOT_NAMES?.[characterEquipmentSlotHint]?.name || characterEquipmentSlotHint;
+    return `<div class="char-equip-slot-tip"><b>${escapeHtml(slotName)}槽为空</b><span>可在背包中装备${escapeHtml(slotName)}</span><button type="button" data-char-open-inventory-slot="${escapeHtml(characterEquipmentSlotHint)}">去背包</button></div>`;
+  }
+  function openInventoryForCharacterSlotDom(slot) {
+    characterEquipmentSlotHint = slot || characterEquipmentSlotHint;
+    inventoryTab = 'equipment';
+    inventorySlotFilter = slot || '';
+    inventoryDetailTarget = null;
+    invalidateInventoryListCacheDom();
+    popPanelFromStack('character');
+    pushPanelToStack('inventory');
+    syncBodyPanelState();
+    if (typeof scheduleInventoryRenderDom === 'function') scheduleInventoryRenderDom('character-slot');
+    const slotName = SLOT_NAMES?.[slot]?.name || slot || '装备';
+    showMessage(`已打开背包：寻找${slotName}`, '#8ee8c2');
   }
   function scrollCharacterDetailIntoViewDom() {
     const p = document.getElementById('character-dom-panel');
@@ -3026,17 +3585,27 @@ function generateNewFloor() {
       const level = item ? equipmentEnhanceLevelDom(item) : 0;
       const active = characterEquipmentDetailSlot === slot;
       const displayName = item ? `${item.name}${level > 0 ? ` +${level}` : ''}` : '未装备';
+      const statusBadge = getCharacterEquipmentSlotBadgeDom(slot, item, level);
       return `<button class="char-equip-card${item ? '' : ' empty'}${active ? ' active' : ''}" type="button" data-char-equip-slot="${escapeHtml(slot)}" style="--rarity-color:${escapeHtml(color)}" aria-label="查看${escapeHtml(slotInfo.name)}详情">
+        ${statusBadge}
         <div class="eq-icon"><span>${escapeHtml(item ? itemIconDom(item, slot) : (slotInfo.icon || itemIconDom(null, slot)))}</span>${item ? `<i>${escapeHtml(rarityShortDom(item.rarity))}</i>` : '<i>空</i>'}</div>
         <div class="eq-info"><div class="eq-name-row"><b>${escapeHtml(slotInfo.name)}</b><span>${escapeHtml(displayName)}</span></div><div class="eq-stats">${stats}</div></div>
       </button>`;
     }).join('');
     const detailItem = characterDetailDom()?.item || null;
     const equippedTitle = typeof getEquippedTitle === 'function' ? getEquippedTitle(player) : null;
+    const buildProfile = getCharacterBuildProfileDom();
+    const buildProfileHtml = getCharacterBuildProfileHtmlDom(buildProfile);
+    const identityHtml = getCharacterIdentityOverviewDom({ slotKeys, equippedTitle, buildProfile, realm });
+    const nextActionHtml = getCharacterNextActionDom({ slotKeys, buildProfile });
     const tabKeys = ['equipment', 'attributes', 'bonus', 'sets', 'titles'];
     if (!tabKeys.includes(characterTab)) characterTab = 'attributes';
-    const equipmentPanel = `<section class="char-tab-panel char-equipment-section top-equipment" data-char-tab-panel="equipment"><h3>当前装备 <small>点击已装备槽位，直接弹出详情卡片</small></h3><div class="char-equip-grid">${slots}</div></section>`;
+    const equipmentHintHtml = getCharacterEquipmentSlotHintDom();
+    const equipmentPanel = `<section class="char-tab-panel char-equipment-section top-equipment" data-char-tab-panel="equipment"><h3>当前装备 <small>诊断短板并点击槽位查看</small></h3>${getCharacterEquipmentDiagnosisDom(slotKeys)}${equipmentHintHtml}<div class="char-equip-grid">${slots}</div></section>`;
     const attributesPanel = `<section class="char-tab-panel" data-char-tab-panel="attributes">
+      ${identityHtml}
+      ${nextActionHtml}
+      ${buildProfileHtml}
       <div class="char-section char-realm">
         <div class="realm-top"><div><div class="realm-name">${realm}</div><div class="xptext">${equippedTitle ? `${equippedTitle.icon} ${equippedTitle.name}` : '未佩戴称号'} · 坐标 (${Math.floor(player.x)}, ${Math.floor(player.y)})</div></div><div class="stones">灵石 ${player.spiritStones || 0}</div></div>
         <div class="xpbar"><i style="width:${xpPct}%"></i></div><div class="xptext">${isMaxRealm ? '已登顶峰' : `经验 ${player.xp || 0} / ${nextXp || 0}`}</div>
@@ -3053,11 +3622,11 @@ function generateNewFloor() {
         <div><b>${availableStatPoints || 0}</b><span></span><em>炼体点</em></div>
       </div>
     </section>`;
-    const bonusPanel = `<section class="char-tab-panel" data-char-tab-panel="bonus"><div class="char-section"><h3>装备加成</h3><div class="bonus-list">${getEquipmentBonusRows()}</div></div></section>`;
-    const setsPanel = `<section class="char-tab-panel" data-char-tab-panel="sets"><div class="char-section"><h3>套装效果</h3><div class="char-set-list">${getEquipmentSetRowsDom()}</div></div></section>`;
+    const bonusPanel = `<section class="char-tab-panel" data-char-tab-panel="bonus"><div class="char-section"><h3>装备加成 <small>按战斗用途归类</small></h3>${getCharacterBonusOverviewDom()}</div></section>`;
+    const setsPanel = `<section class="char-tab-panel" data-char-tab-panel="sets"><div class="char-section"><h3>套装效果 <small>当前进度与下一档</small></h3>${getCharacterSetProgressDom()}<div class="char-set-list">${getEquipmentSetRowsDom()}</div></div></section>`;
     const titlesPanel = `<section class="char-tab-panel" data-char-tab-panel="titles"><div class="char-section"><h3>称号 <small>章节全通后解锁，可佩戴一个</small></h3>${getTitleRowsDom()}</div></section>`;
     const html = `
-      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">装备 · 属性 · 加成 · 套装 · 称号</div></div><button class="char-close">×</button></div>
+      <div class="char-head"><div><div class="char-title">👤 角色</div><div class="char-sub">${escapeHtml(buildProfile.headline)} · 装备 · 属性 · 流派</div></div><button class="char-close">×</button></div>
       <div class="char-tabs" role="tablist"><button class="char-tab" type="button" data-char-tab="equipment">装备</button><button class="char-tab" type="button" data-char-tab="attributes">属性</button><button class="char-tab" type="button" data-char-tab="bonus">加成</button><button class="char-tab" type="button" data-char-tab="sets">套装</button><button class="char-tab" type="button" data-char-tab="titles">称号</button></div>
       <div class="char-body" data-active-char-tab="${escapeHtml(characterTab)}">
         ${equipmentPanel}
@@ -3249,9 +3818,159 @@ function generateNewFloor() {
     if (e) {
       e.preventDefault?.();
       e.stopPropagation?.();
+      e.stopImmediatePropagation?.();
     }
     skillDetailModalOpen = false;
     renderSkillsDomPanel();
+  }
+  function closeSkillDetailModalImmediatelyDom(e) {
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      e.stopImmediatePropagation?.();
+    }
+    skillPanelTapState = null;
+    skillsLastTouchActionAt = Date.now();
+    skillPanelSuppressClickUntil = Date.now() + 900;
+    skillDetailCloseSwallowUntil = Date.now() + 900;
+    closeSkillDetailModalDom(e);
+  }
+  function handleSkillsPanelDelegatedAction(e) {
+    const p = document.getElementById('skills-dom-panel');
+    const layer = document.getElementById('skill-detail-layer');
+    if (!p && !layer) return;
+    const inSkillPanel = p?.contains(e.target) || layer?.contains(e.target);
+    if (!inSkillPanel) return;
+    const target = e.target.closest('.synergy-recommend-strip button, .skill-node, .skill-learn-btn:not([disabled]), .skill-forget-btn:not([disabled]), .mastery-claim-btn:not([disabled]), .synergy-claim-btn:not([disabled]):not(.mastery-claim-btn), .attr-btn:not(.disabled), .skill-modal-backdrop, .skill-modal-close, [data-skill-detail-close]');
+    if (!target) return;
+    const isInteractiveSkillAction = target.matches?.('.synergy-recommend-strip button, .skill-node, .skill-learn-btn:not([disabled]), .skill-forget-btn:not([disabled]), .mastery-claim-btn:not([disabled]), .synergy-claim-btn:not([disabled]):not(.mastery-claim-btn), .attr-btn:not(.disabled)');
+    if (isInteractiveSkillAction && e.type !== 'click') {
+      skillsLastTouchActionAt = Date.now();
+    }
+    if (Date.now() < skillDetailCloseSwallowUntil && target.closest?.('.pclose')) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      e.stopImmediatePropagation?.();
+      return;
+    }
+    const isPointerTouch = e.type === 'pointerdown' && e.pointerType !== 'mouse';
+    const isTouch = e.type === 'touchstart';
+    if (isPointerTouch || isTouch) {
+      const t = e.changedTouches?.[0] || e.touches?.[0] || e;
+      skillPanelTapState = {
+        x: Number(t.clientX) || 0,
+        y: Number(t.clientY) || 0,
+        scrollTop: inventoryScrollableParentDom(target)?.scrollTop || 0,
+        target,
+      };
+      return;
+    }
+    if (e.type === 'pointerup' || e.type === 'touchend') {
+      if (!skillPanelTapState) return;
+      const t = e.changedTouches?.[0] || e.touches?.[0] || e;
+      const moved = Math.hypot((Number(t.clientX) || 0) - skillPanelTapState.x, (Number(t.clientY) || 0) - skillPanelTapState.y);
+      const scrolled = Math.abs((inventoryScrollableParentDom(skillPanelTapState.target)?.scrollTop || 0) - skillPanelTapState.scrollTop);
+      const tapTarget = skillPanelTapState.target;
+      skillPanelTapState = null;
+      if (moved > INVENTORY_TAP_MOVE_THRESHOLD || scrolled > 2) {
+        skillPanelSuppressClickUntil = Date.now() + 450;
+        return;
+      }
+      skillsLastTouchActionAt = Date.now();
+      skillPanelSuppressClickUntil = Date.now() + 700;
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      runSkillsPanelAction(tapTarget, e);
+      return;
+    }
+    if (e.type === 'pointercancel' || e.type === 'touchcancel') {
+      skillPanelTapState = null;
+      skillPanelSuppressClickUntil = Date.now() + 450;
+      return;
+    }
+    if (e.type === 'click') {
+      if (Date.now() < skillPanelSuppressClickUntil || Date.now() - skillsLastTouchActionAt < 700) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        return;
+      }
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      runSkillsPanelAction(target, e);
+    }
+  }
+  function runSkillsPanelAction(target, e) {
+    const backdrop = target.classList?.contains('skill-modal-backdrop') ? target : null;
+    if (backdrop && e.target === backdrop) {
+      closeSkillDetailModalDom(e);
+      return;
+    }
+    if (target.closest?.('.skill-modal-close, [data-skill-detail-close]')) {
+      closeSkillDetailModalDom(e);
+      return;
+    }
+    const recommend = target.closest?.('.synergy-recommend-strip button');
+    if (recommend) {
+      selectedSkillTreeNode = { tree: recommend.dataset.tree, index: parseInt(recommend.dataset.index, 10) || 0 };
+      skillDetailModalOpen = true;
+      renderSkillsDomPanel();
+      return;
+    }
+    const node = target.closest?.('.skill-node');
+    if (node) {
+      selectedSkillTreeNode = { tree: node.dataset.tree, index: parseInt(node.dataset.index, 10) || 0 };
+      skillDetailModalOpen = true;
+      renderSkillsDomPanel();
+      return;
+    }
+    const learnBtn = target.closest?.('.skill-learn-btn:not([disabled])');
+    if (learnBtn) {
+      const t = learnBtn.dataset.tree, idx = parseInt(learnBtn.dataset.index, 10) || 0;
+      if (learnSkill(t, idx)) {
+        showMessage(`✨ 领悟技能: 【${SKILL_TREES[t].skills[idx].name}】！道法渐明。`, '#ffdd44');
+        selectedSkillTreeNode = { tree: t, index: idx };
+        skillDetailModalOpen = true;
+        renderSkillsDomPanel();
+      }
+      return;
+    }
+    const forgetBtn = target.closest?.('.skill-forget-btn:not([disabled])');
+    if (forgetBtn) {
+      const t = forgetBtn.dataset.tree, idx = parseInt(forgetBtn.dataset.index, 10) || 0;
+      if (typeof unlearnSkill === 'function' && unlearnSkill(t, idx)) {
+        showMessage(`化道归虚: 【${SKILL_TREES[t].skills[idx].name}】，悟道点已归还`, '#aaddff');
+        selectedSkillTreeNode = { tree: t, index: idx };
+        skillDetailModalOpen = true;
+        renderSkillsDomPanel();
+      }
+      return;
+    }
+    const masteryBtn = target.closest?.('.mastery-claim-btn:not([disabled])');
+    if (masteryBtn) {
+      const tree = masteryBtn.dataset.tree;
+      const count = parseInt(masteryBtn.dataset.count, 10) || 0;
+      const treeName = (typeof SKILL_TREES !== 'undefined' && SKILL_TREES[tree]?.name) || '单系专精';
+      if (typeof claimSkillMasteryReward === 'function' && claimSkillMasteryReward(tree, count)) {
+        showMessage(`🌟 ${treeName}${count}重专精，奖励已入体！`, '#b0ffbe');
+        renderSkillsDomPanel();
+      }
+      return;
+    }
+    const synergyBtn = target.closest?.('.synergy-claim-btn:not([disabled]):not(.mastery-claim-btn)');
+    if (synergyBtn) {
+      const id = synergyBtn.dataset.synergy;
+      const syn = (typeof SKILL_SYNERGIES !== 'undefined' && SKILL_SYNERGIES[id]) || null;
+      if (typeof claimSkillSynergyReward === 'function' && claimSkillSynergyReward(id)) {
+        showMessage(`🌟 ${syn?.name || '流派共鸣'}成型，奖励已入体！`, '#ffe28a');
+        renderSkillsDomPanel();
+      }
+      return;
+    }
+    const attrBtn = target.closest?.('.attr-btn:not(.disabled)');
+    if (attrBtn) {
+      allocateAttr(attrBtn.dataset.attr);
+      renderSkillsDomPanel();
+    }
   }
   function ensureSkillsDomPanel() {
     let p = document.getElementById('skills-dom-panel');
@@ -3259,6 +3978,12 @@ function generateNewFloor() {
     p = document.createElement('div');
     p.id = 'skills-dom-panel';
     const onCloseHit = e => {
+      if (Date.now() < skillDetailCloseSwallowUntil) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        e.stopImmediatePropagation?.();
+        return;
+      }
       const closeTarget = e.target.closest('.pclose');
       if (!closeTarget) return;
       if (e?.preventDefault) e.preventDefault();
@@ -3269,10 +3994,19 @@ function generateNewFloor() {
     p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
     p.addEventListener('click', onCloseHit, { capture: true });
     p.addEventListener('touchstart', e => {
-      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn')) {
+      if (e.target.closest('.skill-node, .skill-learn-btn, .skill-forget-btn, .attr-btn, .synergy-claim-btn, .synergy-recommend-strip button')) {
+        skillsLastTouchActionAt = Date.now();
+        skillPanelSuppressClickUntil = Date.now() + 650;
         e.stopPropagation();
       }
     }, { passive: false });
+    p.addEventListener('pointerdown', handleSkillsPanelDelegatedAction, { passive: true });
+    p.addEventListener('pointerup', handleSkillsPanelDelegatedAction, { passive: false });
+    p.addEventListener('pointercancel', handleSkillsPanelDelegatedAction, { passive: true });
+    p.addEventListener('touchstart', handleSkillsPanelDelegatedAction, { passive: true });
+    p.addEventListener('touchend', handleSkillsPanelDelegatedAction, { passive: false });
+    p.addEventListener('touchcancel', handleSkillsPanelDelegatedAction, { passive: true });
+    p.addEventListener('click', handleSkillsPanelDelegatedAction);
     document.body.appendChild(p);
     return p;
   }
@@ -3281,12 +4015,42 @@ function generateNewFloor() {
     if (layer) return layer;
     layer = document.createElement('div');
     layer.id = 'skill-detail-layer';
+    const onSkillDetailCloseHit = e => {
+      const closeTarget = e.target.closest?.('.skill-modal-close, [data-skill-detail-close]');
+      const backdropTarget = e.target.classList?.contains('skill-modal-backdrop');
+      if (!closeTarget && !backdropTarget) return;
+      closeSkillDetailModalImmediatelyDom(e);
+    };
+    layer.addEventListener('pointerdown', onSkillDetailCloseHit, { passive: false, capture: true });
+    layer.addEventListener('touchstart', onSkillDetailCloseHit, { passive: false, capture: true });
+    layer.addEventListener('click', onSkillDetailCloseHit, { capture: true });
+    layer.addEventListener('pointerup', e => {
+      if (Date.now() >= skillDetailCloseSwallowUntil) return;
+      if (!e.target.closest?.('.skill-modal-backdrop, .skill-detail-modal, .skill-modal-close, [data-skill-detail-close]')) return;
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      e.stopImmediatePropagation?.();
+    }, { passive: false, capture: true });
+    layer.addEventListener('touchend', e => {
+      if (Date.now() >= skillDetailCloseSwallowUntil) return;
+      if (!e.target.closest?.('.skill-modal-backdrop, .skill-detail-modal, .skill-modal-close, [data-skill-detail-close]')) return;
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      e.stopImmediatePropagation?.();
+    }, { passive: false, capture: true });
     layer.addEventListener('touchstart', e => {
-      if (e.target.closest('.skill-detail-modal, .skill-modal-close, .skill-learn-btn, .skill-forget-btn')) {
+      if (e.target.closest('.skill-detail-modal, .skill-modal-close, .skill-learn-btn, .skill-forget-btn, .synergy-claim-btn')) {
         skillsLastTouchActionAt = Date.now();
         e.stopPropagation();
       }
     }, { passive: true });
+    layer.addEventListener('pointerdown', handleSkillsPanelDelegatedAction, { passive: true });
+    layer.addEventListener('pointerup', handleSkillsPanelDelegatedAction, { passive: false });
+    layer.addEventListener('pointercancel', handleSkillsPanelDelegatedAction, { passive: true });
+    layer.addEventListener('touchstart', handleSkillsPanelDelegatedAction, { passive: true });
+    layer.addEventListener('touchend', handleSkillsPanelDelegatedAction, { passive: false });
+    layer.addEventListener('touchcancel', handleSkillsPanelDelegatedAction, { passive: true });
+    layer.addEventListener('click', handleSkillsPanelDelegatedAction);
     layer.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
     layer.addEventListener('wheel', e => e.stopPropagation(), { passive: true });
     document.body.appendChild(layer);
@@ -3308,14 +4072,20 @@ function generateNewFloor() {
     const mpCost = getActualSkillMpCostDom(skill);
     const hits = Math.max(1, Number(skill.hits || 1));
     const doctrineBonus = typeof getDoctrineSkillDamageBonus === 'function' ? getDoctrineSkillDamageBonus(skill) : 0;
-    const pierce = Math.min(0.85, Number(skill.armorPierce || 0) + (typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce() : 0));
+    const pierce = Math.min(0.85, Number(skill.armorPierce || 0) + (typeof getPassiveArmorPierce === 'function' ? getPassiveArmorPierce(skill) : 0));
     const defMult = enemy && typeof getEnemyDefenseMultiplier === 'function' ? getEnemyDefenseMultiplier() : 1;
     const enemyDef = enemy ? Math.max(0, Math.floor((enemy.def || 0) * defMult * (1 - pierce))) : 0;
     const dmgMult = Number(skill.dmgMult || 0);
     const basePerHit = dmgMult > 0 ? Math.max(1, Math.floor(player.atk * (dmgMult * (1 + doctrineBonus)) / hits - enemyDef)) : 0;
-    const low = dmgMult > 0 ? Math.max(1, (basePerHit - 3) * hits) : 0;
-    const high = dmgMult > 0 ? Math.max(low, (basePerHit + 3) * hits) : 0;
-    const critPct = Math.round((0.15 + Number(skill.critBonus || 0) + (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0)) * 100);
+    const lowRaw = dmgMult > 0 ? Math.max(1, (basePerHit - 3) * hits) : 0;
+    const highRaw = dmgMult > 0 ? Math.max(lowRaw, (basePerHit + 3) * hits) : 0;
+    const affinityMult = dmgMult > 0 && enemy && typeof getEnemyAffinityMultiplier === 'function' ? getEnemyAffinityMultiplier(enemy, skill.tree) : 1;
+    const low = lowRaw ? Math.max(1, Math.floor(lowRaw * affinityMult)) : 0;
+    const high = highRaw ? Math.max(low, Math.floor(highRaw * affinityMult)) : 0;
+    const critPct = Math.round((0.15 + Number(skill.critBonus || 0) + (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus(skill) : 0)) * 100);
+    const runtimeEffectBonus = typeof getSkillRuntimeEffectBonus === 'function' ? getSkillRuntimeEffectBonus(skill) : 0;
+    const healGuardAmp = typeof sumActiveSynergyEffect === 'function' ? sumActiveSynergyEffect('healGuardAmp') : 0;
+    const controlExtendTurns = typeof sumActiveSynergyEffect === 'function' ? sumActiveSynergyEffect('controlExtend', 'turns') : 0;
     const chips = [];
     if (dmgMult > 0) chips.push(['预计伤害', low === high ? `${low}` : `${low}-${high}`]);
     if (hits > 1) chips.push(['段数', `${hits}段`]);
@@ -3323,17 +4093,17 @@ function generateNewFloor() {
     if (dmgMult > 0) chips.push(['暴击', `${critPct}%`]);
     for (const eff of skill.effects || []) {
       if (eff.type === 'burn' || eff.type === 'bleed') {
-        const amp = eff.type === 'burn' && typeof getPassiveBurnAmp === 'function' ? getPassiveBurnAmp() : 0;
+        const amp = (eff.type === 'burn' && typeof getPassiveBurnAmp === 'function' ? getPassiveBurnAmp() : 0) + runtimeEffectBonus;
         const tick = Math.max(1, Math.floor(player.atk * Number(eff.ratio || 0.15) * (1 + amp)));
         chips.push([eff.type === 'burn' ? '灼烧' : '流血', `${tick}/回合×${eff.turns || 2}`]);
-      } else if (eff.type === 'weaken') chips.push(['虚弱', `${Math.round((eff.ratio || 0.15) * 100)}%×${eff.turns || 2}回合`]);
-      else if (eff.type === 'defBreak') chips.push(['破甲', `${Math.round((eff.ratio || 0.15) * 100)}%×${eff.turns || 2}回合`]);
-      else if (eff.type === 'freeze') chips.push(['冻结', `${Math.round((eff.chance ?? 1) * 100)}%×${eff.turns || 1}回合`]);
-      else if (eff.type === 'stunChance') chips.push(['麻痹', `${Math.round((eff.chance ?? 0.25) * 100)}%×${eff.turns || 1}回合`]);
-      else if (eff.type === 'healSelf') chips.push(['治疗', `${Math.floor(player.maxHp * (eff.ratio || 0.15))}`]);
-      else if (eff.type === 'guard') chips.push(['护盾', `${Math.round((eff.ratio || 0.25) * 100)}%×${eff.turns || 2}回合`]);
+      } else if (eff.type === 'weaken') chips.push(['虚弱', `${Math.round((eff.ratio || 0.15) * (1 + runtimeEffectBonus) * 100)}%×${(eff.turns || 2) + controlExtendTurns}回合`]);
+      else if (eff.type === 'defBreak') chips.push(['破甲', `${Math.round((eff.ratio || 0.15) * (1 + runtimeEffectBonus) * 100)}%×${(eff.turns || 2) + controlExtendTurns}回合`]);
+      else if (eff.type === 'freeze') chips.push(['冻结', `${Math.round((eff.chance ?? 1) * 100)}%×${(eff.turns || 1) + controlExtendTurns}回合`]);
+      else if (eff.type === 'stunChance') chips.push(['麻痹', `${Math.round((eff.chance ?? 0.25) * 100)}%×${(eff.turns || 1) + controlExtendTurns}回合`]);
+      else if (eff.type === 'healSelf') chips.push(['治疗', `${Math.floor(player.maxHp * (eff.ratio || 0.15) * (1 + runtimeEffectBonus + healGuardAmp))}`]);
+      else if (eff.type === 'guard') chips.push(['护盾', `${Math.round((eff.ratio || 0.25) * (1 + runtimeEffectBonus + healGuardAmp) * 100)}%×${eff.turns || 2}回合`]);
       else if (eff.type === 'splash') chips.push(['溅射', `${eff.count || 2}目标×${Math.round((eff.ratio || 0.35) * 100)}%`]);
-      else if (eff.type === 'execute') chips.push(['斩杀', `生命≤${Math.round((eff.ratio || 0.1) * 100)}%`]);
+      else if (eff.type === 'execute') chips.push(['追伤', `当前生命${Math.round((eff.ratio || 0.1) * 100)}%${eff.bossCapAtkRatio ? ` · Boss上限${Math.round(eff.bossCapAtkRatio * 100)}%攻` : ''}`]);
       else if (eff.type === 'refundOnKill') chips.push(['击杀返灵', `${Math.round((eff.ratio || 0.4) * 100)}%`]);
       else if (eff.type === 'passiveStat') chips.push(['被动属性', `${statLabelDom(eff.stat)} +${Math.round((eff.value || 0) * 100)}%`]);
       else if (eff.type === 'burnAmp') chips.push(['灼烧强化', `+${Math.round((eff.value || 0) * 100)}%`]);
@@ -3399,6 +4169,19 @@ function generateNewFloor() {
     const selectedRecommendation = typeof getSkillSynergyRecommendationForTree === 'function' ? getSkillSynergyRecommendationForTree(selectedTree) : null;
     const selectedImpact = typeof getSkillLearningImpact === 'function' ? getSkillLearningImpact(selectedTree, selectedIndex) : null;
     const buildRecommendations = typeof getRecommendedSkillNodesForBuild === 'function' ? getRecommendedSkillNodesForBuild(3) : [];
+    const sortedSynergyProgress = (synergyProgress.length ? synergyProgress : Object.entries(typeof SKILL_SYNERGIES !== 'undefined' ? SKILL_SYNERGIES : {}).map(([id, syn]) => ({ id, ...syn, active: activeSynergies.some(s => s.id === id), progress: [] }))).slice().sort((a, b) => {
+      const ar = a.claimable ? 0 : a.active ? 1 : 2;
+      const br = b.claimable ? 0 : b.active ? 1 : 2;
+      if (ar !== br) return ar - br;
+      return (a.missingTotal || 0) - (b.missingTotal || 0);
+    });
+    const visibleSynergyProgress = sortedSynergyProgress.slice(0, 6);
+    const visibleMasteryMilestones = (skillCodex?.masteryMilestones || []).slice().sort((a, b) => {
+      const ar = a.claimable ? 0 : a.active ? 1 : 2;
+      const br = b.claimable ? 0 : b.active ? 1 : 2;
+      if (ar !== br) return ar - br;
+      return (a.missing || 0) - (b.missing || 0);
+    }).slice(0, 6);
     const selectedReqTextSafe = escapeHtml(selectedReqText);
     const detailTagsHtml = selectedSummary.split(' · ').map(t => `<span>${escapeHtml(t)}</span>`).join('');
     const selectedBuildHintHtml = selectedRecommendation ? `<div class="skill-build-hint ${selectedRecommendation.type === 'mastery' ? 'mastery' : 'synergy'}"><b>${escapeHtml(selectedRecommendation.icon || '✦')} 推荐路线</b><span>${escapeHtml(selectedRecommendation.hint || '')}</span></div>` : '';
@@ -3472,7 +4255,36 @@ function generateNewFloor() {
       });
       html += `</div></section>`;
     });
+    const masteryPanelHtml = skillCodex ? `<section class="skill-synergy-panel mastery-milestone-panel">
+        <div class="synergy-title">单系专精奖励<small>${visibleMasteryMilestones.some(m => m.claimable) ? '有阶段奖励可领' : '3/5 同系阶段奖励'}</small></div>
+        <div class="synergy-list">
+          ${visibleMasteryMilestones.map(m => {
+            const state = m.claimed ? '已领取' : m.claimable ? '可领取' : m.active ? '已达成' : `还差 ${escapeHtml(m.missing)} 个`;
+            const rewardShort = (m.rewardText || '').replace('阶段奖励：', '').replace(/炼体点/g, '炼体').replace(/悟道点/g, '悟道').replace(/\s+/g, ' ').trim();
+            return `<div class="synergy-card mastery-card ${m.active ? 'active' : 'locked'} ${m.claimed ? 'claimed' : ''} ${m.claimable ? 'claimable' : ''}" style="--tree-color:${safeCssColor(m.color)}"><b>${escapeHtml(m.icon)} ${escapeHtml(m.shortName)}${escapeHtml(m.name)}</b><span>${state} · ${escapeHtml(Math.min(m.learned, m.count))}/${escapeHtml(m.count)}</span>${rewardShort ? `<small class="synergy-reward">${escapeHtml(rewardShort)}</small>` : ''}${m.claimable ? `<button class="synergy-claim-btn mastery-claim-btn" data-tree="${escapeHtml(m.tree)}" data-count="${escapeHtml(m.count)}">领取</button>` : m.claimed ? `<button class="synergy-claim-btn claimed" disabled>已领</button>` : ''}</div>`;
+          }).join('') || '<div class="synergy-card locked"><b>暂无专精阶段</b><span>继续悟道解锁</span></div>'}
+        </div>
+      </section>` : '';
+    const synergyPanelHtml = `<section class="skill-synergy-panel">
+        <div class="synergy-title">流派共鸣${synergyTitleSmall ? `<small>${escapeHtml(synergyTitleSmall)}</small>` : ''}</div>
+        ${buildRecommendations.length ? `<div class="synergy-recommend-strip"><b>下一手推荐</b>${buildRecommendations.map(r => `<button type="button" data-tree="${escapeHtml(r.tree)}" data-index="${r.index}">${escapeHtml(r.skill.icon || '✦')} ${escapeHtml(r.skill.name)}<small>${escapeHtml(r.impact?.text || '')}</small></button>`).join('')}</div>` : ''}
+        <div class="synergy-list">
+          ${visibleSynergyProgress.map(syn => {
+            const active = !!syn.active;
+            const req = (syn.trees || []).map(t => `${skillTreeShortName(SKILL_TREES[t]?.name || t)}${syn.minLearnedEach || 1}`).join(' + ');
+            const progressText = (syn.progress || []).map(p => `${p.shortName}${Math.min(p.learned, p.required)}/${p.required}`).join(' · ');
+            const missingText = active ? '已激活' : (syn.progress || []).filter(p => p.missing > 0).map(p => `${p.shortName}${p.missing}`).join('、');
+            const effectText = (syn.effects || []).map(e => SKILL_EFFECT_LABELS[e.type] || e.type).slice(0, 1).join(' / ');
+            const claimState = syn.claimed ? '已领取' : syn.claimable ? '可领取' : active ? '已成型' : `需要 ${escapeHtml(req)}`;
+            const mobileHint = active ? effectText : (missingText ? `还差：${missingText}` : req);
+            const rewardShort = (syn.rewardText || '').replace('成型奖励：', '').replace(/攻击/g, '攻').replace(/灵力上限/g, '灵').replace(/生命上限/g, '命').replace(/防御/g, '防').replace(/\s+/g, ' ').trim();
+            return `<div class="synergy-card ${active ? 'active' : 'locked'} ${syn.claimed ? 'claimed' : ''} ${syn.claimable ? 'claimable' : ''}"><b>${escapeHtml(syn.icon || '✦')} ${escapeHtml(syn.name)}</b><span>${claimState}</span>${progressText ? `<strong>${escapeHtml(progressText)}</strong>` : ''}${mobileHint ? `<em>${escapeHtml(mobileHint)}</em>` : ''}${rewardShort ? `<small class="synergy-reward">${escapeHtml(rewardShort)}</small>` : ''}${syn.claimable ? `<button class="synergy-claim-btn" data-synergy="${escapeHtml(syn.id)}">领取</button>` : syn.claimed ? `<button class="synergy-claim-btn claimed" disabled>已领</button>` : ''}</div>`;
+          }).join('') || '<div class="synergy-card locked"><b>暂无共鸣</b><span>继续悟道解锁</span></div>'}
+        </div>
+      </section>`;
     html += `</div>
+      ${synergyPanelHtml}
+      ${masteryPanelHtml}
       <aside class="skill-detail-card" style="--branch-color:${safeCssColor(selectedData.color)}">
         ${detailHtml}
       </aside>
@@ -3486,30 +4298,6 @@ function generateNewFloor() {
         <div class="codex-tree-row">${(skillCodex.treeStats || []).map(t => `<i style="--tree-color:${safeCssColor(t.color)}" class="${t.mastery?.active ? 'mastery' : ''}">${escapeHtml(t.shortName)} ${escapeHtml(t.learned)}/${escapeHtml(t.total)}</i>`).join('')}</div>
         ${skillCodex.claimableCount ? `<div class="codex-claim-guide">可领取：${[...(skillCodex.claimableSynergies || []).map(s => `「${s.name}」`), ...(skillCodex.claimableMasteries || []).map(m => `「${m.shortName}${m.name}」`)].join('、')}，下滑点击领取。</div>` : `<div class="codex-claim-guide muted">${escapeHtml(skillCodex.next?.hint || skillCodex.headline || '')}</div>`}
       </section>` : ''}
-      ${skillCodex ? `<section class="skill-synergy-panel mastery-milestone-panel">
-        <div class="synergy-title">单系专精奖励<small>同系悟道达到 3/5 个可领取阶段奖励</small></div>
-        <div class="synergy-list">
-          ${(skillCodex?.masteryMilestones || []).map(m => {
-            const state = m.claimed ? '已领取' : m.claimable ? '可领取' : m.active ? '已达成' : `还差 ${escapeHtml(m.missing)} 个`;
-            return `<div class="synergy-card mastery-card ${m.active ? 'active' : 'locked'} ${m.claimed ? 'claimed' : ''} ${m.claimable ? 'claimable' : ''}" style="--tree-color:${safeCssColor(m.color)}"><b>${escapeHtml(m.icon)} ${escapeHtml(m.shortName)}${escapeHtml(m.name)}</b><span>${state}</span><strong>${escapeHtml(m.shortName)} ${escapeHtml(Math.min(m.learned, m.count))}/${escapeHtml(m.count)}</strong><em>${escapeHtml(m.treeName)}同系已悟 ${escapeHtml(m.count)} 个时凝成专精阶段。</em>${m.rewardText ? `<small class="synergy-reward">${escapeHtml(m.rewardText)}</small>` : ''}${m.claimable ? `<button class="synergy-claim-btn mastery-claim-btn" data-tree="${escapeHtml(m.tree)}" data-count="${escapeHtml(m.count)}">领取专精奖励</button>` : m.claimed ? `<button class="synergy-claim-btn claimed" disabled>奖励已领取</button>` : ''}</div>`;
-          }).join('') || '<div class="synergy-card locked"><b>暂无专精阶段</b><span>继续悟道解锁</span></div>'}
-        </div>
-      </section>` : ''}
-      <section class="skill-synergy-panel">
-        <div class="synergy-title">流派共鸣${synergyTitleSmall ? `<small>${escapeHtml(synergyTitleSmall)}</small>` : ''}</div>
-        ${buildRecommendations.length ? `<div class="synergy-recommend-strip"><b>下一手推荐</b>${buildRecommendations.map(r => `<button type="button" data-tree="${escapeHtml(r.tree)}" data-index="${r.index}">${escapeHtml(r.skill.icon || '✦')} ${escapeHtml(r.skill.name)}<small>${escapeHtml(r.impact?.text || '')}</small></button>`).join('')}</div>` : ''}
-        <div class="synergy-list">
-          ${(synergyProgress.length ? synergyProgress : Object.entries(typeof SKILL_SYNERGIES !== 'undefined' ? SKILL_SYNERGIES : {}).map(([id, syn]) => ({ id, ...syn, active: activeSynergies.some(s => s.id === id), progress: [] }))).map(syn => {
-            const active = !!syn.active;
-            const req = (syn.trees || []).map(t => `${skillTreeShortName(SKILL_TREES[t]?.name || t)}${syn.minLearnedEach || 1}`).join(' + ');
-            const progressText = (syn.progress || []).map(p => `${p.shortName}${Math.min(p.learned, p.required)}/${p.required}`).join(' · ');
-            const missingText = active ? '已激活' : (syn.progress || []).filter(p => p.missing > 0).map(p => `${p.shortName}${p.missing}`).join('、');
-            const effectText = (syn.effects || []).map(e => SKILL_EFFECT_LABELS[e.type] || e.type).join(' / ');
-            const claimState = syn.claimed ? '已领取' : syn.claimable ? '可领取' : active ? '已成型' : `需要 ${escapeHtml(req)}`;
-            return `<div class="synergy-card ${active ? 'active' : 'locked'} ${syn.claimed ? 'claimed' : ''} ${syn.claimable ? 'claimable' : ''}"><b>${escapeHtml(syn.icon || '✦')} ${escapeHtml(syn.name)}</b><span>${claimState}</span>${progressText ? `<strong>${escapeHtml(progressText)}</strong>` : ''}${missingText && !active ? `<i>还差：${escapeHtml(missingText)}</i>` : ''}<em>${escapeHtml(syn.desc || '')}</em>${syn.rewardText ? `<small class="synergy-reward">${escapeHtml(syn.rewardText)}</small>` : ''}${effectText ? `<small>${escapeHtml(effectText)}</small>` : ''}${syn.claimable ? `<button class="synergy-claim-btn" data-synergy="${escapeHtml(syn.id)}">领取成型奖励</button>` : syn.claimed ? `<button class="synergy-claim-btn claimed" disabled>奖励已领取</button>` : ''}</div>`;
-          }).join('') || '<div class="synergy-card locked"><b>暂无共鸣</b><span>继续悟道解锁</span></div>'}
-        </div>
-      </section>
       <div class="attr-bar skill-attr-bar">
         <span class="attr-title">悟道加点</span>`;
     const attrBtns = [['atk','攻+3','#ff6644'],['def','防+2','#4488ff'],['hp','命+20','#55ff55'],['mp','灵+10','#aaddff']];
@@ -3524,95 +4312,11 @@ function generateNewFloor() {
     p.innerHTML = html;
     const detailLayer = ensureSkillDetailLayer();
     detailLayer.innerHTML = skillDetailModalOpen ? `<div class="skill-modal-backdrop"><aside class="skill-detail-card skill-detail-modal" style="--branch-color:${safeCssColor(selectedData.color)}">
-        <button class="skill-modal-close" aria-label="关闭技能详情">×</button>
+        <button class="skill-modal-close" data-skill-detail-close="1" aria-label="关闭技能详情">×</button>
         ${detailHtml}
       </aside></div>` : '';
-    // Click backdrop or close button to dismiss modal. Do not use once:true here:
-    // tapping learn/forget inside the modal bubbles to the backdrop after re-render on mobile,
-    // which would consume the one-shot listener and make the next ❌ appear dead.
-    const backdropEl = detailLayer.querySelector('.skill-modal-backdrop');
-    if (backdropEl) {
-      const onModalCloseIntent = e => {
-        if (e.target === backdropEl || e.target.closest('.skill-modal-close')) closeSkillDetailModalDom(e);
-      };
-      backdropEl.addEventListener('click', onModalCloseIntent);
-      backdropEl.addEventListener('touchstart', onModalCloseIntent, { passive: false });
-    }
-    p.querySelectorAll('.synergy-recommend-strip button').forEach(el => {
-      bindInventoryTapDom(el, () => {
-        selectedSkillTreeNode = { tree: el.dataset.tree, index: parseInt(el.dataset.index, 10) || 0 };
-        skillDetailModalOpen = true;
-        renderSkillsDomPanel();
-      });
-    });
-    p.querySelectorAll('.skill-node').forEach(el => {
-      const openSkillDetail = () => {
-        selectedSkillTreeNode = { tree: el.dataset.tree, index: parseInt(el.dataset.index, 10) || 0 };
-        // 只响应真正点击；滑动技能树时不弹详情，避免滚动误触。
-        skillDetailModalOpen = true;
-        renderSkillsDomPanel();
-      };
-      bindInventoryTapDom(el, openSkillDetail);
-    });
-    document.querySelectorAll('#skills-dom-panel .skill-learn-btn:not([disabled]), #skill-detail-layer .skill-learn-btn:not([disabled])').forEach(el => {
-      const fn = e => {
-        e?.preventDefault?.();
-        e?.stopPropagation?.();
-        const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
-        if (learnSkill(t, idx)) {
-          showMessage(`✨ 领悟技能: 【${SKILL_TREES[t].skills[idx].name}】！道法渐明。`, '#ffdd44');
-          selectedSkillTreeNode = { tree: t, index: idx };
-          skillDetailModalOpen = true;
-          renderSkillsDomPanel();
-        }
-      };
-      bindInventoryTapDom(el, fn);
-    });
-    document.querySelectorAll('#skills-dom-panel .skill-forget-btn:not([disabled]), #skill-detail-layer .skill-forget-btn:not([disabled])').forEach(el => {
-      const fn = e => {
-        e?.preventDefault?.();
-        e?.stopPropagation?.();
-        const t = el.dataset.tree, idx = parseInt(el.dataset.index, 10) || 0;
-        if (typeof unlearnSkill === 'function' && unlearnSkill(t, idx)) {
-          showMessage(`化道归虚: 【${SKILL_TREES[t].skills[idx].name}】，悟道点已归还`, '#aaddff');
-          selectedSkillTreeNode = { tree: t, index: idx };
-          skillDetailModalOpen = true;
-          renderSkillsDomPanel();
-        }
-      };
-      bindInventoryTapDom(el, fn);
-    });
-    p.querySelectorAll('.mastery-claim-btn:not([disabled])').forEach(el => {
-      const fn = e => {
-        e?.preventDefault?.();
-        e?.stopPropagation?.();
-        const tree = el.dataset.tree;
-        const count = parseInt(el.dataset.count, 10) || 0;
-        const treeName = (typeof SKILL_TREES !== 'undefined' && SKILL_TREES[tree]?.name) || '单系专精';
-        if (typeof claimSkillMasteryReward === 'function' && claimSkillMasteryReward(tree, count)) {
-          showMessage(`🌟 ${treeName}${count}重专精，奖励已入体！`, '#b0ffbe');
-          renderSkillsDomPanel();
-        }
-      };
-      bindInventoryTapDom(el, fn);
-    });
-    p.querySelectorAll('.synergy-claim-btn:not([disabled]):not(.mastery-claim-btn)').forEach(el => {
-      const fn = e => {
-        e?.preventDefault?.();
-        e?.stopPropagation?.();
-        const id = el.dataset.synergy;
-        const syn = (typeof SKILL_SYNERGIES !== 'undefined' && SKILL_SYNERGIES[id]) || null;
-        if (typeof claimSkillSynergyReward === 'function' && claimSkillSynergyReward(id)) {
-          showMessage(`🌟 ${syn?.name || '流派共鸣'}成型，奖励已入体！`, '#ffe28a');
-          renderSkillsDomPanel();
-        }
-      };
-      bindInventoryTapDom(el, fn);
-    });
-    p.querySelectorAll('.attr-btn:not(.disabled)').forEach(el => {
-      const fn = () => { allocateAttr(el.dataset.attr); renderSkillsDomPanel(); };
-      bindInventoryTapDom(el, fn);
-    });
+    // Static skill panel actions are delegated in ensureSkillsDomPanel()/ensureSkillDetailLayer().
+    // renderSkillsDomPanel() only refreshes markup so rerenders cannot accumulate duplicate mobile listeners.
     // ── Scroll reset: ensure panel body starts at top when opened ──
     const panelBody = p.querySelector('.panel-body, .skills-panel-body');
     if (panelBody) panelBody.scrollTop = 0;
@@ -4081,17 +4785,137 @@ function generateNewFloor() {
   function ensureCombatDomPanel() {
     let p = document.getElementById('combat-dom-panel');
     if (p) return p;
+    let toast = document.getElementById('combat-result-toast');
+    if (!toast) { toast = document.createElement('div'); toast.id = 'combat-result-toast'; toast.className = 'combat-result-toast'; toast.style.pointerEvents = 'none'; document.body.appendChild(toast); }
     p = document.createElement('div'); p.id = 'combat-dom-panel';
+    const onCombatAction = e => {
+      const target = e.target.closest('#cbt-attack, #cbt-defend, #cbt-flee, #cbt-skill-toggle, #cbt-skill-toggle-action, .cbt-skill-btn, .cbt-drawer-skill');
+      if (!target) return;
+      if (e.type === 'click' && Date.now() < combatDelegatedTouchUntil) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        return;
+      }
+      if (target.classList.contains('disabled')) return;
+      const scrollCard = target.closest('.cbt-drawer-skill');
+      if ((e.type === 'pointerdown' || e.type === 'touchstart') && scrollCard) {
+        const drawer = scrollCard.closest('.cbt-skill-drawer');
+        const point = e.touches?.[0] || e;
+        scrollCard._combatTapStart = {
+          x: Number(point.clientX || 0),
+          y: Number(point.clientY || 0),
+          scrollTop: drawer ? drawer.scrollTop : 0,
+          at: Date.now()
+        };
+        return;
+      }
+      if (e.type === 'click' && scrollCard && scrollCard._combatTapStart) {
+        const drawer = scrollCard.closest('.cbt-skill-drawer');
+        const start = scrollCard._combatTapStart;
+        scrollCard._combatTapStart = null;
+        const moved = Math.abs(Number(e.clientX || 0) - start.x) > 10 || Math.abs(Number(e.clientY || 0) - start.y) > 10 || Math.abs((drawer ? drawer.scrollTop : 0) - start.scrollTop) > 2;
+        if (moved) {
+          e.preventDefault?.();
+          e.stopPropagation?.();
+          combatDelegatedTouchUntil = Date.now() + 250;
+          return;
+        }
+      }
+      if (e.type === 'touchstart' || e.type === 'pointerdown') combatDelegatedTouchUntil = Date.now() + 650;
+      if (e.type === 'click' && Date.now() < combatDelegatedTouchUntil) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        return;
+      }
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      if (!isInCombat() || !currentEnemy) return;
+      const isPlayerTurn = combatState === COMBAT_STATE.PLAYER_TURN;
+      if (target.id === 'cbt-skill-toggle' || target.id === 'cbt-skill-toggle-action') {
+        markCombatActionFeedback('toggle');
+        combatSkillDrawerOpen = !combatSkillDrawerOpen;
+        combatDomRenderCacheKey = '';
+        renderCombatDomPanel();
+        return;
+      }
+      if (!isPlayerTurn) return;
+      if (target.id === 'cbt-attack') { markCombatActionFeedback('attack'); combatSkillDrawerOpen = false; combatDomRenderCacheKey = ''; playerAttack(); return; }
+      if (target.id === 'cbt-defend') { markCombatActionFeedback('defend'); combatSkillDrawerOpen = false; combatDomRenderCacheKey = ''; playerDefend(); return; }
+      if (target.id === 'cbt-flee') { markCombatActionFeedback('flee'); combatSkillDrawerOpen = false; combatDomRenderCacheKey = ''; playerFlee(); return; }
+      if (target.matches('.cbt-skill-btn, .cbt-drawer-skill')) {
+        const idx = parseInt(target.dataset.skill, 10) || 0;
+        const combatSkills = typeof getCombatSkills === 'function' ? getCombatSkills() : [];
+        const skill = combatSkills[idx];
+        const cost = skill && typeof getActualSkillMpCostDom === 'function' ? getActualSkillMpCostDom(skill) : Number(skill?.mpCost || 0);
+        markCombatActionFeedback(player.mp < cost ? 'mp' : 'skill', idx);
+        combatSkillDrawerOpen = false;
+        combatDomRenderCacheKey = '';
+        playerUseSkill(idx);
+      }
+    };
+    p.addEventListener('pointerdown', onCombatAction, { passive: false });
+    p.addEventListener('touchstart', onCombatAction, { passive: false });
+    p.addEventListener('click', onCombatAction);
     document.body.appendChild(p);
     return p;
   }
+  function getCombatDefensePreviewDom(enemy = currentEnemy, intent = null) {
+    if (!enemy || !player) return null;
+    const next = intent || enemy._nextIntent || null;
+    const suggestion = String(next?.suggestion || '');
+    const shouldDefend = /防御|护身|控场/.test(suggestion) || next?.attackType === 'heavy' || next?.type === 'boss' || ['multiHit', 'damageStatus', 'damageDebuff'].includes(next?.skill?.type || '');
+    if (!shouldDefend) return null;
+    const attackMult = (typeof getEnemyAttackBuffMultiplier === 'function' ? getEnemyAttackBuffMultiplier() : 1);
+    const takenMult = (typeof getPlayerTakenDamageMultiplier === 'function' ? getPlayerTakenDamageMultiplier() : 1);
+    const reduce = typeof equipmentAbilityValue === 'function' ? Math.min(0.7, Number(equipmentAbilityValue('dmgReduce') || 0) / 100) : 0;
+    const skill = next?.skill || null;
+    let mult = Number(skill?.dmgMult || 0) || (next?.attackType === 'heavy' ? 1.35 : 1);
+    if (skill?.type === 'multiHit') mult = Math.max(mult, Number(skill.hits || 2) * 0.72);
+    if (next?.type === 'boss') mult = Math.max(mult, 1.2);
+    const raw = Math.max(1, Math.floor(Number(enemy.atk || 0) * attackMult * mult) - Number(player.def || 0));
+    let normal = Math.max(1, Math.floor(raw * takenMult));
+    if (reduce > 0) normal = Math.max(1, Math.floor(normal * (1 - reduce)));
+    const defended = Math.max(1, Math.floor(normal * 0.5));
+    const saved = Math.max(0, normal - defended);
+    if (saved <= 0) return null;
+    const hpPct = player.maxHp ? Number(player.hp || 0) / Math.max(1, Number(player.maxHp || 1)) : 1;
+    const tone = normal >= Number(player.hp || 0) ? 'danger' : (hpPct < 0.45 || saved >= 10 ? 'warn' : 'safe');
+    return { normal, defended, saved, tone, text: `防御少受约${saved}伤` };
+  }
   function renderCombatDomPanel() {
     const p = ensureCombatDomPanel();
-    if (!isInCombat() || !currentEnemy) { p.innerHTML=''; combatSkillDrawerOpen = false; return; }
+    if (!isInCombat() || !currentEnemy) {
+      if (p.innerHTML) p.innerHTML='';
+      combatDomRenderCacheKey = '';
+      combatSkillDrawerOpen = false;
+      p.classList.remove('drawer-open');
+      return;
+    }
+    const combatSkills = getCombatSkills();
+    const isPlayerTurn = combatState === COMBAT_STATE.PLAYER_TURN;
+    const feedbackKey = combatActionFeedback.until > Date.now() ? `${combatActionFeedback.id}:${combatActionFeedback.until}` : '';
+    const cacheKey = [
+      currentEnemy.name, currentEnemy.title || '', Math.ceil(Number(currentEnemy.hp || 0)), Number(currentEnemy.maxHp || 0),
+      Math.ceil(Number(player.hp || 0)), Number(player.maxHp || 0), Math.ceil(Number(player.mp || 0)), Number(player.maxMp || 0), player.def || 0,
+      combatState, combatSkillDrawerOpen ? 1 : 0, feedbackKey, combatLogBuffer.slice(-6).map(l => `${l.seq}:${l.text}:${l.tone}:${l.color}`).join('|'),
+      (currentEnemy._statusEffects || []).map(s => `${s.type}:${s.turns}`).join('|'),
+      (player._statusEffects || []).map(s => `${s.type}:${s.turns}`).join('|'),
+      currentEnemy._nextIntent ? `${currentEnemy._nextIntent.type}:${currentEnemy._nextIntent.icon}:${currentEnemy._nextIntent.label}` : '',
+      combatSkills.map(s => `${s.tree}:${s.index}:${s.name}:${getActualSkillMpCostDom(s)}`).join('|')
+    ].join('~');
+    if (cacheKey === combatDomRenderCacheKey) return;
+    combatDomRenderCacheKey = cacheKey;
+    p.classList.toggle('drawer-open', !!combatSkillDrawerOpen);
     const eHpPct = currentEnemy.maxHp ? Math.max(0, currentEnemy.hp / currentEnemy.maxHp) : 1;
     const enemyDisplayName = currentEnemy.title || currentEnemy.name;
     const enemySkills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
     const enemySkillText = enemySkills.length ? enemySkills.map(s => `${s.icon || '✦'}${s.name}`).join('、') : '无';
+    const lockedIntent = (currentEnemy && currentEnemy._nextIntent) || null;
+    const enemyIntent = lockedIntent || null;
+    const defensePreview = getCombatDefensePreviewDom(currentEnemy, enemyIntent);
+    const suggestionHtml = enemyIntent && enemyIntent.suggestion ? `<span class="cbt-intent-suggestion">${escapeHtml(enemyIntent.suggestion)}</span>` : '';
+    const defenseHintHtml = defensePreview ? `<span class="cbt-defense-hint ${escapeHtml(defensePreview.tone || 'safe')}" title="预计受${escapeHtml(defensePreview.normal)}伤；防御后约${escapeHtml(defensePreview.defended)}伤">🛡️${escapeHtml(defensePreview.text)}</span>` : '';
+    const enemyIntentHtml = enemyIntent ? `<div class="cbt-intent intent-${cssClassToken(enemyIntent.type || 'attack')}" title="${escapeHtml(enemyIntent.detail || '')}"><b>下回合</b><span class="cbt-intent-main">${escapeHtml(enemyIntent.icon || '⚔️')}${escapeHtml(enemyIntent.label || '普攻')}</span><div class="cbt-intent-hints">${suggestionHtml}${defenseHintHtml}</div></div>` : '';
     const enemyAffinity = typeof getEnemyAffinitySummary === 'function' ? getEnemyAffinitySummary(currentEnemy) : null;
     const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
     const enemyBuffAtk = typeof getEnemyAttackBuffMultiplier === 'function' ? getEnemyAttackBuffMultiplier() : 1;
@@ -4101,12 +4925,13 @@ function generateNewFloor() {
     const playerMpPct = player.maxMp ? Math.max(0, Math.min(100, player.mp / player.maxMp * 100)) : 100;
     const pEnemyName = `${currentEnemy.isBoss ? '👑' : '👺'} ${enemyDisplayName}`;
     const buildSummary = typeof getActiveSkillBuildSummary === 'function' ? getActiveSkillBuildSummary() : null;
-    const combatBenefit = typeof getSkillCombatBenefitSummary === 'function' ? getSkillCombatBenefitSummary() : null;
+    const combatBenefit = typeof getSkillCombatBenefitSummary === 'function' ? getSkillCombatBenefitSummary(currentEnemy) : null;
+    const buildAffinity = typeof getSkillBuildAffinityMatch === 'function' ? getSkillBuildAffinityMatch(currentEnemy) : null;
     const combatBuildBadges = buildSummary ? [
       ...(buildSummary.synergies || []).slice(0, 2).map(s => ({ cls: 'synergy', text: `${s.icon || '✦'} ${s.name}` })),
       ...(buildSummary.masteries || []).slice(0, 2).map(m => ({ cls: 'mastery', text: `${SKILL_TREES[m.tree]?.icon || '✦'} ${m.shortName || SKILL_TREES[m.tree]?.name || m.tree}专精` })),
     ] : [];
-    const combatBuildHtml = combatBuildBadges.length ? `<div class="cbt-build-row" title="${escapeHtml(combatBenefit?.text || '')}">${combatBuildBadges.slice(0, 3).map(b => `<span class="cbt-build-badge ${cssClassToken(b.cls)}">${escapeHtml(b.text)}</span>`).join('')}</div>` : (combatBenefit?.text ? `<div class="cbt-build-row"><span class="cbt-build-badge hint">${escapeHtml(combatBenefit.text)}</span></div>` : '');
+    const combatBuildHtml = combatBuildBadges.length || buildAffinity ? `<div class="cbt-build-row" title="${escapeHtml([combatBenefit?.text, buildAffinity?.detail].filter(Boolean).join(' · '))}">${combatBuildBadges.slice(0, 2).map(b => `<span class="cbt-build-badge ${cssClassToken(b.cls)}">${escapeHtml(b.text)}</span>`).join('')}${buildAffinity ? `<span class="cbt-build-badge affinity-${cssClassToken(buildAffinity.status || 'neutral')}">相性：${escapeHtml(buildAffinity.label || buildAffinity.detail || '一般')}</span>` : ''}</div>` : (combatBenefit?.text ? `<div class="cbt-build-row"><span class="cbt-build-badge hint">${escapeHtml(combatBenefit.text)}</span></div>` : '');
     const safeCombatColor = color => /^#[0-9a-f]{3,8}$/i.test(String(color || '')) ? color : '#d4c8b0';
     const statusLabelMap = {
       burn: ['🔥', '灼烧'], bleed: ['🩸', '流血'], freeze: ['🧊', '冻结'], stun: ['⚡', '麻痹'],
@@ -4119,9 +4944,12 @@ function generateNewFloor() {
     }).join('');
     const enemyStatusHtml = statusChipsHtml(currentEnemy._statusEffects || []);
     const playerStatusHtml = statusChipsHtml(player._statusEffects || []);
-    const logsHtml = combatLogBuffer.slice(-6).map(l => `<div class="cbt-log-entry tone-${cssClassToken(l.tone || 'neutral')}" style="--log-color:${safeCombatColor(l.color)}"><i>${escapeHtml(String(l.seq || ''))}</i><span>${escapeHtml(l.text)}</span></div>`).join('');
-    const combatSkills = getCombatSkills();
-    const isPlayerTurn = combatState === COMBAT_STATE.PLAYER_TURN;
+    const logsHtml = combatLogBuffer.slice(-4).map(l => `<div class="cbt-log-entry tone-${cssClassToken(l.tone || 'neutral')}" style="--log-color:${safeCombatColor(l.color)}"><i>${escapeHtml(String(l.seq || ''))}</i><span>${escapeHtml(l.text)}</span></div>`).join('');
+    const comboPlan = typeof getCombatSkillComboPlan === 'function' ? getCombatSkillComboPlan(combatSkills, currentEnemy) : [];
+    const recommendedCombo = comboPlan[0] || null;
+    const recommendedActionText = recommendedCombo?.skill?.name ? `技能·${recommendedCombo.skill.name}` : (combatSkills.length ? '技能' : '普攻');
+    const recommendedActionTitle = recommendedCombo ? `${recommendedCombo.skill?.icon || '✦'}${recommendedCombo.skill?.name || '技能'}：${recommendedCombo.label}` : (combatSkills.length ? '展开功法' : '暂无功法，建议普攻');
+    const recommendedActionIcon = recommendedCombo?.skill?.icon || '📜';
     let skillsHtml = '';
     if (combatSkills.length > 0) {
       const maxShow = Math.min(combatSkills.length, 3);
@@ -4134,76 +4962,58 @@ function generateNewFloor() {
         const values = getSkillEstimatedValuesDom(s, currentEnemy);
         const synergyTag = typeof getSkillSynergyTagText === 'function' ? getSkillSynergyTagText(s) : '';
         const synergyShortTag = typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(s) : synergyTag;
-        const affinityTag = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(s, currentEnemy) : '';
-        const metaText = [synergyShortTag, affinityTag].filter(Boolean).join(' · ');
-        skillsHtml += `<div class="cbt-skill-btn${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ' affinity-hit' : ''}" data-skill="${i}" style="--skill-color:${color};color:${color};border-color:${color}"><b>${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}${synergyTag ? '<i>共</i>' : ''}${affinityTag ? '<i class="aff">克</i>' : ''}</b><small>${escapeHtml(reason || (metaText || `灵${mpCost} · ${values.damage}伤`))}</small></div>`;
+        const synergyHint = typeof getSkillSynergyCombatHint === 'function' ? getSkillSynergyCombatHint(s, currentEnemy) : null;
+        const comboPrimer = typeof getCombatSkillComboPrimer === 'function' ? getCombatSkillComboPrimer(s, currentEnemy, combatSkills) : null;
+        const affinityMeta = typeof getSkillAffinityMeta === 'function' ? getSkillAffinityMeta(s, currentEnemy) : (typeof getSkillAffinityText === 'function' ? { text: getSkillAffinityText(s, currentEnemy), type: 'hit', badge: '克' } : null);
+        const affinityTag = affinityMeta?.text || '';
+        const affinityType = cssClassToken(affinityMeta?.type || 'hit');
+        const metaText = [recommendedCombo?.index === i ? `荐：${recommendedCombo.label}` : '', comboPrimer?.label, synergyHint?.readinessText, synergyHint?.label || synergyShortTag, affinityMeta?.tip || affinityTag].filter(Boolean).join(' · ');
+        const titleText = [recommendedCombo?.index === i ? `连携推荐：${recommendedCombo.label}` : '', comboPrimer?.detail, synergyHint?.text || synergyTag, synergyHint?.detailText, synergyHint?.readinessText, affinityMeta?.tip || affinityTag].filter(Boolean).join(' · ');
+        skillsHtml += `<div class="cbt-skill-btn${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ` affinity-${affinityType}` : ''}${recommendedCombo?.index === i ? ' combo-recommended' : ''}${combatActionFeedback.id === 'skill' && combatActionFeedback.until > Date.now() && parseInt(combatActionFeedback.skillIndex, 10) === i ? ' just-used' : ''}" role="button" tabindex="0" aria-disabled="${reason ? 'true' : 'false'}" data-skill="${i}" title="${escapeHtml(titleText)}" aria-label="${escapeHtml([s.name, titleText].filter(Boolean).join('：'))}" style="--skill-color:${color};color:${color};border-color:${color}"><b>${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}${recommendedCombo?.index === i ? '<i class="combo">荐</i>' : ''}${synergyTag ? '<i>共</i>' : ''}${affinityTag ? `<i class="aff ${affinityType}">${escapeHtml(affinityMeta?.badge || '克')}</i>` : ''}</b><small>${escapeHtml(reason || (metaText || `灵${mpCost} · ${values.damage}伤`))}</small></div>`;
       }
       if (combatSkills.length > 3) skillsHtml += `<div class="cbt-skill-more ${combatSkillDrawerOpen ? 'active' : ''}" id="cbt-skill-toggle">${combatSkillDrawerOpen ? '收起' : `技能 ${combatSkills.length}`}</div>`;
       skillsHtml += '</div>';
     }
-    const drawerHtml = combatSkillDrawerOpen && combatSkills.length > 0 ? `<div class="cbt-skill-drawer"><div class="cbt-drawer-title"><b>选择功法</b><span>${isPlayerTurn ? '点击释放，灵力不足会灰显' : '等待敌方行动结束'}</span></div><div class="cbt-drawer-grid">${combatSkills.map((s, i) => {
+    const drawerHtml = combatSkillDrawerOpen && combatSkills.length > 0 ? `<div class="cbt-skill-drawer"><div class="cbt-drawer-title"><b>功法</b><span>${isPlayerTurn ? '点按释放 · 可滚动' : '敌方行动中'}</span></div><div class="cbt-drawer-grid">${combatSkills.map((s, i) => {
       const color = safeCssColor(s.treeColor, '#d4a0ff');
       const mpCost = getActualSkillMpCostDom(s);
       const values = getSkillEstimatedValuesDom(s, currentEnemy);
       const summary = typeof getSkillEffectSummary === 'function' ? getSkillEffectSummary(s) : '';
       const synergyTag = typeof getSkillSynergyTagText === 'function' ? getSkillSynergyTagText(s) : '';
       const synergyShortTag = typeof getSkillSynergyShortTagText === 'function' ? getSkillSynergyShortTagText(s) : synergyTag;
-      const affinityTag = typeof getSkillAffinityText === 'function' ? getSkillAffinityText(s, currentEnemy) : '';
+      const synergyHint = typeof getSkillSynergyCombatHint === 'function' ? getSkillSynergyCombatHint(s, currentEnemy) : null;
+      const comboPrimer = typeof getCombatSkillComboPrimer === 'function' ? getCombatSkillComboPrimer(s, currentEnemy, combatSkills) : null;
+      const affinityMeta = typeof getSkillAffinityMeta === 'function' ? getSkillAffinityMeta(s, currentEnemy) : (typeof getSkillAffinityText === 'function' ? { text: getSkillAffinityText(s, currentEnemy), type: 'hit', badge: '克' } : null);
+      const affinityTag = affinityMeta?.text || '';
+      const affinityType = cssClassToken(affinityMeta?.type || 'hit');
       const reason = !isPlayerTurn ? '等待回合' : player.mp < mpCost ? '灵力不足' : '';
-      return `<button type="button" class="cbt-drawer-skill${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ' affinity-hit' : ''}" data-skill="${i}" style="--skill-color:${color};border-color:${color};color:${color}"><i>${escapeHtml(s.icon || '✦')}</i><b>${escapeHtml(s.name)}${synergyTag ? '<strong>共鸣</strong>' : ''}${affinityTag ? '<strong class="affinity">克制</strong>' : ''}</b><em>灵力 ${escapeHtml(mpCost)}</em><small>${escapeHtml(reason || `预计 ${values.damage} 伤${affinityTag ? ` · ${affinityTag}` : ''}`)}</small><span>${escapeHtml([summary, synergyShortTag || synergyTag, affinityTag].filter(Boolean).join(' · '))}</span></button>`;
+      return `<button type="button" class="cbt-drawer-skill${reason ? ' disabled' : ''}${synergyTag ? ' synergy-ready' : ''}${affinityTag ? ` affinity-${affinityType}` : ''}${recommendedCombo?.index === i ? ' combo-recommended' : ''}" data-skill="${i}" title="${escapeHtml([recommendedCombo?.index === i ? `连携推荐：${recommendedCombo.label}` : '', comboPrimer?.detail, synergyHint?.text || synergyTag, synergyHint?.detailText, synergyHint?.readinessText, affinityMeta?.tip || affinityTag].filter(Boolean).join(' · '))}" style="--skill-color:${color};border-color:${color};color:${color}"><i>${escapeHtml(s.icon || '✦')}</i><b>${escapeHtml(s.name)}${recommendedCombo?.index === i ? '<strong class="combo">荐</strong>' : ''}${synergyTag ? '<strong>共</strong>' : ''}${affinityTag ? `<strong class="affinity ${affinityType}">${escapeHtml(affinityMeta?.badge === '抗' ? '抗' : '克')}</strong>` : ''}</b><em>灵${escapeHtml(mpCost)} · ${escapeHtml(values.damage)}伤</em><small>${escapeHtml(reason || [comboPrimer?.label, synergyHint?.readinessText, affinityMeta?.tip || affinityTag].filter(Boolean).join(' · ') || `预计${values.damage}伤`)}</small><span>${escapeHtml([recommendedCombo?.index === i ? `荐：${recommendedCombo.label}` : '', comboPrimer?.label, synergyHint?.label || synergyShortTag || synergyTag, affinityMeta?.tip || affinityTag, summary].filter(Boolean).join(' · '))}</span></button>`;
     }).join('')}</div></div>` : '';
     p.innerHTML = `<div class="cbt-topline">
       <div class="cbt-enemy-block">
         <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
-        <div class="cbt-enemy-tags"><span class="stat-tag atk">攻 ${escapeHtml(enemyAtkText)}</span><span class="stat-tag def">防 ${escapeHtml(enemyDefText)}</span>${enemyAffinity?.weakText ? `<span class="affinity-tag weak">弱 ${escapeHtml(enemyAffinity.weakText)}</span>` : ''}${enemyAffinity?.resistText ? `<span class="affinity-tag resist">抗 ${escapeHtml(enemyAffinity.resistText)}</span>` : ''}${enemySkills.length ? `<span class="skill-tag">技 ${escapeHtml(enemySkillText)}</span>` : ''}</div>
+        <div class="cbt-threat-line" title="${escapeHtml([enemySkillText !== '无' ? `技能：${enemySkillText}` : '', enemyAffinity?.text || ''].filter(Boolean).join(' · '))}">${enemyAffinity?.weakText ? `<span class="weak">弱${escapeHtml(enemyAffinity.weakText)}</span>` : ''}${enemyAffinity?.resistText ? `<span class="resist">抗${escapeHtml(enemyAffinity.resistText)}</span>` : ''}${enemySkills.length ? `<span>技${escapeHtml(enemySkills.length)}</span>` : ''}${!enemyAffinity?.weakText && !enemyAffinity?.resistText && !enemySkills.length ? '<span>常规妖物</span>' : ''}</div>
       </div>
       <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
     </div>
-    <div class="cbt-hp-bar-wrap enemy"><b>妖血</b><div class="cbt-hp-bar-outer"><div class="cbt-hp-bar-inner" style="width:${Math.max(0, Math.min(100, eHpPct * 100))}%"></div></div><span class="cbt-hp-text">${escapeHtml(Number(currentEnemy.hp || 0))}/${escapeHtml(Number(currentEnemy.maxHp || 0))}</span></div>
-    <div class="cbt-status-row">${enemyStatusHtml || '<span class="cbt-status-empty">敌方无状态</span>'}</div>
-    <div class="cbt-player-card compact">
-      <div class="cbt-player-bars">
-        <div class="cbt-mini-bar hp"><span>生命</span><i><b style="width:${playerHpPct}%"></b></i><em>${escapeHtml(Number(player.hp || 0))}/${escapeHtml(Number(player.maxHp || 0))}</em></div>
-        <div class="cbt-mini-bar mp"><span>灵力</span><i><b style="width:${playerMpPct}%"></b></i><em>${escapeHtml(Number(player.mp || 0))}/${escapeHtml(Number(player.maxMp || 0))}</em></div>
-      </div>
+    <div class="cbt-hp-bar-wrap enemy"><b>敌</b><div class="cbt-hp-bar-outer"><div class="cbt-hp-bar-inner" style="width:${Math.max(0, Math.min(100, eHpPct * 100))}%"></div></div><span class="cbt-hp-text">${escapeHtml(Number(currentEnemy.hp || 0))}/${escapeHtml(Number(currentEnemy.maxHp || 0))}</span></div>
+    ${enemyIntentHtml}
+    <div class="cbt-combat-grid">
+      <section class="cbt-side enemy-side"><div class="cbt-side-label">妖</div><div class="cbt-status-row compact">${enemyStatusHtml || '<span class="cbt-status-empty">无状态</span>'}</div></section>
+      <section class="cbt-side player-side"><div class="cbt-player-bars">
+        <div class="cbt-mini-bar hp"><span>命</span><i><b style="width:${playerHpPct}%"></b></i><em>${escapeHtml(Number(player.hp || 0))}/${escapeHtml(Number(player.maxHp || 0))}</em></div>
+        <div class="cbt-mini-bar mp"><span>灵</span><i><b style="width:${playerMpPct}%"></b></i><em>${escapeHtml(Number(player.mp || 0))}/${escapeHtml(Number(player.maxMp || 0))}</em></div>
+      </div><div class="cbt-status-row compact player-status">${playerStatusHtml || '<span class="cbt-status-empty">无状态</span>'}</div></section>
     </div>
-    <div class="cbt-status-row player-status">${playerStatusHtml || '<span class="cbt-status-empty">我方无状态</span>'}</div>
     ${combatBuildHtml}
-    <div class="cbt-log">${logsHtml || '<div class="cbt-log-entry tone-info"><span>战斗记录将在这里显示</span></div>'}</div>${skillsHtml}${drawerHtml}<div class="cbt-actions-row"><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-attack" style="--act-color:#ff6633">⚔️<b>攻击</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-defend" style="--act-color:#dd9944">🛡️<b>防御</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-skill-toggle-action" style="--act-color:#d4a0ff">📜<b>技能</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" id="cbt-flee" style="--act-color:#66bbcc">🏃<b>逃跑</b></div></div>`;
-    const bindTap = (el, fn) => {
-      if (!el) return;
-      const run = e => {
-        if (e) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-        fn();
-      };
-      el.addEventListener('touchstart', e => {
-        // This panel is rebuilt immediately after toggling the skill drawer. The later
-        // synthetic click may land on the freshly-rendered toggle button, so the guard
-        // must be global, not stored in the old DOM node's closure.
-        skillsLastTouchActionAt = Date.now();
-        run(e);
-      }, { passive: false });
-      el.addEventListener('click', e => {
-        if (Date.now() - skillsLastTouchActionAt < 700) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        run(e);
-      });
-    };
-    if (isPlayerTurn) {
-      bindTap(p.querySelector('#cbt-attack'), () => { combatSkillDrawerOpen = false; playerAttack(); });
-      bindTap(p.querySelector('#cbt-defend'), () => { combatSkillDrawerOpen = false; playerDefend(); });
-      bindTap(p.querySelector('#cbt-flee'), () => { combatSkillDrawerOpen = false; playerFlee(); });
-    }
-    const toggleDrawer = () => { combatSkillDrawerOpen = !combatSkillDrawerOpen; renderCombatDomPanel(); };
-    bindTap(p.querySelector('#cbt-skill-toggle'), toggleDrawer);
-    bindTap(p.querySelector('#cbt-skill-toggle-action'), toggleDrawer);
-    p.querySelectorAll('.cbt-skill-btn:not(.disabled), .cbt-drawer-skill:not(.disabled)').forEach(el => bindTap(el, () => { combatSkillDrawerOpen = false; playerUseSkill(parseInt(el.dataset.skill, 10) || 0); }));
+    ${recommendedCombo ? `<div class="cbt-combo-guide"><b>荐</b><span>${escapeHtml(recommendedCombo.skill?.icon || '✦')}${escapeHtml(recommendedCombo.skill?.name || '技能')}：${escapeHtml(recommendedCombo.label)}</span></div>` : ''}
+    ${combatSkills.some(s => typeof getSkillSynergyCombatHint === 'function' && getSkillSynergyCombatHint(s, currentEnemy)) ? `<div class="cbt-resonance-strip">${combatSkills.slice(0, 3).map(s => {
+      const hint = typeof getSkillSynergyCombatHint === 'function' ? getSkillSynergyCombatHint(s, currentEnemy) : null;
+      const primer = typeof getCombatSkillComboPrimer === 'function' ? getCombatSkillComboPrimer(s, currentEnemy, combatSkills) : null;
+      const label = [primer?.label, hint?.readinessText || hint?.label].filter(Boolean).join(' · ');
+      return hint ? `<span title="${escapeHtml([primer?.detail, hint.detailText].filter(Boolean).join(' · '))}">${escapeHtml(s.icon || '✦')}${escapeHtml(s.name)}：${escapeHtml(label || hint.label)}</span>` : '';
+    }).filter(Boolean).join('')}</div>` : ''}
+    <div class="cbt-log">${logsHtml || '<div class="cbt-log-entry tone-info"><span>战斗记录将在这里显示</span></div>'}</div>${skillsHtml}${drawerHtml}<div class="cbt-actions-row"><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" role="button" tabindex="0" aria-disabled="${isPlayerTurn ? 'false' : 'true'}" id="cbt-attack" style="--act-color:#ff6633">⚔️<b>攻击</b></div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" role="button" tabindex="0" aria-disabled="${isPlayerTurn ? 'false' : 'true'}" id="cbt-defend" style="--act-color:#dd9944">🛡️<b>防御</b></div><div class="cbt-act-btn rec${recommendedCombo ? ' has-rec' : ''}${isPlayerTurn?'':' disabled'}" role="button" tabindex="0" aria-disabled="${isPlayerTurn ? 'false' : 'true'}" id="cbt-skill-toggle-action" title="${escapeHtml(recommendedActionTitle)}" style="--act-color:#d4a0ff">${escapeHtml(recommendedActionIcon)}<b>${escapeHtml(recommendedActionText)}</b>${recommendedCombo ? '<small>推荐</small>' : ''}</div><div class="cbt-act-btn${isPlayerTurn?'':' disabled'}" role="button" tabindex="0" aria-disabled="${isPlayerTurn ? 'false' : 'true'}" id="cbt-flee" style="--act-color:#66bbcc">🏃<b>逃跑</b></div></div>`;
   }
 
   function drawCombatUI() {
@@ -4228,7 +5038,7 @@ function generateNewFloor() {
            generateNewFloor();
            const eventText = typeof applyStageRoomEvent === 'function' ? applyStageRoomEvent(activeStage, nextIdx) : '';
            showMessage(eventText || `进入${activeStage.name} · ${getStageRoomLabel(activeStage, nextIdx)}...`, activeStage.color || '#ff9944');
-           autoSave();
+           autoSave({ delay: 8000 });
         } else {
           pushPanelToStack('stages');
           stageTab = 'stages';
@@ -4242,22 +5052,45 @@ function generateNewFloor() {
        }
      }
    }
-   function gameLoop() {
+   function syncRunBodyClasses() {
+    if (typeof document === 'undefined') return;
+    const nextCombat = isInCombat();
+    const nextStage = !!isInStageRun;
+    const nextSecret = !!isInSecretRealm;
+    if (runBodyClassCache.combat !== nextCombat) {
+      document.body.classList.toggle('combat-active', nextCombat);
+      runBodyClassCache.combat = nextCombat;
+    }
+    if (runBodyClassCache.stage !== nextStage) {
+      document.body.classList.toggle('stage-run-active', nextStage);
+      runBodyClassCache.stage = nextStage;
+    }
+    if (runBodyClassCache.secret !== nextSecret) {
+      document.body.classList.toggle('secret-realm-run-active', nextSecret);
+      runBodyClassCache.secret = nextSecret;
+    }
+  }
+  function gameLoop() {
      gameTicks++;
+     const hudTick = gameTicks % 4 === 0;
      updateParticles();
      handleInput();
-     if (!isInCombat()) checkCombatTrigger();
-     if (!isInCombat() && !breakthroughQueue) checkBreakthrough();
-     if (!isInCombat()) checkMaterialPickup();
-     if (!isInCombat()) checkTreasureChestPickup();
-     if (!isInCombat()) checkStairs();
+     const inCombatNow = isInCombat();
+     if (!inCombatNow) {
+       const interactionTileKey = `${Math.floor(player.x)},${Math.floor(player.y)}`;
+       const shouldCheckTileInteractions = interactionTileKey !== lastInteractionTileKey;
+       if (shouldCheckTileInteractions) {
+         checkCombatTrigger();
+         if (!isInCombat()) checkMaterialPickup();
+         if (!isInCombat()) checkTreasureChestPickup();
+         if (!isInCombat()) checkStairs();
+         lastInteractionTileKey = interactionTileKey;
+       }
+       if (!isInCombat() && !breakthroughQueue) checkBreakthrough();
+     }
      updateCamera();
      tickMessages();
-     if (typeof document !== 'undefined') {
-      document.body.classList.toggle('combat-active', isInCombat());
-      document.body.classList.toggle('stage-run-active', !!isInStageRun);
-      document.body.classList.toggle('secret-realm-run-active', !!isInSecretRealm);
-    }
+     syncRunBodyClasses();
      clearCanvas();
      drawDungeon();
      drawPlayer();
@@ -4271,8 +5104,10 @@ function generateNewFloor() {
     drawSecretRealmUI();
     drawTribulationUI();
     drawParticlesDom(camera);
-    renderMessageLog();
-    updateHUD(player, dungeonLevel);
+    if (hudTick) {
+      renderMessageLog();
+      updateHUD(player, dungeonLevel);
+    }
     ctx.restore();
   }
 
@@ -4289,6 +5124,7 @@ function generateNewFloor() {
   // ─── Secret Realm System ───
   let secretRealmSelectedId = null;
   let secretRealmSelectedDifficulty = 'normal';
+  let secretRealmDelegatedTouchUntil = 0;
   let secretRealmResultPanel = null;
 
   function getSecretRealmKeyCount(keyId) {
@@ -4352,10 +5188,6 @@ function generateNewFloor() {
         <button class="sr-result-close sr-close">关闭</button>
       </div>
     </div>`;
-    const moreBtn = p.querySelector('.sr-result-more');
-    if (moreBtn) bindPanelTap(moreBtn, () => { secretRealmResultPanel = null; renderSecretRealmDomPanel(); });
-    const closeBtn = p.querySelector('.sr-result-close');
-    if (closeBtn) bindPanelTap(closeBtn, closeSecretRealmPanel);
     return true;
   }
 
@@ -4383,9 +5215,29 @@ function generateNewFloor() {
       if (e?.stopPropagation) e.stopPropagation();
       closeSecretRealmPanel(e);
     };
+    const onSecretRealmAction = e => {
+      const target = e.target.closest('[data-sr-diff], .sr-result-more, .sr-run-quick, .sr-run-exit');
+      if (!target || target.disabled) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      if (e.type === 'touchstart' || e.type === 'pointerdown') secretRealmDelegatedTouchUntil = Date.now() + 650;
+      if (e.type === 'click' && Date.now() < secretRealmDelegatedTouchUntil) return;
+      const diffTarget = target.closest('[data-sr-diff]');
+      if (diffTarget) {
+        secretRealmSelectedDifficulty = diffTarget.dataset.srDiff;
+        renderSecretRealmDomPanel();
+        return;
+      }
+      if (target.matches('.sr-result-more')) { secretRealmResultPanel = null; renderSecretRealmDomPanel(); return; }
+      if (target.matches('.sr-run-quick')) { if (typeof quickChallengeSecretRealm === 'function') quickChallengeSecretRealm(); return; }
+      if (target.matches('.sr-run-exit')) { if (typeof onSecretRealmFlee === 'function') onSecretRealmFlee(); }
+    };
     p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
     p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
     p.addEventListener('click', onCloseHit, { capture: true });
+    p.addEventListener('pointerdown', onSecretRealmAction, { passive: false });
+    p.addEventListener('touchstart', onSecretRealmAction, { passive: false });
+    p.addEventListener('click', onSecretRealmAction);
     document.body.appendChild(p);
     return p;
   }
@@ -4421,10 +5273,6 @@ function generateNewFloor() {
         </div>
         <div class="sr-progress-hint">${canQuick ? '一键结算剩余节点；也可用右下角“速挑”' : '战斗中请先完成当前回合'}</div>
       </div>`;
-      const quickBtn = p.querySelector('.sr-run-quick');
-      if (quickBtn) bindPanelTap(quickBtn, () => { if (!quickBtn.disabled && typeof quickChallengeSecretRealm === 'function') quickChallengeSecretRealm(); });
-      const exitBtn = p.querySelector('.sr-run-exit');
-      if (exitBtn) bindPanelTap(exitBtn, () => { if (typeof onSecretRealmFlee === 'function') onSecretRealmFlee(); });
       return;
     }
 
@@ -4525,16 +5373,6 @@ function generateNewFloor() {
 
     p.innerHTML = html;
 
-    // Bind difficulty buttons
-    p.querySelectorAll('[data-sr-diff]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        secretRealmSelectedDifficulty = btn.dataset.srDiff;
-        renderSecretRealmDomPanel();
-      });
-      btn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-    });
-
     function selectSecretRealm(realmId) {
       if (!realmId || !SECRET_REALMS[realmId]) return;
       secretRealmSelectedId = realmId;
@@ -4561,11 +5399,7 @@ function generateNewFloor() {
       });
     }
 
-    // Close binding — pointerdown/touchstart closes immediately on mobile; click is fallback.
-    const closeBtn = p.querySelector('.pclose');
-    closeBtn?.addEventListener('pointerdown', closeSecretRealmPanel, { passive: false });
-    closeBtn?.addEventListener('touchstart', closeSecretRealmPanel, { passive: false });
-    closeBtn?.addEventListener('click', closeSecretRealmPanel);
+    // Close is handled by the creation-level capture fallback in ensureSecretRealmDomPanel().
   }
 
   function enterSecretRealm(realmId, difficulty, quickMode = false) {
@@ -5072,8 +5906,10 @@ function generateNewFloor() {
         const stars = stageStarText(stageId);
         const immortalMechanic = typeof getImmortalBossMechanic === 'function' ? getImmortalBossMechanic(stage.boss?.mechanicId || stage.id) : null;
         const mechanicBadge = immortalMechanic ? `<span class="stage-card-mechanic">${escapeHtml(immortalMechanic.icon || '🌌')} ${escapeHtml(immortalMechanic.name)}</span>` : '';
+        const stageAffinity = typeof getStageAffinityText === 'function' ? getStageAffinityText(stage) : '';
+        const stageBuildText = typeof getStageRecommendedBuildText === 'function' ? getStageRecommendedBuildText(stage, true) : '';
         return `<button class="stage-card ${active ? 'selected' : ''} ${unlocked ? '' : 'locked'}" style="--stage-color:${theme?.stairs || stage.color || selectedChapter.color}" type="button" data-stage-id="${escapeHtml(stage.id)}">
-          <span class="stage-card-icon">${stage.icon || selectedChapter.icon}</span><div class="stage-card-main"><b>${idx + 1}. ${escapeHtml(stage.name)}</b><em>${cleared ? stars : (unlocked ? '☆☆☆' : '未解锁')}</em><small>${escapeHtml(REALMS?.[stage.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(stage.recommendedPower)} · ${escapeHtml(stage.roomCount)}房</small>${mechanicBadge}</div><strong>${status}</strong>
+          <span class="stage-card-icon">${stage.icon || selectedChapter.icon}</span><div class="stage-card-main"><b>${idx + 1}. ${escapeHtml(stage.name)}</b><em>${cleared ? stars : (unlocked ? '☆☆☆' : '未解锁')}</em><small>${escapeHtml(REALMS?.[stage.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(stage.recommendedPower)} · ${escapeHtml(stage.roomCount)}房</small>${stageBuildText ? `<span class="stage-card-affinity">${escapeHtml(stageBuildText)}</span>` : ''}${mechanicBadge}</div><strong>${status}</strong>
         </button>`;
       }).join('');
       const unlocked = isStageUnlocked(player, selected.id);
@@ -5088,6 +5924,9 @@ function generateNewFloor() {
       const chBonusText = chBonus ? `${chBonus.desc}：${formatConfiguredRewards(chBonus)}` : '';
       const starCond = getStageStarConditionText(selected);
       const selectedTheme = typeof getStageTheme === 'function' ? getStageTheme(selected) : null;
+      const selectedAffinityText = typeof getStageAffinityText === 'function' ? getStageAffinityText(selected) : '';
+      const selectedBuildText = typeof getStageRecommendedBuildText === 'function' ? getStageRecommendedBuildText(selected, true) : '';
+      const selectedBuildMatch = typeof getSkillBuildAffinityMatch === 'function' ? getSkillBuildAffinityMatch(selected) : null;
       const recSweep = getRecommendedSweepStage(player);
       const recText = recSweep ? `${recSweep.icon || ''}${recSweep.name} · ${getStageSetDropText(recSweep) || getStageDropText(recSweep)}` : '暂无可扫荡副本';
       const codexSummary = typeof getStageCodexSummary === 'function' ? getStageCodexSummary(player) : null;
@@ -5098,7 +5937,7 @@ function generateNewFloor() {
       const sweepCost1 = getStageSweepCost(selected, 1);
       const bossText = selected.boss?.name ? `${selected.boss.name} · ${getStageBossMechanicText(selected)}` : '普通房间清剿，无首领机制';
       const immortalMechanicCard = renderImmortalBossMechanicCard(selected);
-      const detailHtml = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-detail-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><div class="stage-detail-title"><span>${selected.icon || '🗺️'}</span><div><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><em>${escapeHtml(selected.desc || '副本详情')}</em></div></div><section class="stage-detail-section"><h4>基础</h4><div class="stage-detail-chip-grid"><span><b>推荐</b><em>${escapeHtml(REALMS?.[selected.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(selected.recommendedPower)}</em></span><span><b>房间</b><em>${escapeHtml(selected.roomCount)}间</em></span><span><b>地图</b><em>${escapeHtml(selectedTheme ? `${selectedTheme.icon || ''} ${selectedTheme.name}` : '默认秘境')}</em></span><span><b>三星</b><em>${escapeHtml(starCond)}</em></span></div></section><section class="stage-detail-section"><h4>战斗</h4><div class="stage-detail-line compact"><b>首领机制</b><span>${escapeHtml(bossText)}</span></div>${immortalMechanicCard}</section><section class="stage-detail-section"><h4>奖励</h4><div class="stage-detail-line compact"><b>掉落</b><span>${escapeHtml(getStageDropText(selected))}</span></div>${setText ? `<div class="stage-detail-line compact"><b>套装目标</b><span>${escapeHtml(setText)}</span></div>` : ''}<div class="stage-detail-line compact"><b>首通</b><span>${escapeHtml(firstText)}</span></div><div class="stage-detail-line compact"><b>重复</b><span>${escapeHtml(rewardText)}</span></div></section><section class="stage-detail-section"><h4>扫荡</h4><div class="stage-detail-line compact"><b>成本</b><span>每次💎${escapeHtml(sweepCost1)} · 推荐：${escapeHtml(recText)}</span></div></section>${materialSourcePanel}${chClaim.ok ? `<div class="stage-detail-alert">🔔 章节全通奖励可领：${escapeHtml(chBonusText)}</div>` : ''}<div class="stage-sheet-actions"><button class="stage-detail-btn" type="button" data-stage-sheet-close="1">关闭</button><button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入副本' : getStageLockedReason(player, selected.id)}</button></div></aside>`;
+      const detailHtml = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-detail-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><div class="stage-detail-title"><span>${selected.icon || '🗺️'}</span><div><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><em>${escapeHtml(selected.desc || '副本详情')}</em></div></div><section class="stage-detail-section"><h4>基础</h4><div class="stage-detail-chip-grid"><span><b>推荐</b><em>${escapeHtml(REALMS?.[selected.recommendedRealm]?.name || '练气期')} · 战力${escapeHtml(selected.recommendedPower)}</em></span><span><b>房间</b><em>${escapeHtml(selected.roomCount)}间</em></span><span><b>地图</b><em>${escapeHtml(selectedTheme ? `${selectedTheme.icon || ''} ${selectedTheme.name}` : '默认秘境')}</em></span><span><b>三星</b><em>${escapeHtml(starCond)}</em></span><span class="stage-affinity-chip"><b>克制</b><em>${escapeHtml(selectedAffinityText || '无明显克制')}</em></span><span class="stage-affinity-chip build"><b>推荐流派</b><em>${escapeHtml(selectedBuildText || '通用流派')}</em></span><span class="stage-affinity-chip player ${cssClassToken(selectedBuildMatch?.status || 'neutral')}"><b>当前构筑</b><em>${escapeHtml(selectedBuildMatch?.detail || '未形成明显相性')}</em></span></div></section><section class="stage-detail-section"><h4>战斗</h4><div class="stage-detail-line compact"><b>首领机制</b><span>${escapeHtml(bossText)}</span></div>${immortalMechanicCard}</section><section class="stage-detail-section"><h4>奖励</h4><div class="stage-detail-line compact"><b>掉落</b><span>${escapeHtml(getStageDropText(selected))}</span></div>${setText ? `<div class="stage-detail-line compact"><b>套装目标</b><span>${escapeHtml(setText)}</span></div>` : ''}<div class="stage-detail-line compact"><b>首通</b><span>${escapeHtml(firstText)}</span></div><div class="stage-detail-line compact"><b>重复</b><span>${escapeHtml(rewardText)}</span></div></section><section class="stage-detail-section"><h4>扫荡</h4><div class="stage-detail-line compact"><b>成本</b><span>每次💎${escapeHtml(sweepCost1)} · 推荐：${escapeHtml(recText)}</span></div></section>${materialSourcePanel}${chClaim.ok ? `<div class="stage-detail-alert">🔔 章节全通奖励可领：${escapeHtml(chBonusText)}</div>` : ''}<div class="stage-sheet-actions"><button class="stage-detail-btn" type="button" data-stage-sheet-close="1">关闭</button><button class="stage-enter-btn" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '开始挑战' : getStageLockedReason(player, selected.id)}</button></div></aside>`;
       const sweepPreview = getStageSweepPreview(selected, 1);
       const sweepSheet = `<div class="stage-sheet-backdrop" data-stage-sheet-close="1"></div><aside class="stage-sweep-sheet" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><div class="stage-sheet-grip"></div><b>扫荡 ${escapeHtml(selected.name)}</b><small>${sweepCheck.ok ? `每次消耗 💎${escapeHtml(sweepPreview.perCost)}，快速领取重复通关奖励` : escapeHtml(sweepCheck.reason)}</small><div class="stage-sweep-preview"><span><b>当前灵石</b><em class="${sweepPreview.maxRuns <= 0 ? 'lack' : ''}">💎${escapeHtml(sweepPreview.owned)}</em></span><span><b>最多可扫</b><em>${escapeHtml(sweepPreview.maxRuns)}次</em></span><span><b>基础收益</b><em>${escapeHtml(sweepPreview.rewardText)}</em></span><span><b>可能掉落</b><em>${escapeHtml(sweepPreview.dropText)}</em></span></div>${sweepCheck.ok ? `<div class="stage-sweep-options">${[1, 5, 10].map(n => { const pv = getStageSweepPreview(selected, n); return `<button class="stage-sweep-btn ${pv.enough ? '' : 'disabled'}" type="button" data-stage-sweep="${escapeHtml(selected.id)}" data-stage-sweep-count="${n}" ${pv.enough ? '' : 'disabled'}>扫荡${n}次<br><em>💎${pv.cost}</em></button>`; }).join('')}</div>${sweepPreview.maxRuns <= 0 ? `<span class="stage-sweep-hint warn">灵石不足，至少需要💎${escapeHtml(sweepPreview.perCost)}</span>` : ''}` : `<span class="stage-sweep-hint">${escapeHtml(sweepCheck.reason)}</span>`}</aside>`;
 p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-tabs"><button class="stage-tab${stageTab === 'stages' ? ' active' : ''}" type="button" data-stage-tab="stages">选关</button><button class="stage-tab${stageTab === 'codex' ? ' active' : ''}" type="button" data-stage-tab="codex">图鉴</button></div><button class="pclose" type="button" data-stage-close="1" aria-label="关闭副本界面">×</button></div><div class="stage-body stage-select-body"${stageTab === 'stages' ? '' : ' style="display:none"'}><div class="stage-chapter-strip">${chapterTabs}</div><div class="stage-chapter-summary" style="--stage-color:${selectedChapter.color}"><b>${selectedChapter.icon} ${escapeHtml(selectedChapter.name)}</b><span>${chapterProgress.cleared}/${chapterProgress.total}关 · ${chapterProgress.stars}/${chapterProgress.total * 3}★</span><small>${escapeHtml(selectedChapter.desc || '')}</small></div><div class="stage-guide-strip"><b>下一步：</b><span>${escapeHtml(nextGuideText)}</span></div><div class="stage-card-grid">${cards}</div></div><div class="stage-body stage-codex-body"${stageTab === 'codex' ? '' : ' style="display:none"'}>${getStageCodexDom()}</div><div class="stage-foot">${stageTab === 'stages' ? `<div class="stage-foot-info" style="--stage-color:${selectedTheme?.stairs || selected.color || '#d4a0ff'}"><b>${escapeHtml(selected.name)} ${stageStarText(selected.id)}</b><small>${escapeHtml(unlocked ? `${REALMS?.[selected.recommendedRealm]?.name || '练气期'} · 战力${selected.recommendedPower} · ${selected.roomCount}房` : getStageLockedReason(player, selected.id))}</small><em>${escapeHtml(setText || getStageDropText(selected) || '通关可获得经验、灵石与装备')}</em></div><div class="stage-foot-actions"><button class="stage-detail-btn ${stageDetailOpen ? 'active' : ''}" type="button" data-stage-detail-toggle="1">详情</button><button class="stage-detail-btn ${stageSweepOpen ? 'active' : ''}" type="button" data-stage-sweep-toggle="1" ${sweepCheck.ok ? '' : 'disabled'}>${sweepCheck.ok ? '扫荡' : sweepCheck.reason}</button>${chClaim.ok ? `<button class="stage-enter-btn" type="button" data-claim-chapter="${escapeHtml(chId)}">领奖</button>` : `<button class="stage-enter-btn ${unlocked ? '' : 'disabled'}" type="button" data-stage-enter="${escapeHtml(selected.id)}" ${unlocked ? '' : 'disabled'}>${unlocked ? '进入' : '未解锁'}</button>`}</div>` : `<div class="stage-foot-info"><b>副本图鉴</b><small>查看全章节进度</small><em>点击推荐卡可跳转到对应章节与关卡</em></div>`}</div>${stageDetailOpen ? detailHtml : ''}${stageSweepOpen ? sweepSheet : ''}`;
@@ -5305,11 +6144,12 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     const chapter = STAGE_CHAPTERS[chapterId];
     if (!chapter?.chapterBonus || !check.ok) { showMessage(check.reason || '暂不可领取', '#ff8844'); return; }
     player.stageProgress = normalizeStageProgress(player.stageProgress);
+    player.stageProgress.chapterBonusClaimed[chapterId] = true;
+    autoSave();
     applyConfiguredRewards(chapter.chapterBonus);
     const titleId = typeof getChapterTitleId === 'function' ? getChapterTitleId(chapterId) : null;
     const title = titleId && typeof unlockPlayerTitle === 'function' ? unlockPlayerTitle(player, titleId) : null;
     if (typeof player.recalcStats === 'function') player.recalcStats();
-    player.stageProgress.chapterBonusClaimed[chapterId] = true;
     const chBonusText = `${chapter.chapterBonus.desc}：${formatConfiguredRewards(chapter.chapterBonus)}${title ? ` · 解锁称号「${title.name}」` : ''}`;
     lastStageClearSummary = { success: true, title: `🏆 ${chapter.name} 全通奖励！`, desc: chBonusText, rewards: '' };
     showStageClearPanel = true;
@@ -5332,6 +6172,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     selectedStageId = stageId;
     player.stageProgress.selectedStageId = stageId;
     popPanelFromStack('stages');
+    closeAllPanels({ sync: false });
     showStageSelectUI = false;
     showStageClearPanel = false;
     const sp = document.getElementById('stage-dom-panel');
@@ -5339,8 +6180,10 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     clearTouchMovementState();
     syncBodyPanelState();
     generateNewFloor();
-    showMessage(`🗺️ 进入副本：${stage.name}`, stage.color || '#d4a0ff');
-    autoSave();
+    const stagePlanText = typeof getStageRecommendedBuildText === 'function' ? getStageRecommendedBuildText(stage, true) : '';
+    const buildMatch = typeof getSkillBuildAffinityMatch === 'function' ? getSkillBuildAffinityMatch(stage) : null;
+    showMessage(`🗺️ 进入副本：${stage.name}${stagePlanText ? ` · ${stagePlanText}` : ''}${buildMatch?.label ? ` · 当前${buildMatch.label}` : ''}`, stage.color || '#d4a0ff');
+    autoSave({ delay: 8000 });
   }
   window.advanceStageRoom = function advanceStageRoom() {
     if (!isInStageRun) return;
@@ -5413,7 +6256,7 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     const lootText = summary.loot.length ? ` · 🎁${summary.loot.slice(0, 3).join('、')}${summary.loot.length > 3 ? '等' + summary.loot.length + '件' : ''}` : '';
     const fullText = summary.skipped ? ` · 背包满，跳过${summary.skipped}件` : '';
     showMessage(`⚡ 速战清场 ${monsters.length} 只妖怪：${summary.xp}经验，💎${summary.stones}${lootText}${fullText} · 自动前往下一房`, '#ffdd66');
-    autoSave();
+    autoSave({ delay: 8000 });
     setTimeout(() => {
       if (!isInStageRun || isInCombat()) return;
       const exit = dungeon?._stageExit || (typeof getDungeonStairsCell === 'function' ? getDungeonStairsCell(dungeon) : null);
@@ -5433,10 +6276,12 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     const clearGain = applyConfiguredRewards(stage.clearRewards || {});
     let firstGain = { items: [], full: false };
     if (isFirst) {
-      firstGain = applyConfiguredRewards(stage.firstClearRewards || {});
-      if (stage.firstClearSkillPoints) availableSkillPoints += Number(stage.firstClearSkillPoints || 0);
       progress.firstClearClaimed[stageId] = true;
       if (stage.unlockNext && STAGES[stage.unlockNext]) progress.unlockedStages[stage.unlockNext] = true;
+      player.stageProgress = progress;
+      autoSave();
+      firstGain = applyConfiguredRewards(stage.firstClearRewards || {});
+      if (stage.firstClearSkillPoints) availableSkillPoints += Number(stage.firstClearSkillPoints || 0);
     }
     progress.clearedStages[stageId] = (progress.clearedStages[stageId] || 0) + 1;
     progress.stageStars[stageId] = Math.max(Number(progress.stageStars[stageId] || 0), stars);
@@ -5496,9 +6341,26 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       if (e?.stopPropagation) e.stopPropagation();
       closeTribulationPanel(e);
     };
+    const onTribulationAction = e => {
+      const target = e.target.closest('[data-trib-id], [data-trib-enter]');
+      if (!target || target.disabled) return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      if (e.type === 'touchstart' || e.type === 'pointerdown') tribulationDelegatedTouchUntil = Date.now() + 650;
+      if (e.type === 'click' && Date.now() < tribulationDelegatedTouchUntil) return;
+      if (target.matches('[data-trib-id]')) {
+        selectedTribulationId = target.dataset.tribId || 'minor';
+        renderTribulationDomPanel();
+        return;
+      }
+      enterTribulation(target.dataset.tribEnter);
+    };
     p.addEventListener('pointerdown', onCloseHit, { passive: false, capture: true });
     p.addEventListener('touchstart', onCloseHit, { passive: false, capture: true });
     p.addEventListener('click', onCloseHit, { capture: true });
+    p.addEventListener('pointerdown', onTribulationAction, { passive: false });
+    p.addEventListener('touchstart', onTribulationAction, { passive: false });
+    p.addEventListener('click', onTribulationAction);
     document.body.appendChild(p);
     return p;
   }
@@ -5526,13 +6388,6 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       const check = getTribulationAvailability(player, selected.id);
       p.innerHTML = `<div class="trib-head"><b>⚡ 天劫</b><span>雷劫精华 ${Number(player?.tribulationEssence || 0)} · 淬体 ${Number(player?.bodyTemperLevel || 0)}</span><button class="pclose" type="button">×</button></div><div class="trib-body">${cards}</div><div class="trib-foot"><div>${escapeHtml(check.ok ? `准备挑战：${selected.name}` : check.reason)}</div><button class="trib-enter ${check.ok ? '' : 'disabled'}" type="button" data-trib-enter="${escapeHtml(selected.id)}" ${check.ok ? '' : 'disabled'}>${check.ok ? `挑战${selected.name}` : '条件不足'}</button></div>`;
     }
-    p.querySelectorAll('[data-trib-id]').forEach(btn => {
-      btn.addEventListener('click', e => { e.preventDefault(); selectedTribulationId = btn.dataset.tribId || 'minor'; renderTribulationDomPanel(); });
-    });
-    p.querySelector('[data-trib-enter]')?.addEventListener('click', e => {
-      e.preventDefault();
-      enterTribulation(e.currentTarget.dataset.tribEnter);
-    });
   }
   function enterTribulation(tribulationId) {
     if (isInCombat() || isInTribulation) return;
@@ -5617,9 +6472,111 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       if (e?.stopPropagation) e.stopPropagation();
       closeAscensionPanel(e);
     };
+    const onAscensionDelegatedAction = e => {
+      const target = e.target.closest([
+        '[data-asc-tab]', '[data-asc-perform]', '[data-asc-trial-start]', '[data-asc-trial-complete]',
+        '[data-asc-body]', '[data-asc-class]', '[data-asc-skill]', '[data-asc-demon-start]',
+        '[data-asc-demon-next]', '[data-asc-demon-complete]', '[data-asc-refine]', '[data-asc-refine-item]',
+        '[data-asc-awaken]', '[data-asc-law]', '[data-asc-resource-source]'
+      ].join(','));
+      if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') return;
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
+      if (e.type === 'touchstart' || e.type === 'pointerdown') ascensionDelegatedTouchUntil = Date.now() + 650;
+      if (e.type === 'click' && Date.now() < ascensionDelegatedTouchUntil) return;
+      if (target.matches('[data-asc-tab]')) {
+        ascensionTab = target.dataset.ascTab || 'overview';
+        renderAscensionDomPanel();
+        return;
+      }
+      if (target.matches('[data-asc-perform]')) {
+        const r = performAscension(player, playerMaterials);
+        showMessage(r.message || r.reason, r.ok ? '#c8f7ff' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-trial-start]')) {
+        const r = startAscensionTrial(player, playerMaterials);
+        showMessage(r.ok ? '飞升三劫已开启' : r.reason, r.ok ? '#c8f7ff' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-trial-complete]')) { startAscensionTrialCombatNode(); autoSave(); return; }
+      if (target.matches('[data-asc-body]')) {
+        const r = upgradeImmortalBody(player, playerMaterials);
+        showMessage(r.ok ? `仙躯升级：${r.tier.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-class]')) {
+        const r = chooseAscensionClass(player, target.dataset.ascClass);
+        showMessage(r.ok ? `选择仙职：${r.classInfo.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-skill]')) {
+        const r = upgradeAscensionClassSkill(player, target.dataset.ascSkill, playerMaterials);
+        showMessage(r.ok ? `习得${r.node.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-demon-start]')) {
+        const r = startDemonWarRun(player, playerMaterials);
+        showMessage(r.ok ? '仙魔战场开启' : r.reason, r.ok ? '#ffcc88' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-demon-next]')) { startDemonWarCombatNode(); autoSave(); return; }
+      if (target.matches('[data-asc-demon-complete]')) {
+        const r = completeDemonWarRun(player, playerMaterials);
+        showMessage(r.ok ? `仙魔战场结算：仙玉+${r.rewards?.immortal_jade_ascended || 0}` : r.reason, r.ok ? '#ffcc88' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-refine]')) {
+        const refineAction = getImmortalRefineActionState(player, playerMaterials);
+        if (!refineAction.canRefine) return;
+        const item = getEquippedWeaponForAscension();
+        const r = immortalRefineItem(item, player, playerMaterials);
+        showMessage(r.ok ? '武器仙炼完成' : r.reason, r.ok ? '#ffcc88' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-refine-item]')) {
+        const entry = getAscensionRefineCandidates()[Number(target.dataset.ascRefineItem || 0)];
+        if (!entry) return;
+        const action = getImmortalRefineActionState(player, playerMaterials, entry.item);
+        if (!action.canRefine) return;
+        const r = immortalRefineItem(entry.item, player, playerMaterials);
+        showMessage(r.ok ? `仙炼完成：${entry.item.name || '装备'}` : r.reason, r.ok ? '#ffcc88' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-awaken]')) {
+        const awakenAction = getArtifactAwakenActionState(player, playerMaterials);
+        if (!awakenAction.canAwaken) return;
+        const r = awakenArtifact(player, playerMaterials);
+        showMessage(r.ok ? `神器觉醒：${r.awaken?.name || r.artifact.name}` : r.reason, r.ok ? '#ffdd66' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-law]')) {
+        selectedAscensionLawId = target.dataset.ascLaw || 'sword';
+        const r = upgradeLaw(player, selectedAscensionLawId, playerMaterials);
+        showMessage(r.ok ? `${r.law.name}提升至Lv.${r.level}` : r.reason, r.ok ? '#ffe27a' : '#ff8844');
+        renderAscensionDomPanel(); autoSave();
+        return;
+      }
+      if (target.matches('[data-asc-resource-source]')) {
+        openAscensionResourceStageSource(target.dataset.ascResourceSource);
+      }
+    };
     p.addEventListener('pointerdown', onDelegatedAscensionClose, { passive: false, capture: true });
     p.addEventListener('touchstart', onDelegatedAscensionClose, { passive: false, capture: true });
     p.addEventListener('click', onDelegatedAscensionClose, { capture: true });
+    p.addEventListener('pointerdown', onAscensionDelegatedAction, { passive: false });
+    p.addEventListener('touchstart', onAscensionDelegatedAction, { passive: false });
+    p.addEventListener('click', onAscensionDelegatedAction);
     document.body.appendChild(p);
     return p;
   }
@@ -5857,21 +6814,6 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
       }).join('')}</div>`;
     }
     p.innerHTML = `<div class="asc-head"><b>☁️ 飞升仙界</b><span>${escapeHtml(REALMS?.[player.realmIndex]?.name || '修士')} · ${cls ? cls.icon + cls.name : '未选仙职'}</span><button class="pclose" type="button">×</button></div><div class="asc-tabs">${tabs}</div><div class="asc-body">${body}</div>`;
-    p.querySelectorAll('[data-asc-tab]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); ascensionTab = btn.dataset.ascTab || 'overview'; renderAscensionDomPanel(); }));
-    p.querySelector('[data-asc-perform]')?.addEventListener('click', e => { e.preventDefault(); const r = performAscension(player, playerMaterials); showMessage(r.message || r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelector('[data-asc-trial-start]')?.addEventListener('click', e => { e.preventDefault(); const r = startAscensionTrial(player, playerMaterials); showMessage(r.ok ? '飞升三劫已开启' : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelector('[data-asc-trial-complete]')?.addEventListener('click', e => { e.preventDefault(); startAscensionTrialCombatNode(); autoSave(); });
-    p.querySelector('[data-asc-body]')?.addEventListener('click', e => { e.preventDefault(); const r = upgradeImmortalBody(player, playerMaterials); showMessage(r.ok ? `仙躯升级：${r.tier.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelectorAll('[data-asc-class]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const r = chooseAscensionClass(player, btn.dataset.ascClass); showMessage(r.ok ? `选择仙职：${r.classInfo.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
-    p.querySelectorAll('[data-asc-skill]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const r = upgradeAscensionClassSkill(player, btn.dataset.ascSkill, playerMaterials); showMessage(r.ok ? `习得${r.node.name}` : r.reason, r.ok ? '#c8f7ff' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
-    p.querySelector('[data-asc-demon-start]')?.addEventListener('click', e => { e.preventDefault(); const r = startDemonWarRun(player, playerMaterials); showMessage(r.ok ? '仙魔战场开启' : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelector('[data-asc-demon-next]')?.addEventListener('click', e => { e.preventDefault(); startDemonWarCombatNode(); autoSave(); });
-    p.querySelector('[data-asc-demon-complete]')?.addEventListener('click', e => { e.preventDefault(); const r = completeDemonWarRun(player, playerMaterials); showMessage(r.ok ? `仙魔战场结算：仙玉+${r.rewards?.immortal_jade_ascended || 0}` : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelector('[data-asc-refine]')?.addEventListener('click', e => { e.preventDefault(); const refineAction = getImmortalRefineActionState(player, playerMaterials); if (!refineAction.canRefine) return; const item = getEquippedWeaponForAscension(); const r = immortalRefineItem(item, player, playerMaterials); showMessage(r.ok ? '武器仙炼完成' : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelectorAll('[data-asc-resource-source]').forEach(btn => bindPanelTap(btn, e => { if (e?.stopPropagation) e.stopPropagation(); openAscensionResourceStageSource(btn.dataset.ascResourceSource); }));
-    p.querySelectorAll('[data-asc-refine-item]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); const entry = getAscensionRefineCandidates()[Number(btn.dataset.ascRefineItem || 0)]; if (!entry) return; const action = getImmortalRefineActionState(player, playerMaterials, entry.item); if (!action.canRefine) return; const r = immortalRefineItem(entry.item, player, playerMaterials); showMessage(r.ok ? `仙炼完成：${entry.item.name || '装备'}` : r.reason, r.ok ? '#ffcc88' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
-    p.querySelector('[data-asc-awaken]')?.addEventListener('click', e => { e.preventDefault(); const awakenAction = getArtifactAwakenActionState(player, playerMaterials); if (!awakenAction.canAwaken) return; const r = awakenArtifact(player, playerMaterials); showMessage(r.ok ? `神器觉醒：${r.awaken?.name || r.artifact.name}` : r.reason, r.ok ? '#ffdd66' : '#ff8844'); renderAscensionDomPanel(); autoSave(); });
-    p.querySelectorAll('[data-asc-law]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); selectedAscensionLawId = btn.dataset.ascLaw || 'sword'; const r = upgradeLaw(player, selectedAscensionLawId, playerMaterials); showMessage(r.ok ? `${r.law.name}提升至Lv.${r.level}` : r.reason, r.ok ? '#ffe27a' : '#ff8844'); renderAscensionDomPanel(); autoSave(); }));
   }
   window.renderAscensionDomPanel = renderAscensionDomPanel;
 

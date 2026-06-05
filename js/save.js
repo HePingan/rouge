@@ -5,6 +5,7 @@ const SAVE_KEY = 'xian_save_v1';
 const SAVE_VERSION = 8;
 const SAVE_BACKUP_KEY = `${SAVE_KEY}_backup`;
 const SAVE_CORRUPT_KEY = `${SAVE_KEY}_corrupt`;
+let pendingAutoSaveTimer = null;
 
 function backupExistingSave() {
   try {
@@ -142,8 +143,9 @@ function getEquipmentSlotOrder() {
   return typeof EQUIPMENT_SLOT_ORDER !== 'undefined' ? EQUIPMENT_SLOT_ORDER : Object.keys(player?.equipment || {});
 }
 
-function saveGame() {
+function saveGame(options = {}) {
   try {
+    const shouldBackup = options.backup !== false;
     const data = {
       version: SAVE_VERSION,
       timestamp: Date.now(),
@@ -194,7 +196,7 @@ function saveGame() {
       // Dungeon progress
       floor: dungeonLevel,
     };
-    backupExistingSave();
+    if (shouldBackup) backupExistingSave();
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
   } catch (e) {
@@ -416,16 +418,43 @@ function getSaveSummary() {
 
 // ─── Auto-save triggers ───
 
-// Call after any significant state change
-function autoSave() {
-  const ok = saveGame();
-  if (ok) {
-    // Brief flash on save icon if present
+function flushAutoSave() {
+  if (pendingAutoSaveTimer) {
+    clearTimeout(pendingAutoSaveTimer);
+    pendingAutoSaveTimer = null;
+  }
+  const ok = saveGame({ backup: false });
+  if (ok && typeof document !== 'undefined') {
     const el = document.getElementById('btn-save-feedback');
     if (el) {
       el.textContent = '✓';
       clearTimeout(el._saveClear);
       el._saveClear = setTimeout(() => { el.textContent = '💾'; }, 1500);
     }
+  }
+  return ok;
+}
+
+// Call after any significant state change
+function autoSave(options = {}) {
+  const delay = Number(options.delay ?? 1500);
+  if (options.immediate) return flushAutoSave();
+  if (pendingAutoSaveTimer) clearTimeout(pendingAutoSaveTimer);
+  pendingAutoSaveTimer = setTimeout(() => {
+    const timerId = pendingAutoSaveTimer;
+    pendingAutoSaveTimer = null;
+    flushAutoSave();
+    if (timerId && typeof timerId.unref === 'function') timerId.unref();
+  }, Math.max(0, delay));
+  if (pendingAutoSaveTimer && typeof pendingAutoSaveTimer.unref === 'function') pendingAutoSaveTimer.unref();
+}
+
+if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('pagehide', flushAutoSave);
+  window.addEventListener('beforeunload', flushAutoSave);
+}
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (document.hidden) flushAutoSave(); });
   }
 }

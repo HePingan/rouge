@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>inventory long detail browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<body><div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div><pre id="result"></pre>
+<script>
+(() => {
+  const out = document.getElementById('result');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fail = m => { throw new Error(m); };
+  const assert = (c, m) => { if (!c) fail(m); };
+  const w = () => document.getElementById('game').contentWindow;
+  const d = () => w().document;
+  async function waitFor(fn, label, timeout = 8000) {
+    const end = Date.now() + timeout; let last;
+    while (Date.now() < end) { try { last = fn(); if (last) return last; } catch(e) { last = e.message; } await sleep(80); }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function click(el) { assert(el, 'missing click target'); if (el.click) el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:w() })); }
+  async function run() {
+    await waitFor(() => w().gameReady === true, 'gameReady');
+    w().__longDetailErrors = [];
+    w().addEventListener('error', e => w().__longDetailErrors.push(e.message || 'error'));
+    w().addEventListener('unhandledrejection', e => w().__longDetailErrors.push(String(e.reason || 'unhandledrejection')));
+    const longAffixes = Array.from({length: 12}, (_, i) => ({
+      name: `超长词条${i + 1}`, stat: i % 2 ? 'atk' : 'maxHp', value: i % 2 ? 9 + i : 35 + i * 3,
+      type: i % 3 === 0 ? 'legendary' : 'rare',
+      desc: `移动端长描述验证第${i + 1}条：暴击、吸血、护盾、连击、抗性与秘境增益混合显示`
+    }));
+    w().eval(`
+      player.equipment = player.equipment || {};
+      player.equipment.armor = null;
+      player.spiritStones = 999999;
+      player.materials = Object.assign(player.materials || {}, { qingyun_jade: 999, thunder_core: 999, void_crystal: 999 });
+      player.inventory = [{
+        name:'极长词条压力测试玄甲', slot:'armor', rarity:'神话', rarityColor:'#ff77ff',
+        stats:{ maxHp:888, atk:66, def:144, crit:0.18, dodge:0.08, lifesteal:0.06, damageReduction:0.05 },
+        floorLevel:99, enhanceLevel:6, setId:'qingyun_guard', setName:'青云守御', setIcon:'☁️',
+        affixes:${JSON.stringify(longAffixes)}
+      }];
+      if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    await waitFor(() => typeof w().openPanel === 'function' && typeof w().renderInventoryDomPanel === 'function', 'panel functions');
+    w().eval(`openPanel('inventory'); renderInventoryDomPanel('long-detail-smoke');`);
+    await waitFor(() => d().body.classList.contains('inventory-open'), 'inventory open');
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel .bag-item-card[data-index="0"]'), 'bag card'));
+    const card = await waitFor(() => d().querySelector('#inventory-dom-panel .inv-detail-card'), 'detail card');
+    await waitFor(() => d().querySelector('#inventory-dom-panel [data-equip-action-index="0"]'), 'equip button');
+    await sleep(120);
+    card.scrollTop = card.scrollHeight;
+    await sleep(120);
+    const equipBtn = await waitFor(() => {
+      const btn = d().querySelector('#inventory-dom-panel [data-equip-action-index="0"]');
+      return btn && btn.isConnected ? btn : null;
+    }, 'connected equip button after scroll');
+    const cardRect = card.getBoundingClientRect();
+    const btnRect = equipBtn.getBoundingClientRect();
+    const metrics = {
+      cardH: Math.round(cardRect.height),
+      cardMax: Math.round(w().innerHeight * 0.83),
+      scrollable: card.scrollHeight > card.clientHeight + 24,
+      buttonVisible: btnRect.bottom <= cardRect.bottom + 2 && btnRect.top >= cardRect.top - 2 && btnRect.height >= 32,
+      buttonBottom: Math.round(btnRect.bottom),
+      cardBottom: Math.round(cardRect.bottom),
+      overflowX: Math.max(0, d().documentElement.scrollWidth - d().documentElement.clientWidth),
+      errors: w().__longDetailErrors.length,
+      fatal: w().fatalError || ''
+    };
+    assert(metrics.cardH <= metrics.cardMax + 12, `detail sheet too tall: ${JSON.stringify(metrics)}`);
+    assert(metrics.scrollable, `long detail should scroll: ${JSON.stringify(metrics)}`);
+    assert(metrics.buttonVisible, `sticky action button not visible: ${JSON.stringify(metrics)}`);
+    assert(metrics.overflowX === 0, `horizontal overflow: ${metrics.overflowX}`);
+    assert(metrics.errors === 0, `console errors: ${w().__longDetailErrors.join(';')}`);
+    assert(!metrics.fatal, `fatal: ${metrics.fatal}`);
+    document.body.dataset.result = 'passed';
+    document.body.dataset.metrics = JSON.stringify(metrics);
+    out.textContent = 'inventory long detail smoke passed ' + JSON.stringify(metrics);
+  }
+  run().catch(err => { document.body.dataset.result = 'failed'; out.textContent = err && err.stack ? err.stack : String(err); });
+})();
+</script>
+</body>

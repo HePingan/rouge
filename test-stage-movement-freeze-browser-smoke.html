@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stage movement freeze smoke</title>
+<style>
+  html, body { margin:0; background:#101018; color:#eee; font:12px sans-serif; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+<script>
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (_) {}
+    await wait(80);
+  }
+  throw new Error('timeout waiting for ' + label);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  await wait(300);
+  const metrics = w.eval(`(() => {
+    closeAllPanels();
+    if (typeof combatState !== 'undefined') combatState = COMBAT_STATE.NONE;
+    if (!player.stageProgress) player.stageProgress = {};
+    player.stageProgress.currentRun = { stageId: Object.keys(STAGES || {})[0] || 'starter', roomIndex: 0, turns: 0 };
+    isInStageRun = true;
+    syncBodyPanelState();
+    const before = { x: player.x, y: player.y };
+
+    joystick.active = true;
+    joystick.dx = 1;
+    joystick.dy = 0;
+    joystick.distance = 1;
+    currentFrameDt = 1 / 60;
+    handleInput();
+    const movedBeforeInterrupt = player.x - before.x;
+
+    combatState = COMBAT_STATE.PLAYER_TURN;
+    handleInput();
+    const clearedByCombat = !joystick.active && joystick.dx === 0 && joystick.dy === 0;
+
+    combatState = COMBAT_STATE.NONE;
+    if (typeof window.__resetMovementTouchInput === 'function') window.__resetMovementTouchInput('smoke');
+    joystick.active = true;
+    joystick.dx = 1;
+    joystick.dy = 0;
+    joystick.distance = 1;
+    openPanel('inventory');
+    handleInput();
+    const clearedByPanel = !joystick.active && joystick.dx === 0 && joystick.dy === 0;
+    closeAllPanels();
+
+    joystick.active = true;
+    joystick.dx = 1;
+    joystick.dy = 0;
+    joystick.distance = 1;
+    if (typeof window.__resetMovementTouchInput === 'function') window.__resetMovementTouchInput('manual');
+    const clearedByBridge = !joystick.active && joystick.dx === 0 && joystick.dy === 0;
+
+    return {
+      movedBeforeInterrupt,
+      clearedByCombat,
+      clearedByPanel,
+      clearedByBridge,
+      stageRunClass: document.body.classList.contains('stage-run-active'),
+      panelOpenClass: document.body.classList.contains('panel-open'),
+      errors: (window.__errors || []).length
+    };
+  })()`);
+  if (metrics.errors) throw new Error('iframe errors: ' + JSON.stringify(metrics));
+  if (metrics.movedBeforeInterrupt <= 0) throw new Error('stage movement did not move before interrupt: ' + JSON.stringify(metrics));
+  if (!metrics.clearedByCombat || !metrics.clearedByPanel || !metrics.clearedByBridge) throw new Error('movement state did not clear after interrupt: ' + JSON.stringify(metrics));
+  document.body.setAttribute('data-result', 'stage movement freeze smoke passed');
+  console.log('stage movement freeze smoke passed ' + JSON.stringify(metrics));
+})();
+</script>

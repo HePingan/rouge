@@ -2,7 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260525trialtoken1';
 
 const context = { console, Math, Date };
@@ -49,6 +49,14 @@ assert(result.effects.some(effect => effect.type === 'drain'), 'drainPct 机制�
 assert.strictEqual(player.hp, 940, '幽冥魂锁应按玩家最大生命 6% 吸血扣血');
 assert.strictEqual(enemy.hp, 560, '幽冥魂锁应把吸取的生命回复给 Boss 且不超过最大生命');
 assert.strictEqual(combatContext.__describeImmortalBossEffect({ type: 'drain', value: 60 }), '吸取 60 生命', '战斗日志应把 drain 效果显示为可读的吸取生命文本');
+
+const combat = fs.readFileSync('js/combat.js', 'utf8');
+const skills = fs.readFileSync('js/skills.js', 'utf8');
+
+assert(combat.includes('function didBossMechanicTrigger'), 'combat should normalize boolean/structured boss mechanic trigger results');
+assert(combat.includes('return result;'), 'immortal boss combat bridge should return structured effects to callers');
+assert(combat.includes("didBossMechanicTrigger(maybeTriggerBossMechanic('turn'))"), 'turn-based boss mechanics should consume enemy turn with structured results');
+assert(skills.includes("didBossMechanicTrigger(bossMechanicResult)"), 'skill path should consume hp boss mechanics before scheduling enemy retaliation');
 
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');

@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>combat intent smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:100%; height:100%; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${String(msg).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 9000) {
+  const start = Date.now(); let last;
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    player.mp = 999; player.maxMp = Math.max(player.maxMp || 0, 999);
+    learnedSkills = [{ tree:'water', index:1 }, { tree:'earth', index:1 }, { tree:'fire', index:0 }];
+    const enemy = { name:'毒蛛', title:'毒雾蛛妖', hp:160, maxHp:160, atk:20, def:5, realm:0, isElite:true, weaknesses:['water'], _statusEffects:[], _skillCooldowns:{} };
+    window.getEnemySkills = () => [{ name:'毒雾喷吐', icon:'☠️', type:'damageStatus', chance:.6, status:{type:'poison',turns:2} }];
+    startCombat(enemy);
+    combatState = 1;
+    renderCombatDomPanel();
+  `);
+  await waitFor(() => d.querySelector('.cbt-intent'), 'enemy intent');
+  const result = w.eval(`(() => {
+    const intent = document.querySelector('.cbt-intent');
+    const panel = document.querySelector('#combat-dom-panel');
+    const rect = panel.getBoundingClientRect();
+    return {
+      exists: !!intent,
+      text: intent?.textContent || '',
+      title: intent?.getAttribute('title') || '',
+      guide: document.querySelector('.cbt-combo-guide')?.textContent || '',
+      defenseHint: document.querySelector('.cbt-defense-hint')?.textContent || '',
+      defenseTitle: document.querySelector('.cbt-defense-hint')?.getAttribute('title') || '',
+      skillButton: document.querySelector('#cbt-skill-toggle-action')?.textContent || '',
+      panelH: Math.round(rect.height),
+      overflowX: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (result.errors || result.fatal) throw new Error('console/fatal errors: ' + JSON.stringify(result));
+  if (!result.exists) throw new Error('intent missing');
+  if (!result.text.includes('下回合') || !result.text.includes('施毒')) throw new Error('intent text wrong ' + JSON.stringify(result));
+  if (!result.defenseHint.includes('防御少受约') || !result.defenseTitle.includes('防御后约')) throw new Error('defense benefit hint missing ' + JSON.stringify(result));
+  if (!result.guide.includes('打断异常') && !result.guide.includes('冰封万里')) throw new Error('intent-aware recommendation missing ' + JSON.stringify(result));
+  if (!result.skillButton.includes('冰封万里')) throw new Error('main skill button should show intent recommendation ' + JSON.stringify(result));
+  if (result.overflowX > 2) throw new Error('horizontal overflow: ' + JSON.stringify(result));
+  const payload = 'combat intent browser smoke passed ' + JSON.stringify(result);
+  out(payload);
+  document.body.setAttribute('data-result','passed');
+  console.log(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+});
+</script>

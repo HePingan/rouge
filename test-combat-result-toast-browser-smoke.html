@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>combat result toast smoke</title>
+<link rel="stylesheet" href="css/style.css?v=20260605combatp3">
+<script src="js/combat.js?v=20260605combatp3"></script>
+<script>
+window.addEventListener('load', () => {
+  try {
+    showCombatResultToast('victory', '胜利 · 副本', '+经验 22 · +灵石 5 · 出口已开');
+    setTimeout(() => {
+      const el = document.getElementById('combat-result-toast');
+      const cs = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      const result = {
+        exists: !!el,
+        text: el?.textContent || '',
+        pointerEvents: cs.pointerEvents,
+        width: Math.round(rect.width),
+        bottom: Math.round(window.innerHeight - rect.bottom),
+        overflowX: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+        zIndex: cs.zIndex
+      };
+      if (!result.exists) throw new Error('toast missing');
+      if (!result.text.includes('胜利')) throw new Error('victory text missing');
+      if (result.pointerEvents !== 'none') throw new Error('toast blocks controls');
+      if (result.width > 360 || result.width < 120) throw new Error('toast width invalid ' + result.width);
+      if (result.overflowX !== 0) throw new Error('toast overflowX ' + result.overflowX);
+      document.body.setAttribute('data-result', 'passed');
+      document.body.innerHTML += '<pre id="result">combat result toast browser smoke passed ' + JSON.stringify(result) + '</pre>';
+    }, 120);
+  } catch (err) {
+    document.body.setAttribute('data-result', 'failed');
+    document.body.innerHTML += '<pre id="result">fatal ' + err.message + '</pre>';
+  }
+});
+</script>

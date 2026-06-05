@@ -5,7 +5,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260527detailfix1';
 
 function mustInclude(label, needle) {
@@ -22,7 +22,7 @@ mustMatch('stage foot should be compact grid not tall column', /#stage-dom-panel
 mustMatch('stage foot actions should be one compact row', /#stage-dom-panel \.stage-foot \.stage-foot-actions \{[\s\S]*display:\s*grid[\s\S]*grid-auto-flow:\s*column[\s\S]*grid-template-columns:\s*none[\s\S]*grid-auto-columns:\s*minmax\(58px,\s*auto\)[\s\S]*overflow-x:\s*auto/);
 mustMatch('stage card should be short horizontal scan row', /#stage-dom-panel \.stage-card \{[\s\S]*min-height:\s*74px[\s\S]*display:\s*grid[\s\S]*grid-template-columns:\s*34px minmax\(0,\s*1fr\) auto/);
 mustMatch('mobile should force one-column readable stage cards', /@media \(max-width:\s*620px\), \(pointer:\s*coarse\) \{[\s\S]*#stage-dom-panel \.stage-card-grid \{\s*grid-template-columns:\s*1fr;/);
-mustInclude('footer readability override marker', `Mobile Stage Footer Readability + Scroll Fix ${CURRENT_TOKEN}`);
+mustInclude('footer readability override marker', `Mobile Stage Footer Readability + Scroll Fix 20260531resonance1`);
 mustMatch('mobile stage list remains the touch scroll target', /#stage-dom-panel \.stage-body\.stage-select-body > \.stage-card-grid \{[\s\S]*min-height:\s*112px[\s\S]*overflow-y:\s*auto[\s\S]*touch-action:\s*pan-y/);
 mustMatch('mobile footer buttons stay three readable columns', /#stage-dom-panel \.stage-foot \.stage-foot-actions \{[\s\S]*grid-auto-flow:\s*initial[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[\s\S]*overflow:\s*visible/);
 mustMatch('mobile footer button labels do not clip vertically', /#stage-dom-panel \.stage-foot \.stage-foot-actions > button,[\s\S]*#stage-dom-panel \.stage-foot \.stage-enter-btn \{[\s\S]*display:\s*flex[\s\S]*align-items:\s*center[\s\S]*height:\s*36px[\s\S]*line-height:\s*1[\s\S]*white-space:\s*nowrap/);

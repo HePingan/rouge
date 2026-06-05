@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HUD Next Step Visibility Smoke</title>
+  <link rel="stylesheet" href="./css/style.css?v=20260605combatp3">
+</head>
+<body>
+  <div id="hud-next-step">角色有 2 个空装备槽，点「角色」补装</div>
+  <script>
+    const result = { errors: 0, fatal: '', defaultVisible: false, panelHidden: false, combatHidden: false, pointerEvents: '', overflowX: 0, position: '', top: 0, inTopHalf: false };
+    const fail = (msg) => {
+      result.fatal = msg;
+      document.body.dataset.result = 'failed';
+      document.body.dataset.metrics = JSON.stringify(result);
+      document.body.textContent = 'hud next-step visibility smoke failed ' + JSON.stringify(result);
+    };
+    try {
+      const hud = document.getElementById('hud-next-step');
+      if (!hud) {
+        fail('hud-next-step missing');
+      } else {
+        const base = getComputedStyle(hud);
+        const rect = hud.getBoundingClientRect();
+        result.pointerEvents = base.pointerEvents;
+        result.position = base.position;
+        result.top = Math.round(rect.top);
+        result.inTopHalf = rect.top >= 32 && rect.bottom < window.innerHeight * 0.35;
+        result.defaultVisible = base.opacity !== '0' && rect.width > 0 && rect.height > 0;
+        result.overflowX = Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+        document.body.classList.add('panel-open');
+        result.panelHidden = getComputedStyle(hud).opacity === '0';
+        document.body.classList.remove('panel-open');
+        document.body.classList.add('combat-active');
+        result.combatHidden = getComputedStyle(hud).opacity === '0';
+        if (!result.defaultVisible) fail('default hint should be visible on map');
+        else if (!result.panelHidden) fail('panel-open should hide hint');
+        else if (!result.combatHidden) fail('combat-active should hide hint');
+        else if (result.pointerEvents !== 'none') fail('hint should not block touch');
+        else if (result.position !== 'fixed') fail('hint should stay in fixed map-safe viewport layer');
+        else if (!result.inTopHalf) fail('hint should stay near top map area, not drift into bottom menu zone');
+        else if (result.overflowX > 0) fail('horizontal overflow');
+        else {
+          document.body.dataset.result = 'passed';
+          document.body.dataset.metrics = JSON.stringify(result);
+          document.body.textContent = 'hud next-step visibility smoke passed ' + JSON.stringify(result);
+        }
+      }
+    } catch (err) {
+      result.errors += 1;
+      fail(err && err.message ? err.message : String(err));
+    }
+  </script>
+</body>
+</html>

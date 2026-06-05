@@ -5,7 +5,7 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260527invfix' + '1';
 
 assert(main.includes("emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上'"), 'empty detail hint should mention equip instead of sell/decompose');
@@ -41,6 +41,19 @@ assert(css.includes('grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px'
 assert(css.includes('#inventory-dom-panel .material-list {') && css.includes('grid-template-columns: repeat(6, minmax(0, 1fr));') && css.includes('#inventory-dom-panel .mat-card.grid-mat-card .mat-dot'), 'mobile material grid should match compact equipment icon density');
 assert(css.includes('#inventory-dom-panel .mat-card.grid-mat-card em {\n  display: none;\n}'), 'material grid should hide long usage text in compact tile mode');
 assert(main.includes('inventoryMaterialHtmlCacheKeyDom') && main.includes('function materialCardsHtmlDom()') && main.includes('return inventoryMaterialHtmlCacheDom'), 'material card HTML should be cached to avoid rebuild jank while switching inventory tabs');
+assert(main.includes('function closeInventoryDetailDom()') && main.includes('closeInventoryDetailDom();'), 'inventory detail close should use a shared close helper that can be smoke-tested');
+assert(main.includes('closeDetailButtonFallback') && main.includes("detailLayer.addEventListener('pointerup'") && main.includes("e.target.closest('[data-detail-close]')"), 'inventory detail close should have a capture fallback for mobile synthetic-click suppression');
+assert(main.includes('data-clear-slot-filter="1"') && main.includes('aria-label="清除${escapeHtml(filterName)}筛选"'), 'slot-filter clear button should be delegated and accessible');
+assert(main.includes('handleInventoryDelegatedTapDom(e)') && main.includes("closest('[data-clear-slot-filter]')"), 'slot-filter clear action should route through inventory delegation');
+assert(main.includes("closest('[data-bulk-mode]')") && main.includes("closest('[data-bulk-rarity-chip]')"), 'bulk mode and rarity chips should route through inventory delegation');
+assert(main.includes("closest('[data-bulk-sell]')") && main.includes('bulkSellInventoryByRarityDom(inventoryBulkRarity)'), 'bulk sell should route through inventory delegation');
+assert(main.includes("closest('[data-bulk-decompose]')") && main.includes('bulkDecomposeInventoryByRarityDom(inventoryBulkRarity)'), 'bulk decompose should route through inventory delegation');
+const renderInventoryBody = main.slice(main.indexOf('function renderInventoryDomPanel'), main.indexOf('function hideDomPanelById'));
+assert(renderInventoryBody.includes('bindInventoryTapDom(card'), 'dynamic bag cards may keep scroll-safe per-render tap binding');
+assert(!/querySelectorAll\('\[data-inv-tab\]'\)[\s\S]{0,120}bindPanelActionDom/.test(renderInventoryBody), 'inventory tabs must not bind per render');
+assert(!/querySelectorAll\('\[data-bag-sort\]'\)[\s\S]{0,160}bindPanelActionDom/.test(renderInventoryBody), 'bag sort buttons must not bind per render');
+assert(!/querySelectorAll\('\[data-bulk-mode\]'\)[\s\S]{0,160}bindPanelActionDom/.test(renderInventoryBody), 'bulk mode buttons must not bind per render');
+assert(!/querySelectorAll\('\[data-clear-slot-filter\]'\)[\s\S]{0,160}bindPanelActionDom/.test(renderInventoryBody), 'slot filter clear must not bind per render');
 assert(!main.includes("scheduleInventoryRenderDom('stagechange')"), 'opening stages should not schedule inventory rerender and cause tab-switch jank');
 assert(css.includes('#inventory-dom-panel .bag-item-card .bag-main,') && css.includes('#inventory-dom-panel .bag-item-card .bag-power,') && css.includes('#inventory-dom-panel .bag-item-card .bag-stats { display: none; }'), 'mobile bag cards should hide verbose text/stats and keep compact icon tiles');
 assert(css.includes('#inventory-dom-panel .equip-list { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }'), 'mobile equipped slots should not fall back to two columns');

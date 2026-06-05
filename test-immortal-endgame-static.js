@@ -136,6 +136,6 @@ for (const needle of ['问心劫', '炼体劫', '叩仙门', '仙炼', '仙魔�
 }
 assert(artifactSrc.includes('神器觉醒'), 'artifacts.js should contain 神器觉醒');
 const index = fs.readFileSync('index.html', 'utf8');
-assert(index.includes('20260530synergy7'), 'cachebuster should bump for immortal endgame systems');
+assert(index.includes('20260605combatp3'), 'cachebuster should bump for immortal endgame systems');
 
 console.log('immortal endgame static ok');

@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>skill affinity combat browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${String(msg).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 8000) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeout) {
+    try {
+      const value = fn();
+      if (value) return value;
+    } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [
+      { tree:'water', index:0 }, { tree:'water', index:1 },
+      { tree:'wood', index:0 }, { tree:'wood', index:1 },
+      { tree:'sword', index:0 }
+    ];
+    player.hp = player.maxHp || 120;
+    player.mp = player.maxMp || 120;
+    const enemy = {
+      name:'相性石魔', title:'相性石魔', hp:120, maxHp:120, atk:8, def:3, realm:0,
+      weaknesses:['water', 'wood'], resists:['sword', 'earth'], _statusEffects:[]
+    };
+    startCombat(enemy);
+    combatState = COMBAT_STATE.PLAYER_TURN;
+    combatSkillDrawerOpen = true;
+    renderCombatDomPanel();
+  `);
+  await waitFor(() => d.querySelector('#combat-dom-panel .affinity-tag.weak') && d.querySelector('.cbt-drawer-skill.affinity-hit') && d.querySelector('.cbt-drawer-skill.affinity-resist'), 'affinity combat panel');
+  const beforeMetrics = w.eval(`(() => {
+    const panel = document.querySelector('#combat-dom-panel');
+    const text = panel ? panel.textContent : '';
+    const weak = document.querySelector('.affinity-tag.weak')?.textContent || '';
+    const resist = document.querySelector('.affinity-tag.resist')?.textContent || '';
+    const build = document.querySelector('.cbt-build-row')?.textContent || '';
+    const affinityButtons = [...document.querySelectorAll('.cbt-skill-btn.affinity-hit, .cbt-drawer-skill.affinity-hit')].map(el => el.textContent.trim()).slice(0, 4);
+    const resistedButtons = [...document.querySelectorAll('.cbt-skill-btn.affinity-resist, .cbt-drawer-skill.affinity-resist')].map(el => el.textContent.trim()).slice(0, 4);
+    const drawer = document.querySelector('.cbt-skill-drawer');
+    const pr = panel.getBoundingClientRect();
+    const dr = drawer ? drawer.getBoundingClientRect() : { bottom: 0 };
+    return {
+      text, weak, resist, build, affinityButtons, resistedButtons,
+      weakSkillEstimate: [...document.querySelectorAll('.cbt-drawer-skill.affinity-hit')].find(el => el.textContent.includes('寒冰刺'))?.textContent || '',
+      resistSkillEstimate: [...document.querySelectorAll('.cbt-drawer-skill.affinity-resist')].find(el => el.textContent.includes('剑'))?.textContent || '',
+      drawerBottom: dr.bottom, panelBottom: pr.bottom,
+      actionsBottom: document.querySelector('.cbt-actions-row')?.getBoundingClientRect().bottom || 0,
+      drawerTouchAction: drawer ? getComputedStyle(drawer).touchAction : '',
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (beforeMetrics.errors || beforeMetrics.fatal) throw new Error('console/fatal errors in iframe: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.weak.includes('水') || !beforeMetrics.weak.includes('木')) throw new Error('missing weak affinity tags: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.resist.includes('剑')) throw new Error('missing resist affinity tags: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.build.includes('相性：') || !beforeMetrics.build.includes('克制已覆盖')) throw new Error('missing current build affinity badge: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.affinityButtons.some(t => t.includes('寒冰刺') && (t.includes('克制') || t.includes('克水')))) throw new Error('missing skill affinity affordance: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.weakSkillEstimate.includes('预计') || !/预计\s+6-13\s+伤/.test(beforeMetrics.weakSkillEstimate)) throw new Error('weakness-adjusted skill estimate missing: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.resistSkillEstimate.includes('预计') || !/预计\s+6-12\s+伤/.test(beforeMetrics.resistSkillEstimate)) throw new Error('resistance-adjusted skill estimate missing: ' + JSON.stringify(beforeMetrics));
+  if (!beforeMetrics.resistedButtons.some(t => t.includes('剑') && (t.includes('被抗') || t.includes('抗剑')) && t.includes('建议换水/木'))) throw new Error('missing resisted skill counter guidance: ' + JSON.stringify(beforeMetrics));
+  if (beforeMetrics.drawerTouchAction !== 'pan-y') throw new Error('combat skill drawer should keep vertical pan touch scrolling: ' + JSON.stringify(beforeMetrics));
+  if (beforeMetrics.actionsBottom > beforeMetrics.panelBottom + 1) throw new Error('combat action row should stay within bottom sheet: ' + JSON.stringify(beforeMetrics));
+  if (beforeMetrics.drawerBottom > beforeMetrics.panelBottom + 12) throw new Error('combat skill drawer should not escape bottom sheet: ' + JSON.stringify(beforeMetrics));
+  if (beforeMetrics.overflowX > 2) throw new Error('horizontal overflow in affinity panel: ' + JSON.stringify(beforeMetrics));
+  w.eval(`
+    Math.random = () => 0.99;
+    combatState = COMBAT_STATE.PLAYER_TURN;
+    player.mp = player.maxMp || 120;
+    playerUseSkill(0);
+    renderCombatDomPanel();
+  `);
+  await wait(160);
+  const afterMetrics = w.eval(`(() => {
+    const panel = document.querySelector('#combat-dom-panel');
+    const text = panel ? panel.textContent : '';
+    return {
+      text,
+      logText: [...document.querySelectorAll('.cbt-log-entry')].map(el => el.textContent).join(' | '),
+      enemyHp: currentEnemy && currentEnemy.hp,
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (afterMetrics.errors || afterMetrics.fatal) throw new Error('console/fatal errors after skill: ' + JSON.stringify(afterMetrics));
+  if (!afterMetrics.logText.includes('克水+')) throw new Error('combat log missing real weakness multiplier marker: ' + JSON.stringify(afterMetrics));
+  if (!(afterMetrics.enemyHp < 120)) throw new Error('weakness skill did not damage enemy: ' + JSON.stringify(afterMetrics));
+  const payload = 'skill affinity combat browser smoke passed ' + JSON.stringify({ before: beforeMetrics, after: afterMetrics });
+  out(payload);
+  document.body.setAttribute('data-result', 'passed');
+  console.log(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+});
+</script>

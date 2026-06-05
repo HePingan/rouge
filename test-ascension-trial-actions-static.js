@@ -6,7 +6,7 @@ const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260524endgame' + '9';
 const STALE_DEMONSTATE_TOKEN = '20260525demonstate' + '1';
 
@@ -20,7 +20,7 @@ mustInclude(main, 'const startState = buttonState(trialActionState.canStart);', 
 mustInclude(main, 'const challengeState = buttonState(trialActionState.canChallenge);', 'trial challenge should only be enabled during an unfinished active run');
 mustInclude(main, 'trialActionState.tokenCount', 'trial UI should show 飞升试炼令 count');
 mustInclude(main, 'trialActionState.startReason', 'trial start button should surface disabled reason on mobile');
-mustInclude(main, "p.querySelector('[data-asc-trial-complete]')", 'trial challenge handler should bind the guarded complete button');
+mustInclude(main, "target.matches('[data-asc-trial-complete]')", 'trial challenge delegated handler should route the guarded complete button');
 
 const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
 assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');

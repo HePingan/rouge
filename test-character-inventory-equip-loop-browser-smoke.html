@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>character inventory equip loop browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<body><div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div><pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const out = document.getElementById('result');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fail = m => { throw new Error(m); };
+  const assert = (c, m) => { if (!c) fail(m); };
+  const w = () => document.getElementById('game').contentWindow;
+  const d = () => w().document;
+  async function waitFor(fn, label, timeout = 9000) {
+    const end = Date.now() + timeout; let last;
+    while (Date.now() < end) { try { last = fn(); if (last) return last; } catch(e) { last = e.message; } await sleep(80); }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function click(el) { assert(el, 'missing click target'); el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:w() })); }
+  async function run() {
+    await waitFor(() => w().gameReady === true, 'gameReady');
+    w().__charInventoryLoopErrors = [];
+    w().addEventListener('error', e => w().__charInventoryLoopErrors.push(e.message || 'error'));
+    w().addEventListener('unhandledrejection', e => w().__charInventoryLoopErrors.push(String(e.reason || 'unhandledrejection')));
+    w().eval(`
+      player.equipment.weapon = { name:'旧木剑', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:1 }, floorLevel:1 };
+      player.equipment.armor = null;
+      player.inventory = [
+        { name:'玄铁护甲·联动验证', slot:'armor', rarity:'稀有', rarityColor:'#ffdd44', stats:{ def:18, maxHp:42 }, floorLevel:6 },
+        { name:'错位长剑·不应出现在护甲筛选', slot:'weapon', rarity:'稀有', rarityColor:'#ffdd44', stats:{ atk:33 }, floorLevel:6 }
+      ];
+      inventorySlotFilter = '';
+      inventoryTab = 'equipment';
+      inventoryDetailTarget = null;
+      characterPanelLastHtml = '';
+      if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    await waitFor(() => d().getElementById('btn-character'), 'character nav');
+    click(d().getElementById('btn-character'));
+    await waitFor(() => d().body.classList.contains('character-open'), 'character panel open');
+    const equipTab = await waitFor(() => d().querySelector('#character-dom-panel .char-tab[data-char-tab="equipment"]'), 'equipment tab');
+    click(equipTab);
+    await waitFor(() => d().querySelector('.char-tab.active')?.dataset.charTab === 'equipment', 'equipment tab active');
+    const armorEmpty = await waitFor(() => d().querySelector('#character-dom-panel .char-equip-card.empty[data-char-equip-slot="armor"]'), 'empty armor slot');
+    click(armorEmpty);
+    const tip = await waitFor(() => d().querySelector('#character-dom-panel .char-equip-slot-tip [data-char-open-inventory-slot="armor"]'), 'armor slot inventory CTA');
+    click(tip);
+    await waitFor(() => d().body.classList.contains('inventory-open') && !d().body.classList.contains('character-open'), 'inventory opens from armor slot');
+    const filter = await waitFor(() => d().querySelector('#inventory-dom-panel .bag-slot-filter.active'), 'armor filter active');
+    assert(filter.textContent.includes('护甲'), `filter should name armor: ${filter.textContent}`);
+    const listText = d().querySelector('#inventory-dom-panel .bag-list')?.textContent || '';
+    assert(listText.includes('玄铁护甲') && !listText.includes('错位长剑'), `filtered list should only show armor: ${listText}`);
+    const armorCard = await waitFor(() => Array.from(d().querySelectorAll('#inventory-dom-panel .bag-item-card')).find(el => el.textContent.includes('玄铁护甲')), 'armor bag card');
+    click(armorCard);
+    const equipBtn = await waitFor(() => d().querySelector('#inventory-dom-panel [data-equip-action-index]'), 'equip action');
+    click(equipBtn);
+    const confirm = await waitFor(() => d().querySelector('#inventory-dom-panel [data-confirm-equip-index]'), 'confirm equip action');
+    click(confirm);
+    await waitFor(() => d().body.classList.contains('character-open') && !d().body.classList.contains('inventory-open'), 'confirm returns to character');
+    await waitFor(() => w().player.equipment.armor?.name === '玄铁护甲·联动验证', 'armor equipped in runtime');
+    const metrics = {
+      armorName: w().player.equipment.armor?.name || '',
+      inventoryNames: w().player.inventory.map(item => item.name),
+      bodyClass: d().body.className,
+      characterText: d().querySelector('#character-dom-panel')?.textContent || '',
+      overflowX: Math.max(0, d().documentElement.scrollWidth - d().documentElement.clientWidth),
+      errors: w().__charInventoryLoopErrors.length,
+      fatal: w().fatalError || ''
+    };
+    assert(!metrics.inventoryNames.includes('玄铁护甲·联动验证') && metrics.inventoryNames.includes('错位长剑·不应出现在护甲筛选'), `inventory mutation wrong: ${JSON.stringify(metrics.inventoryNames)}`);
+    assert(metrics.characterText.includes('玄铁护甲') && metrics.characterText.includes('护甲'), 'character panel should rerender equipped armor');
+    assert(metrics.overflowX === 0, `horizontal overflow: ${metrics.overflowX}`);
+    assert(metrics.errors === 0, `console errors: ${w().__charInventoryLoopErrors.join(';')}`);
+    assert(!metrics.fatal, `fatal: ${metrics.fatal}`);
+    document.body.dataset.result = 'passed';
+    document.body.dataset.metrics = JSON.stringify({ armorName: metrics.armorName, inventoryCount: metrics.inventoryNames.length, overflowX: metrics.overflowX });
+    out.textContent = 'character inventory equip loop browser smoke passed ' + document.body.dataset.metrics;
+  }
+  run().catch(err => { document.body.dataset.result = 'failed'; out.textContent = err && err.stack ? err.stack : String(err); });
+})();
+</script>
+</body>

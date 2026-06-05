@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>skill strip density browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${esc(msg)}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 9000) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow?.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [];
+    for (const tree of Object.keys(SKILL_TREES)) {
+      for (let i = 0; i < Math.min(5, SKILL_TREES[tree].skills.length); i++) learnedSkills.push({ tree, index: i });
+    }
+    claimedSkillSynergies = {};
+    claimedSkillMasteries = {};
+    availableSkillPoints = 0;
+    availableStatPoints = 0;
+    openPanel('skills');
+  `);
+  await waitFor(() => d.body.classList.contains('skills-open') && d.querySelectorAll('.skill-synergy-panel .synergy-card').length >= 6, 'skills strip cards');
+  const metrics = w.eval(`(() => {
+    const panel = document.querySelector('#skills-dom-panel');
+    const body = panel.querySelector('.skills-panel-body');
+    const synergyPanel = panel.querySelector('.skill-synergy-panel:not(.mastery-milestone-panel)');
+    const masteryPanel = panel.querySelector('.mastery-milestone-panel');
+    const synergyList = synergyPanel.querySelector('.synergy-list');
+    const masteryList = masteryPanel.querySelector('.synergy-list');
+    const firstCard = synergyList.querySelector('.synergy-card');
+    const masteryCard = masteryList.querySelector('.synergy-card');
+    const claimBtn = panel.querySelector('.synergy-claim-btn:not(.claimed)');
+    const pRect = panel.getBoundingClientRect();
+    const bRect = body.getBoundingClientRect();
+    const sRect = synergyPanel.getBoundingClientRect();
+    const mRect = masteryPanel.getBoundingClientRect();
+    const cardRect = firstCard.getBoundingClientRect();
+    const masteryRect = masteryCard.getBoundingClientRect();
+    const csList = getComputedStyle(synergyList);
+    const csPanel = getComputedStyle(synergyPanel);
+    const csTitle = getComputedStyle(synergyPanel.querySelector('.synergy-title small'));
+    const csCard = getComputedStyle(firstCard);
+    return {
+      viewport: { w: innerWidth, h: innerHeight },
+      panel: { top: pRect.top, bottom: pRect.bottom, height: pRect.height },
+      body: { clientHeight: body.clientHeight, scrollHeight: body.scrollHeight, scrollTop: body.scrollTop },
+      synergyPanelTop: Math.round(sRect.top - bRect.top),
+      masteryPanelTop: Math.round(mRect.top - bRect.top),
+      synergyHeight: Math.round(sRect.height),
+      masteryHeight: Math.round(mRect.height),
+      cardWidth: Math.round(cardRect.width),
+      cardHeight: Math.round(cardRect.height),
+      masteryCardHeight: Math.round(masteryRect.height),
+      cardsPerScreenApprox: Number((synergyList.clientWidth / cardRect.width).toFixed(2)),
+      stripScrolls: synergyList.scrollWidth > synergyList.clientWidth && masteryList.scrollWidth > masteryList.clientWidth,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      touchAction: csList.touchAction,
+      overflowY: csList.overflowY,
+      panelOverflow: csPanel.overflow,
+      titleSmallWhiteSpace: csTitle.whiteSpace,
+      cardFlexBasis: csCard.flexBasis,
+      cardMinHeight: csCard.minHeight,
+      visibleSynergy: sRect.top < bRect.bottom && sRect.bottom > bRect.top,
+      visibleMastery: mRect.top < bRect.bottom && mRect.bottom > bRect.top,
+      claimButtonText: claimBtn?.textContent.trim() || '',
+      firstText: firstCard.textContent.trim(),
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (metrics.errors || metrics.fatal) throw new Error('console/fatal errors: ' + JSON.stringify(metrics));
+  if (metrics.overflowX > 2) throw new Error('whole skill panel horizontally overflows: ' + JSON.stringify(metrics));
+  if (!metrics.stripScrolls || metrics.touchAction !== 'pan-x pan-y' || metrics.overflowY !== 'hidden') throw new Error('synergy strips should scroll horizontally without trapping vertical swipes: ' + JSON.stringify(metrics));
+  if (metrics.panelOverflow !== 'visible') throw new Error('synergy panel should not clip card height: ' + JSON.stringify(metrics));
+  if (metrics.cardsPerScreenApprox < 1.9) throw new Error('strip should show about two cards on 390px phone: ' + JSON.stringify(metrics));
+  if (metrics.synergyHeight > 120 || metrics.masteryHeight > 100) throw new Error('synergy/mastery strips still too tall: ' + JSON.stringify(metrics));
+  if (!metrics.visibleSynergy || !metrics.visibleMastery) throw new Error('synergy and mastery should both be visible in first viewport: ' + JSON.stringify(metrics));
+  if (metrics.titleSmallWhiteSpace !== 'nowrap') throw new Error('title hint should be compact single line: ' + JSON.stringify(metrics));
+  if (!metrics.claimButtonText.includes('领取')) throw new Error('claim button should remain visible after compression: ' + JSON.stringify(metrics));
+  const payload = 'skill strip density browser smoke passed ' + JSON.stringify(metrics);
+  document.body.setAttribute('data-result', 'passed');
+  console.log(payload);
+  out(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+  out(err.stack || err.message || err);
+});
+</script>

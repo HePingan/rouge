@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stage affinity detail browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${String(msg).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 9000) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeout) {
+    try {
+      const value = fn();
+      if (value) return value;
+    } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+function tapInFrame(frame, selector) {
+  const el = frame.contentDocument.querySelector(selector);
+  if (!el) throw new Error('missing tap target ' + selector);
+  el.dispatchEvent(new frame.contentWindow.PointerEvent('pointerdown', { bubbles:true, pointerId:1, clientX:10, clientY:10 }));
+  el.dispatchEvent(new frame.contentWindow.PointerEvent('pointerup', { bubbles:true, pointerId:1, clientX:10, clientY:10 }));
+  el.click();
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [
+      { tree:'water', index:0 }, { tree:'water', index:1 },
+      { tree:'wood', index:0 }, { tree:'wood', index:1 },
+      { tree:'sword', index:0 }
+    ];
+    player.realmIndex = Math.max(player.realmIndex || 0, 1);
+    player.stageProgress = normalizeStageProgress(player.stageProgress);
+    player.stageProgress.unlockedStages.qingyun_foot = true;
+    player.stageProgress.unlockedStages.qingyun_peak = true;
+    player.stageProgress.unlockedStages.blood_entrance = true;
+    player.stageProgress.unlockedStages.blood_depth = true;
+    selectedStageId = 'blood_depth';
+    player.stageProgress.selectedStageId = 'blood_depth';
+    selectedStageChapterId = 'blood_cave';
+  `);
+  tapInFrame(frame, '#btn-stages');
+  await waitFor(() => d.body.classList.contains('stage-open') && d.querySelector('#stage-dom-panel [data-stage-detail-toggle]'), 'stage panel open');
+  tapInFrame(frame, '#stage-dom-panel [data-stage-detail-toggle]');
+  await waitFor(() => d.querySelector('#stage-dom-panel .stage-detail-sheet .stage-affinity-chip.player'), 'stage detail affinity chips');
+  const metrics = w.eval(`(() => {
+    const panel = document.querySelector('#stage-dom-panel');
+    const sheet = panel.querySelector('.stage-detail-sheet');
+    const cards = [...panel.querySelectorAll('.stage-card-affinity')].map(el => ({ text: el.textContent.trim(), rect: el.getBoundingClientRect(), whiteSpace: getComputedStyle(el).whiteSpace })).slice(0, 4);
+    const chips = [...sheet.querySelectorAll('.stage-affinity-chip')].map(el => ({ cls: el.className, text: el.textContent.trim(), rect: el.getBoundingClientRect(), whiteSpace: getComputedStyle(el.querySelector('em')).whiteSpace })).slice(0, 4);
+    const playerChip = sheet.querySelector('.stage-affinity-chip.player');
+    const buildChip = sheet.querySelector('.stage-affinity-chip.build');
+    const affinityChip = sheet.querySelector('.stage-affinity-chip:not(.build):not(.player)');
+    const action = sheet.querySelector('.stage-enter-btn');
+    const sheetRect = sheet.getBoundingClientRect();
+    const actionRect = action ? action.getBoundingClientRect() : { bottom: 0 };
+    return {
+      stageOpen: document.body.classList.contains('stage-open'),
+      detailVisible: !!sheet,
+      cardTexts: cards.map(c => c.text),
+      chipTexts: chips.map(c => c.text),
+      playerText: playerChip?.textContent.trim() || '',
+      buildText: buildChip?.textContent.trim() || '',
+      affinityText: affinityChip?.textContent.trim() || '',
+      playerStatus: playerChip?.className || '',
+      sheetTop: sheetRect.top,
+      sheetBottom: sheetRect.bottom,
+      actionBottom: actionRect.bottom,
+      viewportH: innerHeight,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      cardOverflow: cards.some(c => c.rect.right > innerWidth + 2 || c.rect.left < -2),
+      chipOverflow: chips.some(c => c.rect.right > innerWidth + 2 || c.rect.left < -2),
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (metrics.errors || metrics.fatal) throw new Error('console/fatal errors in iframe: ' + JSON.stringify(metrics));
+  if (!metrics.stageOpen || !metrics.detailVisible) throw new Error('stage detail sheet did not open: ' + JSON.stringify(metrics));
+  if (!metrics.cardTexts.some(t => t.includes('水木续航') && t.includes('当前克制已覆盖'))) throw new Error('stage card missing recommended build/current match text: ' + JSON.stringify(metrics));
+  if (!metrics.affinityText.includes('弱 水/木/剑') || !metrics.affinityText.includes('抗 火')) throw new Error('detail missing chapter affinity chip: ' + JSON.stringify(metrics));
+  if (!metrics.buildText.includes('水木续航') || !metrics.buildText.includes('土剑破甲')) throw new Error('detail missing recommended build chip: ' + JSON.stringify(metrics));
+  if (!metrics.playerText.includes('当前构筑') || !metrics.playerText.includes('克制已覆盖') || !metrics.playerText.includes('水木长生')) throw new Error('detail missing player build affinity chip: ' + JSON.stringify(metrics));
+  if (!metrics.playerStatus.includes('good') && !metrics.playerStatus.includes('ok')) throw new Error('player affinity status class should be positive/ok: ' + JSON.stringify(metrics));
+  if (metrics.overflowX > 2 || metrics.cardOverflow || metrics.chipOverflow) throw new Error('stage affinity UI overflows phone frame: ' + JSON.stringify(metrics));
+  if (metrics.actionBottom > metrics.viewportH + 2 || metrics.sheetBottom > metrics.viewportH + 2) throw new Error('detail sheet actions clipped below viewport: ' + JSON.stringify(metrics));
+  const payload = 'stage affinity detail browser smoke passed ' + JSON.stringify(metrics);
+  out(payload);
+  document.body.setAttribute('data-result', 'passed');
+  console.log(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+  out(err.stack || err.message || err);
+});
+</script>

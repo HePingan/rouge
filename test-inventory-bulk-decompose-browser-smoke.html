@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>inventory bulk decompose browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<body><div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div><pre id="result"></pre>
+<script>
+(() => {
+  const out = document.getElementById('result');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fail = m => { throw new Error(m); };
+  const assert = (c, m) => { if (!c) fail(m); };
+  const w = () => document.getElementById('game').contentWindow;
+  const d = () => w().document;
+  async function waitFor(fn, label, timeout = 9000) {
+    const end = Date.now() + timeout; let last;
+    while (Date.now() < end) { try { last = fn(); if (last) return last; } catch(e) { last = e.message; } await sleep(80); }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function click(el) { assert(el, 'missing click target'); if (el.click) el.click(); else el.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, view:w() })); }
+  async function run() {
+    await waitFor(() => w().gameReady === true, 'gameReady');
+    w().__bulkDecomposeErrors = [];
+    w().addEventListener('error', e => w().__bulkDecomposeErrors.push(e.message || 'error'));
+    w().addEventListener('unhandledrejection', e => w().__bulkDecomposeErrors.push(String(e.reason || 'unhandledrejection')));
+    w().eval(`
+      player.inventory = [
+        { name:'普通剑一', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:1 }, floorLevel:1 },
+        { name:'普通剑二', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:2 }, floorLevel:1 },
+        { name:'普通甲三', slot:'armor', rarity:'普通', rarityColor:'#aaa', stats:{ def:1 }, floorLevel:1 },
+        { name:'普通靴四', slot:'boots', rarity:'普通', rarityColor:'#aaa', stats:{ dodge:0.01 }, floorLevel:1 },
+        { name:'普通盔五', slot:'helmet', rarity:'普通', rarityColor:'#aaa', stats:{ maxHp:3 }, floorLevel:1 },
+        { name:'稀有保留甲', slot:'armor', rarity:'稀有', rarityColor:'#ffdd44', stats:{ def:9 }, floorLevel:5 },
+        { name:'稀有保留剑', slot:'weapon', rarity:'稀有', rarityColor:'#ffdd44', stats:{ atk:9 }, floorLevel:5 }
+      ];
+      player.spiritStones = 100;
+      playerMaterials = {}; if (player) player.materials = playerMaterials;
+      inventoryTab = 'process';
+      inventoryBulkMode = 'decompose';
+      inventoryBulkRarity = '普通';
+      inventoryBulkConfirm = null;
+      if (typeof invalidateInventoryListCacheDom === 'function') invalidateInventoryListCacheDom();
+      if (typeof player.recalcStats === 'function') player.recalcStats();
+    `);
+    const initialStones = w().player.spiritStones;
+    await waitFor(() => typeof w().openPanel === 'function' && typeof w().renderInventoryDomPanel === 'function', 'panel functions');
+    w().eval(`openPanel('inventory'); renderInventoryDomPanel('bulk-decompose-smoke');`);
+    await waitFor(() => d().body.classList.contains('inventory-open'), 'inventory open');
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-inv-tab="process"]'), 'process tab'));
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-bulk-mode="decompose"]'), 'decompose mode'));
+    const chip = await waitFor(() => Array.from(d().querySelectorAll('#inventory-dom-panel [data-bulk-rarity-chip]')).find(btn => btn.dataset.bulkRarityChip === '普通'), 'normal rarity chip');
+    click(chip);
+    click(await waitFor(() => d().querySelector('#inventory-dom-panel [data-bulk-decompose]'), 'bulk decompose preview button'));
+    await waitFor(() => d().querySelector('#inventory-dom-panel [data-bulk-confirm="decompose"]'), 'decompose confirm sheet');
+    click(d().querySelector('#inventory-dom-panel [data-bulk-confirm="decompose"]'));
+    await waitFor(() => w().player.inventory.length === 2, 'only rare items remain');
+    await waitFor(() => !d().querySelector('#inventory-dom-panel [data-bulk-confirm="decompose"]'), 'decompose confirm sheet closes');
+    const names = w().player.inventory.map(item => item.name).sort();
+    const metrics = {
+      inventoryCount: w().player.inventory.length,
+      names,
+      stonesDelta: w().player.spiritStones - initialStones,
+      materialTotal: w().eval('Object.values(playerMaterials || {}).reduce((sum, value) => sum + Number(value || 0), 0)'),
+      confirmGone: !d().querySelector('#inventory-dom-panel [data-bulk-confirm="decompose"]'),
+      normalGone: !w().player.inventory.some(item => item.rarity === '普通'),
+      rareKept: names.includes('稀有保留剑') && names.includes('稀有保留甲'),
+      overflowX: Math.max(0, d().documentElement.scrollWidth - d().documentElement.clientWidth),
+      errors: w().__bulkDecomposeErrors.length,
+      fatal: w().fatalError || ''
+    };
+    assert(metrics.inventoryCount === 2 && metrics.normalGone && metrics.rareKept, `bulk decompose removed wrong items: ${JSON.stringify(metrics)}`);
+    assert(metrics.materialTotal > 0, `bulk decompose should add materials: ${JSON.stringify(metrics)}`);
+    assert(metrics.confirmGone, 'confirm sheet should close after sell');
+    assert(metrics.overflowX === 0, `horizontal overflow: ${metrics.overflowX}`);
+    assert(metrics.errors === 0, `console errors: ${w().__bulkDecomposeErrors.join(';')}`);
+    assert(!metrics.fatal, `fatal: ${metrics.fatal}`);
+    document.body.dataset.result = 'passed';
+    document.body.dataset.metrics = JSON.stringify(metrics);
+    out.textContent = 'inventory bulk decompose browser smoke passed ' + JSON.stringify(metrics);
+  }
+  run().catch(err => { document.body.dataset.result = 'failed'; out.textContent = err && err.stack ? err.stack : String(err); });
+})();
+</script>
+</body>

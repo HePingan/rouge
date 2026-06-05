@@ -1,0 +1,100 @@
+const fs = require('fs');
+const assert = require('assert');
+
+const main = fs.readFileSync('js/main.js', 'utf8');
+const ui = fs.readFileSync('js/ui.js', 'utf8');
+const css = fs.readFileSync('css/style.css', 'utf8');
+
+function mustInclude(src, needle, label) {
+  assert(src.includes(needle), label || `missing ${needle}`);
+}
+
+mustInclude(main, 'function getCharacterBuildProfileDom()', 'character build profile data helper missing');
+
+mustInclude(main, 'function getCharacterBuildJumpTargetDom()', 'character build jump target helper missing');
+mustInclude(main, 'function openCharacterBuildSkillTargetDom', 'character build jump opener missing');
+mustInclude(main, 'getRecommendedSkillNodesForBuild(1)', 'character build jump should reuse recommended skill route');
+mustInclude(main, 'data-char-build-jump="1"', 'character build card should expose stable jump selector');
+mustInclude(main, "pushPanelToStack('skills')", 'character build jump should open skills panel');
+mustInclude(main, 'selectedSkillTreeNode = { tree: jump.tree, index: Number(jump.index) || 0 }', 'character build jump should preselect skill node');
+mustInclude(main, 'skillDetailModalOpen = !!jump', 'character build jump should open skill detail modal for target');
+mustInclude(main, "p.querySelectorAll('[data-char-build-jump]')", 'character build jump should be bound in character panel actions');
+mustInclude(main, 'function getCharacterBuildProfileHtmlDom', 'character build profile html helper missing');
+mustInclude(main, 'function getCharacterIdentityOverviewDom', 'character identity overview helper missing');
+mustInclude(main, 'function getCharacterBonusOverviewDom', 'character bonus overview helper missing');
+mustInclude(main, 'function getCharacterEquipmentDiagnosisDom', 'character equipment diagnosis helper missing');
+mustInclude(main, 'function getCharacterNextActionDom', 'character next-action helper missing');
+mustInclude(ui, 'function getSharedNextActionRecommendation', 'shared next-action recommendation helper missing');
+mustInclude(main, 'getSharedNextActionRecommendation(player, { slotKeys, buildProfile })', 'character next-action should reuse HUD/shared recommendation logic');
+mustInclude(ui, 'getHudNextStepHint(player)', 'HUD next-step wrapper missing');
+mustInclude(main, 'char-next-action', 'character attributes tab should render next-action card');
+mustInclude(main, 'data-char-tab-jump', 'next-action card should navigate character tabs');
+mustInclude(main, 'data-char-open-skills', 'next-action card should open skills when no precise jump exists');
+mustInclude(main, 'data-char-close-panel', 'next-action card should support default close action');
+mustInclude(main, 'function getCharacterEquipmentSlotBadgeDom', 'character equipment slot badge helper missing');
+mustInclude(main, 'function getCharacterEquipmentSlotHintDom', 'empty equipment slot hint helper missing');
+mustInclude(main, 'function openInventoryForCharacterSlotDom', 'empty equipment slot should offer inventory entry');
+mustInclude(main, 'inventorySlotFilter', 'inventory should support slot filtering from character slots');
+mustInclude(main, 'data-clear-slot-filter', 'inventory slot filter should be clearable');
+mustInclude(main, 'data-char-open-inventory-slot', 'empty equipment slot hint should expose inventory CTA');
+mustInclude(main, "popPanelFromStack('inventory')", 'confirm equip should leave inventory after filtered-slot equip');
+mustInclude(main, "pushPanelToStack('character')", 'confirm equip should return to character panel after filtered-slot equip');
+mustInclude(main, "characterPanelLastHtml = ''", 'confirm equip should invalidate character panel cache before refresh');
+mustInclude(main, 'function itemDetailSummaryHtmlDom', 'equipment detail summary helper missing');
+mustInclude(main, 'function itemGroupedStatsHtmlDom', 'equipment detail grouped stats helper missing');
+mustInclude(main, 'detail-summary-row', 'equipment detail should render compact summary row');
+mustInclude(main, 'detail-stat-group', 'equipment detail should render grouped stats');
+mustInclude(main, 'eq-status-badge', 'character equipment slot cards should render status badge');
+mustInclude(main, "label: '低品'", 'equipment badge should flag low-quality gear');
+mustInclude(main, "label: '未强'", 'equipment badge should flag unupgraded gear');
+mustInclude(main, 'char-equip-diagnosis', 'character equipment tab should render compact diagnosis bar');
+mustInclude(main, 'char-equip-diag-setgap', 'equipment diagnosis should surface next set breakpoint');
+mustInclude(main, '下一档：还差', 'equipment diagnosis should describe next set gap');
+mustInclude(main, '诊断短板并点击槽位查看', 'equipment tab heading should explain diagnostic interaction');
+mustInclude(main, 'function getCharacterSetProgressDom', 'character set progress helper missing');
+mustInclude(main, 'equipmentSetCounts(player.equipment || {})', 'character set progress should reuse equipment set counts');
+mustInclude(main, 'char-set-card', 'character set progress should render compact set cards');
+mustInclude(main, '当前进度与下一档', 'sets tab should explain set progress/next breakpoint');
+mustInclude(main, 'getEquipmentBonusTotals', 'character bonus overview should reuse equipment bonus totals');
+mustInclude(main, 'char-bonus-pillars', 'character bonus panel should render pillar summary');
+mustInclude(main, '按战斗用途归类', 'bonus tab should explain grouped combat usage');
+mustInclude(main, 'getActiveSkillBuildSummary', 'character profile should reuse active skill build summary');
+mustInclude(main, 'getSkillCodexSummary', 'character profile should reuse skill codex progress');
+mustInclude(main, 'char-build-profile', 'character attributes tab should render build profile card');
+mustInclude(main, '待领 ${data.claimableCount}', 'character profile should surface claimable synergy/mastery rewards');
+mustInclude(main, '${identityHtml}', 'attributes tab should insert identity overview before build profile');
+mustInclude(main, '${nextActionHtml}', 'attributes tab should insert next-action card after identity');
+mustInclude(main, '${buildProfileHtml}', 'attributes tab should insert build profile before raw stats');
+mustInclude(main, '${escapeHtml(buildProfile.headline)} · 装备 · 属性 · 流派', 'character header should show current build headline');
+
+mustInclude(css, '#character-dom-panel .char-build-profile', 'character build profile css missing');
+mustInclude(css, '#character-dom-panel .char-next-action', 'character next-action css missing');
+mustInclude(css, '#character-dom-panel .char-identity-card', 'character identity overview css missing');
+mustInclude(css, '#character-dom-panel .char-identity-grid', 'character identity stat grid css missing');
+mustInclude(css, '#character-dom-panel .char-bonus-overview', 'character bonus overview css missing');
+mustInclude(css, '#character-dom-panel .char-bonus-pillars', 'character bonus pillars css missing');
+mustInclude(css, '#character-dom-panel .char-bonus-group', 'character bonus groups css missing');
+mustInclude(css, '#character-dom-panel .char-equip-diagnosis', 'character equipment diagnosis css missing');
+mustInclude(css, '#character-dom-panel .char-equip-diag-main', 'character equipment diagnosis chips css missing');
+mustInclude(css, '#character-dom-panel .char-equip-diag-foot', 'character equipment weakness row css missing');
+mustInclude(css, '#character-dom-panel .char-equip-diag-setgap', 'character equipment set gap row css missing');
+mustInclude(css, '#character-dom-panel .char-equip-slot-tip', 'empty equipment slot hint css missing');
+mustInclude(css, '#inventory-dom-panel .bag-slot-filter', 'inventory slot filter css missing');
+mustInclude(css, '#character-dom-panel .detail-summary-row', 'equipment detail summary row css missing');
+mustInclude(css, '#character-dom-panel .detail-stat-group', 'equipment detail stat group css missing');
+mustInclude(css, '#character-dom-panel .eq-status-badge', 'equipment status badge css missing');
+mustInclude(css, '#character-dom-panel .eq-status-badge.empty', 'equipment empty badge css missing');
+mustInclude(css, '#character-dom-panel .eq-status-badge.set', 'equipment set badge css missing');
+mustInclude(css, '#character-dom-panel .char-set-progress', 'character set progress css missing');
+mustInclude(css, '#character-dom-panel .char-set-card', 'character set card css missing');
+mustInclude(css, '#character-dom-panel .char-set-meter', 'character set meter css missing');
+mustInclude(css, '#character-dom-panel .char-set-gap', 'character set next-gap css missing');
+mustInclude(css, 'grid-template-columns: repeat(5, minmax(0, 1fr));', 'five character tabs should fit one row');
+mustInclude(css, '#character-dom-panel .char-build-tags', 'character build tag css missing');
+mustInclude(css, '#character-dom-panel .char-build-row', 'character build progress row css missing');
+mustInclude(css, '#character-dom-panel .char-build-next', 'character next-route hint css missing');
+
+mustInclude(css, '#character-dom-panel .char-build-jump', 'character build jump button css missing');
+mustInclude(css, '#character-dom-panel .char-build-profile.actionable', 'actionable character build profile css missing');
+
+console.log('character build profile static checks passed');

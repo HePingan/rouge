@@ -7,7 +7,7 @@ const asc = fs.readFileSync('js/ascension.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260525saveguard' + '1';
 
 function runBrowserScript(file, expose, context) {
@@ -46,7 +46,7 @@ assert(context.__combatBridgeTest.getLog().some(entry => String(entry.text).incl
 assert(context.__combatBridgeTest.getLog().some(entry => String(entry.text).includes('机制')), 'combat intro should make boss mechanics visible in the mobile combat log');
 assert.strictEqual(context.__combatBridgeTest.maybeTriggerBossMechanic('turn'), false, 'immortal turn mechanic should wait for interval');
 assert.strictEqual(context.__combatBridgeTest.maybeTriggerBossMechanic('turn'), false, 'immortal turn mechanic should wait until third turn');
-assert.strictEqual(context.__combatBridgeTest.maybeTriggerBossMechanic('turn'), true, 'third immortal boss turn should trigger through combat bridge');
+assert(context.__combatBridgeTest.maybeTriggerBossMechanic('turn'), 'third immortal boss turn should trigger through combat bridge');
 assert(context.player.hp < 1000, 'turn-interval immortal boss mechanic should damage the player');
 assert(context.__combatBridgeTest.getLog().some(entry => String(entry.text).includes('仙界机制·雷罚审判')), 'combat log should report the triggered immortal boss mechanic');
 

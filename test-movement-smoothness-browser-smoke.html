@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>movement smoothness smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+<script>
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 7000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (_) {}
+    await wait(80);
+  }
+  throw new Error('timeout waiting for ' + label);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  await wait(300);
+  const metrics = w.eval(`(() => {
+    closeAllPanels();
+    if (typeof combatState !== 'undefined') combatState = COMBAT_STATE.NONE;
+    joystick.active = true;
+    joystick.dx = 1;
+    joystick.dy = 0;
+    joystick.distance = 1;
+    const startX = player.x;
+    const startCamera = camera.x;
+    const positions = [];
+    for (let i = 0; i < 24; i++) {
+      currentFrameDt = i === 8 ? 0.2 : 1 / 60;
+      handleInput();
+      updateCamera();
+      positions.push(player.x);
+    }
+    joystick.active = false;
+    const deltas = positions.map((x, i) => i ? x - positions[i - 1] : x - startX);
+    return {
+      startX,
+      endX: player.x,
+      moved: player.x - startX,
+      maxStep: Math.max(...deltas.map(Math.abs)),
+      minPositiveStep: Math.min(...deltas.filter(d => d > 0)),
+      cameraMoved: Math.abs(camera.x - startCamera),
+      errors: (window.__errors || []).length,
+      rafLoop: typeof startGameLoop === 'function'
+    };
+  })()`);
+  if (metrics.errors) throw new Error('iframe errors: ' + JSON.stringify(metrics));
+  if (!metrics.rafLoop) throw new Error('startGameLoop not exposed in browser lexical scope');
+  if (metrics.moved <= 0.8 || metrics.moved > 3.2) throw new Error('movement distance abnormal: ' + JSON.stringify(metrics));
+  if (metrics.maxStep > 0.19) throw new Error('single-frame movement jump too large: ' + JSON.stringify(metrics));
+  if (metrics.cameraMoved <= 0) throw new Error('camera did not follow movement: ' + JSON.stringify(metrics));
+    window.__movementSmoothnessPassed = true;
+    window.__movementSmoothnessMetrics = metrics;
+    document.body.setAttribute('data-result', 'movement smoothness smoke passed');
+    console.log('movement smoothness smoke passed ' + JSON.stringify(metrics));
+})();
+</script>

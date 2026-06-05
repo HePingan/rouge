@@ -40,6 +40,8 @@ function startCombat(enemy) {
   if (!currentEnemy._statusEffects) currentEnemy._statusEffects = [];
   if (!currentEnemy._skillCooldowns) currentEnemy._skillCooldowns = {};
   if (!currentEnemy._buffs) currentEnemy._buffs = [];
+  if (!currentEnemy._intentHistory) currentEnemy._intentHistory = [];
+  currentEnemy._nextIntent = null;
   combatState = COMBAT_STATE.PLAYER_TURN;
   combatLogBuffer = [];
   if (typeof applyPassiveOnCombatStart === 'function') applyPassiveOnCombatStart();
@@ -59,6 +61,7 @@ function startCombat(enemy) {
   combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
   showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
   document.body.classList.add('combat-active');
+  generateEnemyIntent();
 }
 function getCombatLogTone(text, color = '#d4c8b0') {
   const s = String(text || '');
@@ -230,6 +233,9 @@ function playerAttack() {
     applyEquipmentOnVictory();
     const artifactRecover = typeof applyArtifactVictoryEffects === 'function' ? applyArtifactVictoryEffects(player) : null;
     if (artifactRecover?.ok) combatLog(`🏺 炼妖壶炼化妖力，恢复生命 ${artifactRecover.hp}、灵力 ${artifactRecover.mp}`, '#90ee90');
+    const _toastTitle1 = currentEnemy.isBoss ? 'Boss' : currentEnemy.isElite ? '精英' : '胜利';
+    const _toastDetail1 = `副本 +经验 ${Math.ceil(currentEnemy.xp || 0)} · +灵石 ${Math.ceil(currentEnemy.stones || 0)}${currentEnemy.isElite ? ' · 精英' : ''}`;
+    if (typeof showCombatResultToast === 'function') showCombatResultToast('victory', _toastTitle1, _toastDetail1);
     combatLog(`✅ 你击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
@@ -354,6 +360,89 @@ function finishEnemyDamage(dmg, label, color = '#ff6666', crit = false, guardMul
 function chooseEnemySkill() {
   const skills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
   const usable = skills.filter(s => !currentEnemy._skillCooldowns?.[s.name]);
+  const locked = currentEnemy._nextIntent;
+  if (locked && locked.type === 'skill' && locked.skill) {
+    if (usable.find(s => s.name === locked.skill.name)) return locked.skill;
+    currentEnemy._nextIntent = null;
+    const remaining = chooseEnemySkill();
+    if (remaining) currentEnemy._intentHistory.push(locked);
+    return remaining;
+  }
+  if (locked && locked.type === 'attack' && (locked.attackType === 'heavy' || locked.attackType === 'normal')) {
+    currentEnemy._nextIntent = null;
+    const remaining = chooseEnemySkill();
+    if (remaining) currentEnemy._intentHistory.push(locked);
+    return remaining;
+  }
+  if (locked && locked.type === 'control') {
+    currentEnemy._nextIntent = null;
+    currentEnemy._skipEnemyTurn = true;
+    return null;
+  }
+  currentEnemy._nextIntent = null;
+  const remaining = chooseEnemySkill();
+  if (remaining) currentEnemy._intentHistory.push(locked);
+  return remaining;
+}
+
+function generateEnemyIntent() {
+  if (!currentEnemy || !currentEnemy.hp || currentEnemy.hp <= 0) return;
+  if (currentEnemy._skipEnemyTurn) {
+    currentEnemy._skipEnemyTurn = false;
+    currentEnemy._nextIntent = { type: 'control', icon: '⏳', label: '受控', suggestion: '建议输出', detail: '下回合大概率无法行动' };
+    return;
+  }
+  const status = currentEnemy._statusEffects || [];
+  if (status.some(st => (st.type === 'freeze' || st.type === 'stun') && Number(st.turns || 0) > 0)) {
+    currentEnemy._nextIntent = { type: 'control', icon: '⏳', label: '受控', suggestion: '建议输出', detail: '下回合大概率无法行动' };
+    return;
+  }
+  const mechanic = currentEnemy.isBoss && typeof getCurrentBossMechanic === 'function' ? getCurrentBossMechanic() : null;
+  if (mechanic?.triggers?.turn) {
+    const hpPct = currentEnemy.maxHp ? (Number(currentEnemy.hp || 0) / Number(currentEnemy.maxHp || 1)) : 1;
+    const suggestion = hpPct < 0.35 ? '建议速杀' : hpPct > 0.7 ? '建议控场' : '建议防御';
+    currentEnemy._nextIntent = { type: 'boss', icon: mechanic.icon || '👑', label: mechanic.name || '机制', suggestion, detail: 'Boss机制将触发' };
+    return;
+  }
+  const skills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
+  const usable = skills.filter(s => !currentEnemy._skillCooldowns?.[s.name]);
+  if (usable.length) {
+    const ranked = usable.map(skill => {
+      let chance = Number(skill.chance || 0.25);
+      if (currentEnemy.isElite) chance += 0.08;
+      if (currentEnemy.isBoss) chance += 0.16;
+      chance = Math.min(currentEnemy.isBoss ? 0.76 : 0.56, chance);
+      return { skill, chance };
+    }).sort((a, b) => b.chance - a.chance);
+    const chosen = ranked[0];
+    if (chosen) {
+      const skill = chosen.skill;
+      const map = {
+        selfBuff: ['蓄势', '强化自身', '建议速杀或控场'],
+        multiHit: ['连击', `${skill.hits || 2}段攻击`, '建议防御'],
+        drain: ['吸血', '造成伤害并回复', '建议速杀'],
+        damageStatus: [skill.status?.type === 'poison' ? '施毒' : '灼烧', '伤害并附加持续伤害', '建议防御或驱散'],
+        damageDebuff: [skill.debuff?.type === 'slow' ? '迟缓' : skill.debuff?.type === 'curse' ? '诅咒' : '压制', '伤害并附加负面状态', '建议防御或驱散'],
+      };
+      const [label, detail, suggestion] = map[skill.type] || ['技能', skill.name || '特殊攻击', '建议注意'];
+      currentEnemy._nextIntent = { type: 'skill', icon: skill.icon || '✦', label, suggestion, detail: `${skill.name || '技能'} · ${detail}`, skill };
+      return;
+    }
+  }
+  const atk = Number(currentEnemy.atk || 0);
+  const hpPct = currentEnemy.maxHp ? Number(currentEnemy.hp || 0) / Number(currentEnemy.maxHp || 1) : 1;
+  if (currentEnemy.isBoss || currentEnemy.isElite || hpPct < 0.35 || atk > Number(player?.def || 0) * 2) {
+    currentEnemy._nextIntent = { type: 'attack', icon: '⚔️', label: '重击', attackType: 'heavy', suggestion: '建议防御或控场', detail: '高伤普攻，建议防御或控场' };
+    return;
+  }
+  currentEnemy._nextIntent = { type: 'attack', icon: '⚔️', label: '普攻', attackType: 'normal', suggestion: '可输出', detail: '常规攻击' };
+}
+
+function chooseEnemySkill() {
+  const skills = typeof getEnemySkills === 'function' ? getEnemySkills(currentEnemy) : [];
+  const usable = skills.filter(s => !currentEnemy._skillCooldowns?.[s.name]);
+  const lockedSkill = currentEnemy?._nextIntent?.type === 'skill' ? currentEnemy._nextIntent.skill : null;
+  if (lockedSkill && usable.some(s => s.name === lockedSkill.name)) return lockedSkill;
   for (const skill of usable) {
     let chance = skill.chance || 0.25;
     if (currentEnemy.isElite) chance += 0.08;
@@ -441,7 +530,7 @@ function triggerImmortalBossMechanic(mechanic, phase = 'turn') {
   if (!result?.effects?.length) return false;
   const detail = result.effects.map(describeImmortalBossEffect).join('、');
   combatLog(`${mechanic.icon || '👑'} ${currentEnemy.name}触发【仙界机制·${mechanic.name}】：${detail}`, '#ffcc88');
-  return true;
+  return result;
 }
 
 function triggerBossMechanic(mechanic) {
@@ -510,6 +599,13 @@ function maybeTriggerBossMechanic(phase = 'turn') {
   return false;
 }
 
+function didBossMechanicTrigger(result) {
+  if (!result) return false;
+  if (result === true) return true;
+  if (typeof result === 'object') return result.triggered !== false;
+  return Boolean(result);
+}
+
 function finishEnemyTurn() {
   if (player.hp <= 0) {
     const saved = typeof applyArtifactDeathSave === 'function' ? applyArtifactDeathSave(player) : null;
@@ -531,6 +627,9 @@ function finishEnemyTurn() {
     applyEquipmentOnVictory();
     const artifactRecover = typeof applyArtifactVictoryEffects === 'function' ? applyArtifactVictoryEffects(player) : null;
     if (artifactRecover?.ok) combatLog(`🏺 炼妖壶炼化妖力，恢复生命 ${artifactRecover.hp}、灵力 ${artifactRecover.mp}`, '#90ee90');
+    const _toastTitle2 = currentEnemy.isBoss ? 'Boss' : currentEnemy.isElite ? '精英' : '胜利';
+    const _toastDetail2 = `反震 +经验 ${Math.ceil(currentEnemy.xp || 0)} · +灵石 ${Math.ceil(currentEnemy.stones || 0)}`;
+    if (typeof showCombatResultToast === 'function') showCombatResultToast('victory', _toastTitle2, _toastDetail2);
     combatLog(`✅ 你反震击败了 ${currentEnemy.name}！`, '#55ff55');
     combatState = COMBAT_STATE.VICTORY;
     onVictory();
@@ -538,6 +637,7 @@ function finishEnemyTurn() {
   }
   if (typeof applyPassiveOnPlayerTurnStart === 'function') applyPassiveOnPlayerTurnStart();
   applyEquipmentTurnRegen();
+  generateEnemyIntent();
   combatState = COMBAT_STATE.PLAYER_TURN;
 }
 
@@ -547,7 +647,7 @@ function enemyAttack() {
   if (typeof tickEnemyStatusStartTurn === 'function' && tickEnemyStatusStartTurn()) return;
   if (tickPlayerStatusStartEnemyTurn()) return;
   tickEnemyBuffsStartTurn();
-  if (maybeTriggerBossMechanic('turn')) { finishEnemyTurn(); return; }
+  if (didBossMechanicTrigger(maybeTriggerBossMechanic('turn'))) { finishEnemyTurn(); return; }
   if (currentEnemy._skillCooldowns) {
     for (const key of Object.keys(currentEnemy._skillCooldowns)) {
       currentEnemy._skillCooldowns[key] -= 1;
@@ -585,6 +685,30 @@ function onDemonWarDefeat() {
   showMessage('仙魔战场失利，战旗燃尽，需重新开启。', '#ff8844');
   if (typeof autoSave === 'function') autoSave();
 }
+function showCombatResultToast(type, title, detail) {
+  const old = document.getElementById('combat-result-toast');
+  if (old) old.remove();
+  const toast = document.createElement('div');
+  toast.id = 'combat-result-toast';
+  toast.className = `combat-result-toast toast-${type}`;
+  toast.innerHTML = `<b>${title}</b><span>${detail}</span>`;
+  document.body.appendChild(toast);
+  if (type === 'victory') {
+    toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  } else {
+    const b = toast.querySelector('b');
+    if (b) {
+      b.textContent = '已保存';
+    }
+    setTimeout(() => {
+      if (toast.parentNode) {
+        const b2 = toast.querySelector('b');
+        if (b2) b2.textContent = '已保存';
+      }
+    }, 2000);
+  }
+}
+
 function onVictory() {
   if (isAscensionTrialCombat() && currentEnemy) {
     const result = typeof completeAscensionTrialNode === 'function' ? completeAscensionTrialNode(player, currentEnemy.trialId) : null;
@@ -794,6 +918,7 @@ function onVictory() {
 }
 
 function onDefeat() {
+  if (typeof showCombatResultToast === 'function') showCombatResultToast('defeat', '败退', '已保留进度 · 返回入口');
   combatLog('💀 你被击败了...', '#ff3333');
   if (isDemonWarCombat()) {
     combatLog('仙魔战场失利，你被战场法则送回仙门...', '#ff8844');
@@ -890,6 +1015,7 @@ function onDefeat() {
   }, 1500);
 }
 function onFlee() {
+  if (typeof showCombatResultToast === 'function') showCombatResultToast('flee', '撤退', '脱离战斗 · 保留状态');
   const fallbackX = Number.isFinite(player.prevX) ? player.prevX : player.x;
   const fallbackY = Number.isFinite(player.prevY) ? player.prevY : player.y;
   player.x = Math.round(fallbackX);

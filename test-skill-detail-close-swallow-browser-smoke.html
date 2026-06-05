@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>skill detail close swallow browser smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<pre id="result">RUNNING</pre>
+<script>
+(() => {
+  const resultEl = document.getElementById('result');
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const fail = message => { throw new Error(message); };
+  const assert = (condition, message) => { if (!condition) fail(message); };
+  function gameWindow() { return document.getElementById('game').contentWindow; }
+  function gameDocument() { return gameWindow().document; }
+  function centerPoint(el) {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  function pointerTap(el, offsetX = 0, offsetY = 0) {
+    assert(el, 'tap target missing');
+    const w = gameWindow();
+    const p = centerPoint(el);
+    const init = { bubbles: true, cancelable: true, view: w, clientX: p.x + offsetX, clientY: p.y + offsetY, pointerId: 7, pointerType: 'touch', isPrimary: true };
+    el.dispatchEvent(new PointerEvent('pointerdown', init));
+    el.dispatchEvent(new PointerEvent('pointerup', init));
+    el.dispatchEvent(new MouseEvent('click', init));
+  }
+  async function waitFor(predicate, label, timeout = 7000) {
+    const end = Date.now() + timeout;
+    let last;
+    while (Date.now() < end) {
+      try {
+        last = predicate();
+        if (last) return last;
+      } catch (err) { last = err.message; }
+      await sleep(80);
+    }
+    fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
+  }
+  function inspect() {
+    const d = gameDocument();
+    const w = gameWindow();
+    return {
+      bodyClass: d.body.className,
+      skillsOpen: d.body.classList.contains('skills-open'),
+      detailVisible: !!d.querySelector('#skill-detail-layer .skill-detail-modal'),
+      selected: w.eval('typeof selectedSkillTreeNode !== "undefined" ? selectedSkillTreeNode : null'),
+      suppressLeft: w.eval('typeof skillDetailCloseSwallowUntil !== "undefined" ? Math.max(0, skillDetailCloseSwallowUntil - Date.now()) : -1'),
+      consoleErrors: w.__skillCloseSmokeErrors || [],
+    };
+  }
+  async function run() {
+    const w = gameWindow();
+    await waitFor(() => w.gameReady === true, 'gameReady');
+    w.__skillCloseSmokeErrors = [];
+    w.addEventListener('error', e => w.__skillCloseSmokeErrors.push(e.message || 'error'));
+    w.addEventListener('unhandledrejection', e => w.__skillCloseSmokeErrors.push(String(e.reason || 'unhandledrejection')));
+    await waitFor(() => w.eval('typeof renderSkillsDomPanel === "function" && typeof SKILL_TREES !== "undefined"'), 'skill globals');
+    w.eval(`
+      learnedSkills = [{ tree: 'fire', index: 0 }, { tree: 'thunder', index: 0 }];
+      selectedSkillTreeNode = null;
+      skillDetailModalOpen = false;
+      openPanel('skills');
+    `);
+    await waitFor(() => gameDocument().body.classList.contains('skills-open'), 'skills panel open');
+
+    for (let i = 0; i < 8; i += 1) {
+      w.eval(`
+        selectedSkillTreeNode = { tree: ${JSON.stringify(['fire', 'thunder', 'water', 'wood'][i % 4])}, index: ${i % 2} };
+        skillDetailModalOpen = true;
+        renderSkillsDomPanel();
+      `);
+      await waitFor(() => gameDocument().querySelector('#skill-detail-layer .skill-detail-modal'), `detail open ${i}`);
+      const close = await waitFor(() => gameDocument().querySelector('#skill-detail-layer .skill-modal-close, #skill-detail-layer [data-skill-detail-close]'), `detail close ${i}`);
+      pointerTap(close, (i % 2), -(i % 2));
+      await sleep(45);
+      const state = inspect();
+      assert(state.skillsOpen, `closing detail must not also close skills panel on iteration ${i}: ${JSON.stringify(state)}`);
+      assert(!state.detailVisible, `detail should close on iteration ${i}: ${JSON.stringify(state)}`);
+    }
+    await sleep(950);
+    const panelClose = await waitFor(() => gameDocument().querySelector('#skills-dom-panel .pclose'), 'skills panel close button');
+    pointerTap(panelClose);
+    await waitFor(() => !gameDocument().body.classList.contains('skills-open'), 'skills panel closes after swallow lock expires');
+    const state = inspect();
+    assert(!state.consoleErrors.length, `console should stay clean: ${state.consoleErrors.join('\n')}`);
+    return { ok: true, message: 'skill detail close swallow browser smoke passed', state };
+  }
+  run().then(result => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+    document.title = 'SMOKE_OK';
+  }).catch(err => {
+    resultEl.textContent = 'SMOKE_RESULT:' + JSON.stringify({ ok:false, message: err.message, stack: err.stack, state: (() => { try { return inspect(); } catch (_) { return null; } })() });
+    document.title = 'SMOKE_FAIL';
+  });
+})();
+</script>

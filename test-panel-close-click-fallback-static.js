@@ -5,6 +5,8 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const indexHtml = fs.readFileSync('index.html', 'utf8');
 const mobileVerify = fs.readFileSync('mobile-verify.html', 'utf8');
+const CURRENT_TOKEN = '20260605combatp3';
+const STALE_STAGE_TOP_TOKEN = '20260530stagetop1';
 
 function sliceFunction(name, nextMarker) {
   const start = main.indexOf(`function ${name}()`);
@@ -39,9 +41,9 @@ assert(mobileCss.includes('#secretrealm-dom-panel,\n  #tribulation-dom-panel,\n 
 assert(mobileCss.includes('body.secretrealm-open #secretrealm-dom-panel') && mobileCss.includes('body.tribulation-open #tribulation-dom-panel') && mobileCss.includes('body.ascension-open #ascension-dom-panel'), 'secret/tribulation/ascension should only display when matching body class is open');
 assert(mobileCss.includes('z-index: 10010 !important'), 'top panels should sit above HUD/nav after audit');
 
-assert(indexHtml.includes('20260530synergy7'), 'index.html should use current panel audit cache token');
-assert(mobileVerify.includes('20260530synergy7'), 'mobile-verify iframe should use current panel audit cache token');
-assert(!indexHtml.includes('20260530stagetop1'), 'index.html should not keep stale stage top cache token');
-assert(!mobileVerify.includes('20260530stagetop1'), 'mobile-verify should not keep stale stage top cache token');
+assert(indexHtml.includes(CURRENT_TOKEN), 'index.html should use current panel audit cache token');
+assert(mobileVerify.includes(CURRENT_TOKEN), 'mobile-verify iframe should use current panel audit cache token');
+assert(!indexHtml.includes(STALE_STAGE_TOP_TOKEN), 'index.html should not keep stale stage top cache token');
+assert(!mobileVerify.includes(STALE_STAGE_TOP_TOKEN), 'mobile-verify should not keep stale stage top cache token');
 
 console.log('panel close click fallback static tests passed');

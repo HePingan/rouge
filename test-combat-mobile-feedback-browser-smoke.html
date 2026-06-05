@@ -1,0 +1,135 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>combat mobile feedback viewport smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  .phone { width:390px; height:844px; overflow:hidden; background:#000; }
+  iframe { width:100%; height:100%; border:0; display:block; }
+  pre { white-space:pre-wrap; }
+</style>
+<div class="phone"><iframe id="game" src="./index.html?v=20260605combatp3"></iframe></div>
+<script>
+const out = msg => document.body.insertAdjacentHTML('beforeend', `<pre>${String(msg).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>`);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(fn, label, timeout = 9000) {
+  const start = Date.now(); let last;
+  while (Date.now() - start < timeout) {
+    try { const value = fn(); if (value) return value; } catch (err) { last = err; }
+    await wait(80);
+  }
+  throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+}
+(async () => {
+  const frame = document.getElementById('game');
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 'gameReady');
+  const w = frame.contentWindow;
+  const d = w.document;
+  w.eval(`
+    learnedSkills = [
+      { tree:'water', index:0 }, { tree:'water', index:1 },
+      { tree:'wood', index:0 }, { tree:'sword', index:0 },
+      { tree:'fire', index:0 }, { tree:'thunder', index:0 }
+    ];
+    player.hp = player.maxHp || 120;
+    player.mp = player.maxMp || 120;
+    const enemy = { name:'反馈测试妖兽', title:'反馈测试妖兽', hp:160, maxHp:160, atk:8, def:3, realm:0, weaknesses:['water','wood'], resists:['sword'], _statusEffects:[] };
+    startCombat(enemy);
+    combatState = 1;
+    combatSkillDrawerOpen = true;
+    renderCombatDomPanel();
+  `);
+  await waitFor(() => d.querySelector('#combat-dom-panel.drawer-open .cbt-skill-drawer') && d.querySelector('#cbt-attack'), 'combat drawer');
+  const openMetrics = w.eval(`(() => {
+    const panel = document.querySelector('#combat-dom-panel');
+    const drawer = document.querySelector('.cbt-skill-drawer');
+    const action = document.querySelector('.cbt-actions-row');
+    const pr = panel.getBoundingClientRect();
+    const dr = drawer.getBoundingClientRect();
+    const ar = action.getBoundingClientRect();
+    const ds = getComputedStyle(drawer);
+    return {
+      panelH: pr.height, panelTop: pr.top, panelBottom: pr.bottom,
+      drawerH: dr.height, drawerMaxH: ds.maxHeight, drawerOverflowY: ds.overflowY,
+      actionBottom: ar.bottom, actionH: ar.height,
+      viewportH: innerHeight, overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      token: [...document.scripts].slice(-1)[0]?.src,
+      errors: (window.__errors || []).length,
+      fatal: window.__fatalError || ''
+    };
+  })()`);
+  if (openMetrics.errors || openMetrics.fatal) throw new Error('console/fatal errors: ' + JSON.stringify(openMetrics));
+  if (openMetrics.panelH > openMetrics.viewportH * 0.52) throw new Error('combat drawer panel too tall: ' + JSON.stringify(openMetrics));
+  if (openMetrics.drawerH > openMetrics.viewportH * 0.22) throw new Error('skill drawer too tall: ' + JSON.stringify(openMetrics));
+  if (openMetrics.drawerOverflowY !== 'auto') throw new Error('drawer should scroll internally: ' + JSON.stringify(openMetrics));
+  if (openMetrics.actionBottom > openMetrics.panelBottom + 1) throw new Error('action row escaped bottom sheet: ' + JSON.stringify(openMetrics));
+  if (openMetrics.overflowX > 2) throw new Error('horizontal overflow: ' + JSON.stringify(openMetrics));
+
+  const singleFireMetrics = w.eval(`(() => {
+    const originalAttack = playerAttack;
+    window.__combatAttackCalls = 0;
+    playerAttack = function(...args) {
+      window.__combatAttackCalls += 1;
+      return originalAttack.apply(this, args);
+    };
+    player.hp = player.maxHp || 120;
+    player.mp = player.maxMp || 120;
+    const enemy = { name:'单击防重妖兽', title:'单击防重妖兽', hp:180, maxHp:180, atk:6, def:2, realm:0, weaknesses:['water'], resists:[], _statusEffects:[] };
+    startCombat(enemy);
+    combatState = 1;
+    combatSkillDrawerOpen = false;
+    renderCombatDomPanel();
+    const attack = document.querySelector('#cbt-attack');
+    const pointer = window.PointerEvent
+      ? new PointerEvent('pointerdown', { bubbles:true, cancelable:true, pointerType:'touch', clientX:44, clientY:760 })
+      : new MouseEvent('pointerdown', { bubbles:true, cancelable:true, clientX:44, clientY:760 });
+    const pointerAllowed = attack.dispatchEvent(pointer);
+    const click = new MouseEvent('click', { bubbles:true, cancelable:true, clientX:44, clientY:760 });
+    const clickAllowed = attack.dispatchEvent(click);
+    renderCombatDomPanel();
+    const result = {
+      calls: window.__combatAttackCalls,
+      pointerAllowed,
+      clickAllowed,
+      clickPrevented: click.defaultPrevented,
+      state: combatState,
+      attackDisabled: document.querySelector('#cbt-attack')?.getAttribute('aria-disabled'),
+      defendDisabled: document.querySelector('#cbt-defend')?.getAttribute('aria-disabled'),
+      skillDisabled: document.querySelector('#cbt-skill-toggle-action')?.getAttribute('aria-disabled')
+    };
+    playerAttack = originalAttack;
+    return result;
+  })()`);
+  if (singleFireMetrics.calls !== 1 || singleFireMetrics.clickAllowed !== false || !singleFireMetrics.clickPrevented) throw new Error('pointerdown plus synthetic click should fire exactly once and suppress click: ' + JSON.stringify(singleFireMetrics));
+  if (singleFireMetrics.attackDisabled !== 'true' || singleFireMetrics.defendDisabled !== 'true' || singleFireMetrics.skillDisabled !== 'true') throw new Error('enemy-turn action aria-disabled missing after attack: ' + JSON.stringify(singleFireMetrics));
+
+  w.eval(`
+    player.hp = player.maxHp || 120;
+    player.mp = player.maxMp || 120;
+    const enemy = { name:'反馈测试妖兽', title:'反馈测试妖兽', hp:160, maxHp:160, atk:8, def:3, realm:0, weaknesses:['water','wood'], resists:['sword'], _statusEffects:[] };
+    startCombat(enemy);
+    combatState = 1;
+    combatSkillDrawerOpen = true;
+    combatDelegatedTouchUntil = 0;
+    renderCombatDomPanel();
+  `);
+  await waitFor(() => d.querySelector('#combat-dom-panel.drawer-open .cbt-skill-drawer') && d.querySelector('#cbt-attack'), 'combat drawer reset');
+
+  w.eval(`document.querySelector('#cbt-skill-toggle-action').dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, clientX:300, clientY:760}));`);
+  await wait(60);
+  const toggleMetrics = w.eval(`(() => ({ hasFeedback: document.querySelector('#combat-dom-panel').classList.contains('feedback-toggle'), drawerOpen: document.querySelector('#combat-dom-panel').classList.contains('drawer-open') }))()`);
+  if (!toggleMetrics.hasFeedback) throw new Error('skill toggle feedback class missing: ' + JSON.stringify(toggleMetrics));
+
+  w.eval(`combatState = 1; renderCombatDomPanel(); document.querySelector('#cbt-attack').dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, clientX:40, clientY:760}));`);
+  await wait(60);
+  const attackMetrics = w.eval(`(() => ({ hasFeedback: document.querySelector('#combat-dom-panel').classList.contains('feedback-attack'), state: combatState, disabledText: document.querySelector('#cbt-defend')?.textContent || '' }))()`);
+  if (!attackMetrics.hasFeedback) throw new Error('attack feedback class missing: ' + JSON.stringify(attackMetrics));
+  if (attackMetrics.state !== 2) throw new Error('attack should advance to enemy turn: ' + JSON.stringify(attackMetrics));
+  const payload = 'combat mobile feedback viewport smoke passed ' + JSON.stringify({ openMetrics, toggleMetrics, attackMetrics });
+  out(payload);
+  document.body.setAttribute('data-result', 'passed');
+  console.log(payload);
+})().catch(err => {
+  console.error(err);
+  document.body.setAttribute('data-result', String(err.message || err));
+});
+</script>

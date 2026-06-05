@@ -5,10 +5,10 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260530synergy7';
+const CURRENT_TOKEN = '20260605combatp3';
 const PREVIOUS_TOKEN = '20260530stageclose1';
 
-assert(css.includes(`Mobile Stage Footer Readability + Scroll Fix ${CURRENT_TOKEN}`), 'stage top overlay CSS marker should be current');
+assert(css.includes(`Mobile Stage Footer Readability + Scroll Fix 20260531resonance1`), 'stage top overlay CSS marker should be current');
 assert(css.includes('top: calc(50px + env(safe-area-inset-top)) !important;'), 'stage panel should use the same top overlay offset as inventory');
 assert(css.includes('bottom: calc(12px + env(safe-area-inset-bottom)) !important;'), 'stage panel should use the same bottom safe area as inventory');
 assert(css.includes('z-index: 10010 !important;'), 'stage panel should be above HUD/nav/touch controls');

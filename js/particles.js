@@ -5,9 +5,11 @@ let particles = [];
 let screenShake = { x: 0, y: 0, intensity: 0, duration: 0 };
 
 // DOM particle pool
-const PARTICLE_POOL_SIZE = 300;
+const PARTICLE_POOL_SIZE = 180;
+const PARTICLE_MOBILE_ACTIVE_BUDGET = 96;
 let domParticlePool = [];
 let domParticleLayer = null;
+let domParticleVisibleCount = 0;
 
 function initParticlePool() {
   domParticleLayer = document.getElementById('particle-layer');
@@ -26,7 +28,12 @@ function initParticlePool() {
 }
 
 function spawnParticles(x, y, count, color, speedMult = 1.0, size = 3) {
-  for (let i = 0; i < count; i++) {
+  const mobileRunActive = typeof window !== 'undefined' && window.innerWidth < 700 &&
+    (document?.body?.classList?.contains('stage-run-active') || document?.body?.classList?.contains('secret-realm-run-active'));
+  const activeBudget = mobileRunActive ? PARTICLE_MOBILE_ACTIVE_BUDGET : PARTICLE_POOL_SIZE;
+  if (particles.length >= activeBudget) return;
+  const spawnCount = Math.min(count, activeBudget - particles.length, mobileRunActive ? 12 : count);
+  for (let i = 0; i < spawnCount; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = (1 + Math.random() * 3) * speedMult;
     particles.push({
@@ -74,19 +81,25 @@ function drawParticlesDom(camera) {
   for (const p of particles) {
     if (idx >= poolSize) break;
     const el = domParticlePool[idx++];
-    el.style.display = 'block';
-    el.style.width = p.size + 'px';
-    el.style.height = p.size + 'px';
-    el.style.background = p.color;
-    el.style.opacity = p.life / p.maxLife;
-    el.style.transform = 'translate(' +
+    if (el.style.display !== 'block') el.style.display = 'block';
+    const width = p.size + 'px';
+    const height = p.size + 'px';
+    const bg = p.color;
+    const opacity = String(p.life / p.maxLife);
+    const transform = 'translate(' +
       (p.x - camera.x - p.size / 2) + 'px,' +
       (p.y - camera.y - p.size / 2) + 'px)';
+    if (el.style.width !== width) el.style.width = width;
+    if (el.style.height !== height) el.style.height = height;
+    if (el.style.background !== bg) el.style.background = bg;
+    if (el.style.opacity !== opacity) el.style.opacity = opacity;
+    if (el.style.transform !== transform) el.style.transform = transform;
   }
-  // Hide unused pool elements
-  while (idx < poolSize) {
-    domParticlePool[idx++].style.display = 'none';
+  // Hide unused pool elements only when the visible count shrinks.
+  for (let i = idx; i < domParticleVisibleCount && i < poolSize; i++) {
+    if (domParticlePool[i].style.display !== 'none') domParticlePool[i].style.display = 'none';
   }
+  domParticleVisibleCount = idx;
 }
 
 function applyScreenShake() {

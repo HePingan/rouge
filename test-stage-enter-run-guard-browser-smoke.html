@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stage enter run guard smoke</title>
+<style>
+  html, body { margin:0; background:#111; color:#eee; font:12px sans-serif; }
+  iframe { width:390px; height:844px; border:0; display:block; }
+</style>
+<iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+<script>
+const frame = document.getElementById('game');
+function wait(ms){ return new Promise(r => setTimeout(r, ms)); }
+function fail(msg, extra){
+  const result = { ok:false, error:msg, extra };
+  console.log('SMOKE_RESULT:' + JSON.stringify(result));
+  document.body.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+}
+function pass(metrics){
+  const result = { ok:true, metrics };
+  console.log('SMOKE_RESULT:' + JSON.stringify(result));
+  document.body.textContent = 'SMOKE_RESULT:' + JSON.stringify(result);
+}
+async function waitFor(fn, timeout=6000){
+  const start = performance.now();
+  while (performance.now() - start < timeout) {
+    try { if (fn()) return true; } catch (_) {}
+    await wait(80);
+  }
+  return false;
+}
+(async () => {
+  await waitFor(() => frame.contentWindow && frame.contentWindow.gameReady, 8000);
+  const w = frame.contentWindow;
+  const d = w.document;
+  if (!w.gameReady) return fail('game did not become ready');
+  w.localStorage.removeItem('xian_save_v1');
+  w.localStorage.removeItem('rougeSave');
+  w.localStorage.removeItem('rouge_save');
+  // Reset a persisted in-run save in-place; closeAllPanels() would treat it as flee
+  // and can auto-save stale run state again before the smoke opens the selector.
+  w.eval(`
+    isInStageRun = false;
+    showStageClearPanel = false;
+    if (player?.stageProgress) player.stageProgress.currentRun = null;
+    panelStack.splice(0, panelStack.length);
+    pushPanelToStack('stages');
+    syncBodyPanelState();
+  `);
+  await waitFor(() => d.querySelector('[data-stage-enter]'), 3000);
+  const enter = d.querySelector('[data-stage-enter]');
+  if (!enter) return fail('enter button missing', { body: d.body.className, html: d.getElementById('stage-dom-panel')?.innerHTML?.slice(0, 300) });
+  if (enter.disabled) return fail('enter button disabled', enter.textContent);
+  const nav = d.getElementById('btn-stages');
+  if (!nav) return fail('stage nav button missing');
+  const r = enter.getBoundingClientRect();
+  const hit = d.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const beforeBody = d.body.className;
+  enter.click();
+  await wait(400);
+  const afterEnter = {
+    body: d.body.className,
+    hasRun: !!w.player.stageProgress.currentRun,
+    runActive: d.body.classList.contains('stage-run-active'),
+    stageOpen: d.body.classList.contains('stage-open'),
+    panelOpen: d.body.classList.contains('panel-open'),
+    panelDisplay: getComputedStyle(d.getElementById('stage-dom-panel')).display,
+    stack: w.eval('Array.from(panelStack)'),
+    hitClass: hit?.className || '',
+    hitStageEnter: hit?.closest?.('[data-stage-enter]')?.dataset?.stageEnter || null
+  };
+  if (!afterEnter.hasRun || !afterEnter.runActive || afterEnter.stageOpen || afterEnter.panelDisplay !== 'none') {
+    return fail('enter did not close selector and start run', { beforeBody, afterEnter });
+  }
+  nav.click();
+  await wait(300);
+  const afterRetap = {
+    body: d.body.className,
+    hasRun: !!w.player.stageProgress.currentRun,
+    runActive: d.body.classList.contains('stage-run-active'),
+    stageOpen: d.body.classList.contains('stage-open'),
+    panelOpen: d.body.classList.contains('panel-open'),
+    panelDisplay: getComputedStyle(d.getElementById('stage-dom-panel')).display,
+    stack: w.eval('Array.from(panelStack)')
+  };
+  if (!afterRetap.hasRun || !afterRetap.runActive || afterRetap.stageOpen || afterRetap.panelDisplay !== 'none') {
+    return fail('stage nav reopened selector during run', { afterEnter, afterRetap });
+  }
+  pass({ beforeBody, afterEnter, afterRetap });
+})();
+</script>
