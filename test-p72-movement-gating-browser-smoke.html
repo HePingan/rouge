@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P72 movement gating browser smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;max-width:390px}</style></head>
+<body><iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">running</pre>
+<script>
+const frame=document.getElementById('game'); const result=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function post(text){try{fetch('/__p72_movement_result',{method:'POST',headers:{'Content-Type':'text/plain'},body:text})}catch(_){}}
+async function waitFor(fn,label,timeout=10000){const start=Date.now();let last;while(Date.now()-start<timeout){try{const v=fn();if(v)return v;}catch(e){last=e}await sleep(80)}throw new Error('timeout waiting for '+label+(last?': '+last.message:''));}
+function dispatchPointer(win,el,type,x,y){const opts={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,pointerId:72,pointerType:'touch',isPrimary:true};el.dispatchEvent(new win.PointerEvent(type,opts));}
+(async()=>{const metrics={};try{const win=frame.contentWindow;await waitFor(()=>win&&win.gameReady,'gameReady');await sleep(300);win.__p72Errors=[];const oldErr=win.console.error;win.console.error=(...a)=>{win.__p72Errors.push(a.map(String).join(' '));oldErr.apply(win.console,a)};
+  metrics.before=win.eval(`(() => { closeAllPanels(); combatState=COMBAT_STATE.IDLE; if(typeof openPanel==='function') openPanel('inventory'); return {stack: typeof panelStack!=='undefined'?panelStack.slice():[], panelOpen: document.body.classList.contains('panel-open'), inventoryOpen: document.body.classList.contains('inventory-open')}; })()`);
+  metrics.enter=win.eval(`(() => { const id=Object.keys(STAGES||{})[0]; enterStage(id); return {id, isInStageRun, panelStack: typeof panelStack!=='undefined'?panelStack.slice():[], panelOpen: document.body.classList.contains('panel-open'), stageRun: document.body.classList.contains('stage-run-active'), blocked: isMovementBlockedByUi(), body:[...document.body.classList].join(' ')}; })()`);
+  const touch=await waitFor(()=>win.document.getElementById('touch-controls'),'touch-controls');
+  const r=touch.getBoundingClientRect(); const x=Math.max(90, r.left+120); const y=Math.min(win.innerHeight-180, r.top+r.height-220);
+  dispatchPointer(win,touch,'pointerdown',x,y); await sleep(80);
+  metrics.afterDown=win.eval(`(() => ({active:joystick.active, dx:joystick.dx, dy:joystick.dy, distance:joystick.distance, blocked:isMovementBlockedByUi(), body:[...document.body.classList].join(' ')}))()`);
+  win.eval(`(() => { currentFrameDt=1/60; handleInput(); })()`);
+  metrics.afterDeadZoneFrame=win.eval(`(() => ({active:joystick.active, x:player.x, y:player.y, dx:joystick.dx, dy:joystick.dy, distance:joystick.distance}))()`);
+  dispatchPointer(win,touch,'lostpointercapture',x,y); await sleep(20);
+  metrics.afterLostCapture=win.eval(`(() => ({active:joystick.active, dx:joystick.dx, dy:joystick.dy, distance:joystick.distance}))()`);
+  dispatchPointer(win,touch,'pointermove',x+64,y+8); await sleep(80);
+  metrics.afterMove=win.eval(`(() => ({active:joystick.active, dx:Number(joystick.dx.toFixed(3)), dy:Number(joystick.dy.toFixed(3)), distance:Number(joystick.distance.toFixed(3)), blocked:isMovementBlockedByUi()}))()`);
+  metrics.motion=win.eval(`(() => { const start={x:player.x,y:player.y}; let blockedFrames=0; for(let i=0;i<48;i++){const bx=player.x,by=player.y; currentFrameDt=1/60; handleInput(); updateCamera(); if(Math.abs(player.x-bx)+Math.abs(player.y-by)<0.0001) blockedFrames++;} return {moved:Number((Math.abs(player.x-start.x)+Math.abs(player.y-start.y)).toFixed(3)), blockedFrames, active:joystick.active, body:[...document.body.classList].join(' ')}; })()`);
+  dispatchPointer(win,touch,'pointerup',x+64,y+8); await sleep(80);
+  metrics.afterUp=win.eval(`(() => ({active:joystick.active, dx:joystick.dx, dy:joystick.dy, distance:joystick.distance, errors:(window.__errors||[]).length}))()`);
+  metrics.consoleErrors=(win.__p72Errors||[]).filter(e=>!/Failed to load resource/.test(e));
+  const issues=[];
+  if(!metrics.before.inventoryOpen)issues.push('dirty inventory panel did not open before entry');
+  if(!metrics.enter.isInStageRun||!metrics.enter.stageRun)issues.push('stage run did not start');
+  if(metrics.enter.panelOpen||metrics.enter.panelStack.length)issues.push('dirty panel stack survived stage entry');
+  if(metrics.enter.blocked)issues.push('movement blocked immediately after stage entry');
+  if(!metrics.afterDown.active)issues.push('pointerdown did not activate joystick');
+  if(!metrics.afterDeadZoneFrame.active)issues.push('dead-zone frame cleared joystick ownership');
+  if(!metrics.afterLostCapture.active)issues.push('lostpointercapture cleared active drag');
+  if(!metrics.afterMove.active||metrics.afterMove.distance<=0)issues.push('pointermove did not update joystick vector');
+  if(metrics.motion.moved<=0.25)issues.push('player did not move after real pointer drag');
+  if(!metrics.motion.active)issues.push('joystick cleared during movement frames');
+  if(metrics.afterUp.active||metrics.afterUp.distance!==0)issues.push('pointerup did not release joystick');
+  if(metrics.consoleErrors.length)issues.push('console errors: '+metrics.consoleErrors.slice(0,3).join(' || '));
+  if(issues.length)throw new Error(issues.join('; ')+' '+JSON.stringify(metrics));
+  document.body.dataset.result='passed';document.body.dataset.metrics=JSON.stringify(metrics);result.textContent='p72 movement gating browser smoke passed '+JSON.stringify(metrics);post(result.textContent);frame.remove();
+}catch(err){document.body.dataset.result='failed';result.textContent='p72 movement gating browser smoke failed '+(err&&err.stack||err)+'\n'+JSON.stringify(metrics,null,2);post(result.textContent);frame.remove();}})();
+</script></body></html>
