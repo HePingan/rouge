@@ -1480,6 +1480,22 @@ function escapeHtml(value) {
       fn(e);
     });
   }
+  function ensureDomPanelForType(panel) {
+    if (typeof document === 'undefined') return null;
+    const map = {
+      inventory: () => typeof ensureInventoryDomPanel === 'function' && ensureInventoryDomPanel(),
+      character: () => typeof ensureCharacterDomPanel === 'function' && ensureCharacterDomPanel(),
+      skills: () => typeof ensureSkillsDomPanel === 'function' && ensureSkillsDomPanel(),
+      artifact: () => typeof ensureArtifactDomPanel === 'function' && ensureArtifactDomPanel(),
+      alchemy: () => typeof ensureAlchemyDomPanel === 'function' && ensureAlchemyDomPanel(),
+      breakthrough: () => typeof ensureBreakthroughDomPanel === 'function' && ensureBreakthroughDomPanel(),
+      secretrealm: () => typeof ensureSecretRealmDomPanel === 'function' && ensureSecretRealmDomPanel(),
+      stages: () => typeof ensureStageDomPanel === 'function' && ensureStageDomPanel(),
+      tribulation: () => typeof ensureTribulationDomPanel === 'function' && ensureTribulationDomPanel(),
+      ascension: () => typeof ensureAscensionDomPanel === 'function' && ensureAscensionDomPanel(),
+    };
+    return map[panel]?.() || null;
+  }
   function openPanel(panel) {
     if (isInCombat()) return;
     /* Toggle: if this exact panel type is the top of the stack, close it. */
@@ -1488,6 +1504,7 @@ function escapeHtml(value) {
       syncBodyPanelState();
       return;
     }
+    ensureDomPanelForType(panel);
     pushPanelToStack(panel);
     if (panel === 'stages') {
       const selectedStage = (typeof STAGES !== 'undefined' && STAGES) ? STAGES[selectedStageId] : null;
@@ -1501,6 +1518,8 @@ function escapeHtml(value) {
       return;
     }
     syncBodyPanelState();
+    const currentPanelEl = ensureDomPanelForType(panel);
+    if (currentPanelEl) currentPanelEl.style.removeProperty('display');
   }
   function drawPanelFrame(title, subtitle, color = '#d4a0ff') {
      const margin = canvasW < 520 ? 10 : 28;

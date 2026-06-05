@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>P6 mobile flow browser smoke</title>
+  <style>
+    body { margin: 0; background: #111; }
+    iframe { width: 390px; height: 844px; border: 0; display: block; }
+    #result { white-space: pre-wrap; font-family: monospace; color: #d6ffd6; }
+  </style>
+</head>
+<body>
+  <iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+  <pre id="result">running</pre>
+  <script>
+  const result = document.getElementById('result');
+  const frame = document.getElementById('game');
+  const issues = [];
+  const metrics = {};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function waitFor(fn, label, timeout = 9000) {
+    const start = Date.now();
+    let last;
+    while (Date.now() - start < timeout) {
+      try {
+        const value = fn();
+        if (value) return value;
+      } catch (err) { last = err; }
+      await sleep(80);
+    }
+    throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+  }
+  function recordIssue(msg, data) { issues.push(data ? `${msg}: ${JSON.stringify(data)}` : msg); }
+  function postResult(text) {
+    try { fetch('/__p6_result', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: text }); } catch (_) {}
+  }
+  function rectObj(r) { return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), bottom: Math.round(r.bottom) }; }
+  function visible(el, win) {
+    if (!el) return false;
+    const cs = win.getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && Number(cs.opacity || 1) !== 0 && r.width > 4 && r.height > 4;
+  }
+  function tap(win, el) {
+    const r = el.getBoundingClientRect();
+    const x = r.left + Math.min(Math.max(r.width / 2, 8), Math.max(8, r.width - 8));
+    const y = r.top + Math.min(Math.max(r.height / 2, 8), Math.max(8, r.height - 8));
+    const opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', isPrimary: true };
+    try { el.dispatchEvent(new win.PointerEvent('pointerdown', opts)); } catch (_) {}
+    try { el.dispatchEvent(new win.PointerEvent('pointerup', opts)); } catch (_) {}
+    el.dispatchEvent(new win.MouseEvent('click', opts));
+  }
+  async function openByButton(win, btnId) {
+    const btn = win.document.getElementById(btnId);
+    if (!btn) throw new Error(`missing ${btnId}`);
+    tap(win, btn);
+    await sleep(240);
+  }
+  async function openMore(win, btnId) {
+    await openByButton(win, 'btn-more');
+    await sleep(80);
+    await openByButton(win, btnId);
+  }
+  function firstClose(panel) {
+    return panel.querySelector('.pclose, .inv-close, .char-close, .skills-close, .stage-close, .secretrealm-close, .asc-close, [data-panel-close], [data-close]');
+  }
+  async function auditPanel(win, name, panelId, opener) {
+    await opener();
+    const doc = win.document;
+    const panel = doc.getElementById(panelId);
+    const panelVisible = visible(panel, win);
+    const r = panel ? panel.getBoundingClientRect() : null;
+    const html = doc.documentElement;
+    const data = {
+      panelId,
+      visible: panelVisible,
+      rect: r ? rectObj(r) : null,
+      body: [...doc.body.classList].filter(c => /open|active|run/.test(c)).join(' '),
+      overflowX: html.scrollWidth - win.innerWidth,
+      close: false,
+      closeHit: false,
+      remainingVisible: null,
+    };
+    if (!panelVisible) recordIssue(`${name} panel not visible`, data);
+    if (data.overflowX > 1) recordIssue(`${name} horizontal overflow`, data);
+    if (r && r.width > win.innerWidth + 1) recordIssue(`${name} wider than viewport`, data);
+    if (r && r.bottom > win.innerHeight + 2) recordIssue(`${name} bottom clipped`, data);
+    const close = panel && firstClose(panel);
+    if (!close) {
+      recordIssue(`${name} missing close button`, data);
+    } else {
+      data.close = true;
+      const cr = close.getBoundingClientRect();
+      const cx = cr.left + cr.width / 2;
+      const cy = cr.top + cr.height / 2;
+      const hit = doc.elementFromPoint(cx, cy);
+      data.closeHit = !!(hit && (hit === close || close.contains(hit) || hit.closest('.pclose, .inv-close, .char-close, .skills-close, .stage-close, .secretrealm-close, .asc-close, [data-panel-close], [data-close]')));
+      if (!data.closeHit) recordIssue(`${name} close button not top hit target`, { hit: hit && (hit.id || hit.className || hit.tagName), close: rectObj(cr) });
+      tap(win, close);
+      await sleep(220);
+      data.remainingVisible = visible(panel, win);
+      if (data.remainingVisible) recordIssue(`${name} close did not hide panel`, data);
+    }
+    metrics[name] = data;
+  }
+  (async () => {
+    try {
+      const win = frame.contentWindow;
+      await waitFor(() => win && win.gameReady, 'gameReady');
+      await sleep(260);
+      win.__p6Errors = [];
+      const oldErr = win.console.error;
+      win.console.error = (...args) => { win.__p6Errors.push(args.map(String).join(' ')); oldErr.apply(win.console, args); };
+      metrics.viewport = { w: win.innerWidth, h: win.innerHeight };
+      metrics.home = {
+        overflowX: win.document.documentElement.scrollWidth - win.innerWidth,
+        body: [...win.document.body.classList].join(' '),
+        canvas: rectObj(win.document.getElementById('game-canvas').getBoundingClientRect()),
+        menu: rectObj(win.document.getElementById('menu-bar').getBoundingClientRect()),
+        hudPointer: win.getComputedStyle(win.document.getElementById('hud-next-step')).pointerEvents,
+      };
+      if (metrics.home.overflowX > 1) recordIssue('home horizontal overflow', metrics.home);
+      if (metrics.home.hudPointer !== 'none') recordIssue('hud-next-step should be non-interactive', metrics.home);
+      await auditPanel(win, 'character', 'character-dom-panel', () => openByButton(win, 'btn-character'));
+      await auditPanel(win, 'inventory', 'inventory-dom-panel', () => openByButton(win, 'btn-bag'));
+      await auditPanel(win, 'stage', 'stage-dom-panel', () => openByButton(win, 'btn-stages'));
+      await auditPanel(win, 'skills', 'skills-dom-panel', () => openMore(win, 'btn-skills'));
+      await auditPanel(win, 'secret', 'secretrealm-dom-panel', () => openMore(win, 'btn-secret-realm'));
+      await auditPanel(win, 'ascension', 'ascension-dom-panel', () => openMore(win, 'btn-ascension'));
+      metrics.consoleErrors = (win.__p6Errors || []).filter(e => !/Failed to load resource/.test(e));
+      if (metrics.consoleErrors.length) recordIssue('console errors', metrics.consoleErrors.slice(0, 3));
+      if (issues.length) {
+        document.body.dataset.result = 'failed';
+        document.body.dataset.metrics = JSON.stringify(metrics);
+        result.textContent = `p6 mobile flow browser smoke failed\n${issues.join('\n')}\n${JSON.stringify(metrics, null, 2)}`;
+        postResult(result.textContent);
+        frame.remove();
+      } else {
+        document.body.dataset.result = 'passed';
+        document.body.dataset.metrics = JSON.stringify(metrics);
+        result.textContent = `p6 mobile flow browser smoke passed ${JSON.stringify(metrics)}`;
+        postResult(result.textContent);
+        frame.remove();
+      }
+    } catch (err) {
+      document.body.dataset.result = 'failed';
+      result.textContent = `p6 mobile flow browser smoke crashed ${err && err.stack || err}`;
+      postResult(result.textContent);
+    }
+  })();
+  </script>
+</body>
+</html>
