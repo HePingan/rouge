@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>P6 stage long-run browser smoke</title>
+  <style>
+    body { margin:0; background:#111; color:#eee; font:12px monospace; }
+    iframe { width:390px; height:844px; border:0; display:block; }
+    pre { white-space:pre-wrap; max-width:390px; }
+  </style>
+</head>
+<body>
+  <iframe id="game" src="./index.html?v=20260605combatp3"></iframe>
+  <pre id="result">running</pre>
+  <script>
+  const result = document.getElementById('result');
+  const frame = document.getElementById('game');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function waitFor(fn, label, timeout = 10000) {
+    const start = Date.now();
+    let last;
+    while (Date.now() - start < timeout) {
+      try { const v = fn(); if (v) return v; } catch (err) { last = err; }
+      await sleep(80);
+    }
+    throw new Error(`timeout waiting for ${label}${last ? ': ' + last.message : ''}`);
+  }
+  function postResult(text) {
+    try { fetch('/__p6_stage_long_result', { method:'POST', headers:{'Content-Type':'text/plain'}, body:text }); } catch (_) {}
+  }
+  (async () => {
+    try {
+      const w = frame.contentWindow;
+      await waitFor(() => w && w.gameReady, 'gameReady');
+      await sleep(260);
+      const metrics = await w.eval(`(async () => {
+        closeAllPanels();
+        if (typeof combatState !== 'undefined') combatState = COMBAT_STATE.NONE;
+        if (!player.stageProgress) player.stageProgress = {};
+        const stageId = Object.keys(STAGES || {})[0] || 'qingyun_foot';
+        player.stageProgress.currentRun = { stageId, roomIndex: 0, turns: 0 };
+        isInStageRun = true;
+        syncBodyPanelState();
+        if (typeof generateNewFloor === 'function') generateNewFloor();
+        if (typeof updateMapVisibilityIfNeeded === 'function') updateMapVisibilityIfNeeded(true);
+        const counters = { innerHTML: 0, textContent: 0, styleTransform: 0, hudWrites: 0 };
+        const innerDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+        const textDesc = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+        const transformDesc = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'transform');
+        Object.defineProperty(Element.prototype, 'innerHTML', { get: innerDesc.get, set(v){ counters.innerHTML++; return innerDesc.set.call(this, v); }, configurable:true });
+        Object.defineProperty(Node.prototype, 'textContent', { get: textDesc.get, set(v){ counters.textContent++; return textDesc.set.call(this, v); }, configurable:true });
+        if (transformDesc && transformDesc.set && transformDesc.get) Object.defineProperty(CSSStyleDeclaration.prototype, 'transform', { get: transformDesc.get, set(v){ counters.styleTransform++; return transformDesc.set.call(this, v); }, configurable:true });
+        const start = { x: player.x, y: player.y, camX: camera.x, camY: camera.y };
+        const frameCosts = [];
+        let blockedFrames = 0;
+        let blockedStreak = 0;
+        const dirs = [[0.92, 0.24], [0.15, 0.98], [-0.88, 0.30], [0.80, -0.34]];
+        let dirIndex = 0;
+        joystick.active = true; joystick.dx = dirs[0][0]; joystick.dy = dirs[0][1]; joystick.distance = 1;
+        const t0 = performance.now();
+        for (let i = 0; i < 420; i++) {
+          currentFrameDt = (i === 70 || i === 210) ? 0.2 : 1 / 60;
+          const beforeX = player.x, beforeY = player.y;
+          const f0 = performance.now();
+          handleInput();
+          updateCamera();
+          if (typeof drawDungeon === 'function') drawDungeon();
+          if (typeof drawParticlesDom === 'function') drawParticlesDom(camera);
+          if (i % 6 === 0) { if (typeof tickMessages === 'function') tickMessages(); if (typeof updateHUD === 'function') { counters.hudWrites++; updateHUD(player, dungeonLevel); } }
+          frameCosts.push(performance.now() - f0);
+          if (Math.abs(player.x - beforeX) + Math.abs(player.y - beforeY) < 0.0001) {
+            blockedFrames++;
+            blockedStreak++;
+            if (blockedStreak >= 6) {
+              dirIndex = (dirIndex + 1) % dirs.length;
+              joystick.dx = dirs[dirIndex][0]; joystick.dy = dirs[dirIndex][1]; joystick.distance = 1;
+              blockedStreak = 0;
+            }
+          } else {
+            blockedStreak = 0;
+          }
+          if (i % 60 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+        if (typeof window.__resetMovementTouchInput === 'function') window.__resetMovementTouchInput('p6-stage-long-run');
+        const totalMs = performance.now() - t0;
+        const sorted = frameCosts.slice().sort((a,b)=>a-b);
+        const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+        const maxFrame = sorted[sorted.length - 1] || 0;
+        Object.defineProperty(Element.prototype, 'innerHTML', innerDesc);
+        Object.defineProperty(Node.prototype, 'textContent', textDesc);
+        if (transformDesc && transformDesc.set && transformDesc.get) Object.defineProperty(CSSStyleDeclaration.prototype, 'transform', transformDesc);
+        return {
+          totalMs: Number(totalMs.toFixed(2)),
+          avgFrameMs: Number((frameCosts.reduce((s,n)=>s+n,0)/frameCosts.length).toFixed(3)),
+          p95FrameMs: Number(p95.toFixed(3)),
+          maxFrameMs: Number(maxFrame.toFixed(3)),
+          movedX: Number((player.x - start.x).toFixed(3)),
+          movedY: Number((player.y - start.y).toFixed(3)),
+          cameraMoved: Number((Math.abs(camera.x - start.camX) + Math.abs(camera.y - start.camY)).toFixed(3)),
+          blockedFrames,
+          counters,
+          mapChildren: document.getElementById('map-layer')?.querySelectorAll('*').length || 0,
+          activePanels: document.body.className,
+          errors: (window.__errors || []).length
+        };
+      })()`);
+      const issues = [];
+      if (metrics.errors) issues.push('iframe errors ' + metrics.errors);
+      if (Math.abs(metrics.movedX) + Math.abs(metrics.movedY) <= 1) issues.push('movement too small');
+      if (metrics.cameraMoved <= 0) issues.push('camera did not follow');
+      if (metrics.blockedFrames > 120) issues.push('too many blocked frames: ' + metrics.blockedFrames);
+      if (metrics.p95FrameMs > 40) issues.push('p95 frame too high: ' + metrics.p95FrameMs);
+      if (metrics.counters.innerHTML > 360) issues.push('too many innerHTML writes: ' + metrics.counters.innerHTML);
+      if (metrics.mapChildren > 650) issues.push('map DOM children too high: ' + metrics.mapChildren);
+      if (issues.length) throw new Error(issues.join('; ') + ' ' + JSON.stringify(metrics));
+      document.body.dataset.result = 'passed';
+      document.body.dataset.metrics = JSON.stringify(metrics);
+      result.textContent = 'p6 stage long-run browser smoke passed ' + JSON.stringify(metrics);
+      postResult(result.textContent);
+      frame.remove();
+    } catch (err) {
+      document.body.dataset.result = 'failed';
+      result.textContent = 'p6 stage long-run browser smoke failed ' + (err && err.stack || err);
+      postResult(result.textContent);
+    }
+  })();
+  </script>
+</body>
+</html>
