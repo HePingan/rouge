@@ -336,6 +336,7 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     runBodyClassCache.stage = !!isInStageRun;
     runBodyClassCache.secret = !!isInSecretRealm;
     document.body.classList.toggle('panel-open', open);
+    document.body.classList.toggle('combat-active', runBodyClassCache.combat);
     document.body.classList.toggle('stage-run-active', runBodyClassCache.stage);
     document.body.classList.toggle('secret-realm-run-active', runBodyClassCache.secret);
     /* Only the top panel in the stack is visually shown.

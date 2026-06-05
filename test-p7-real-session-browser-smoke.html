@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P7 real session mobile smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;max-width:390px}</style></head>
+<body>
+<iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">running</pre>
+<script>
+const frame=document.getElementById('game'); const result=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const metrics={}; const issues=[];
+function post(text){try{fetch('/__p7_real_session_result',{method:'POST',headers:{'Content-Type':'text/plain'},body:text})}catch(_){}}
+async function waitFor(fn,label,timeout=10000){const start=Date.now();let last;while(Date.now()-start<timeout){try{const v=fn();if(v)return v;}catch(e){last=e}await sleep(80)}throw new Error('timeout waiting for '+label+(last?': '+last.message:''));}
+function rectObj(r){return{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height),bottom:Math.round(r.bottom)}}
+function visible(win,el){if(!el)return false;const cs=win.getComputedStyle(el);const r=el.getBoundingClientRect();return cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>4&&r.height>4;}
+function tap(win,el){if(!el)throw new Error('tap target missing');const r=el.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const opts={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,pointerId:1,pointerType:'touch',isPrimary:true};try{el.dispatchEvent(new win.PointerEvent('pointerdown',opts));}catch(_){}try{el.dispatchEvent(new win.PointerEvent('pointerup',opts));}catch(_){}el.dispatchEvent(new win.MouseEvent('click',opts));}
+async function clickId(win,id){const el=win.document.getElementById(id);if(!el)throw new Error('missing #'+id);tap(win,el);await sleep(260);}
+async function openMore(win,id){await clickId(win,'btn-more');await sleep(100);await clickId(win,id);}
+function overflow(win){return win.document.documentElement.scrollWidth-win.innerWidth;}
+(async()=>{try{
+ const win=frame.contentWindow; await waitFor(()=>win&&win.gameReady,'gameReady'); await sleep(300);
+ win.__p7Errors=[]; const oldErr=win.console.error; win.console.error=(...a)=>{win.__p7Errors.push(a.map(String).join(' ')); oldErr.apply(win.console,a)};
+ metrics.home={overflowX:overflow(win),body:[...win.document.body.classList].join(' '),menu:rectObj(win.document.getElementById('menu-bar').getBoundingClientRect())};
+ if(metrics.home.overflowX>1)issues.push('home overflow');
+ // Real UI: open stage selector, select first stage, enter through its detail sheet.
+ await clickId(win,'btn-stages');
+ await waitFor(()=>visible(win,win.document.getElementById('stage-dom-panel')),'stage panel visible');
+ const firstStage=await waitFor(()=>win.document.querySelector('[data-stage-id]'),'first stage card');
+ tap(win,firstStage); await sleep(320);
+ const enterBtn=await waitFor(()=>win.document.querySelector('[data-stage-enter]'),'stage enter button');
+ metrics.stageEnterHit=!!enterBtn;
+ tap(win,enterBtn); await sleep(520);
+ metrics.stageAfterEnter=win.eval(`(() => ({isInStageRun, body:[...document.body.classList].join(' '), stageVisible:(()=>{const p=document.getElementById('stage-dom-panel'); if(!p)return false; const cs=getComputedStyle(p); const r=p.getBoundingClientRect(); return cs.display!=='none'&&r.width>0&&r.height>0})(), currentRun:!!(player.stageProgress&&player.stageProgress.currentRun), errors:(window.__errors||[]).length}))()`);
+ if(!metrics.stageAfterEnter.isInStageRun||!metrics.stageAfterEnter.currentRun)issues.push('stage did not enter run');
+ if(metrics.stageAfterEnter.stageVisible)issues.push('stage selector still visible after enter');
+ // Move for a short realistic burst after entering.
+ metrics.movement=await win.eval(`(async()=>{const start={x:player.x,y:player.y,camX:camera.x,camY:camera.y}; joystick.active=true; joystick.dx=0.8; joystick.dy=0.28; joystick.distance=1; let blocked=0; for(let i=0;i<120;i++){const bx=player.x,by=player.y; currentFrameDt=i===40?0.2:1/60; handleInput(); updateCamera(); if(typeof drawDungeon==='function')drawDungeon(); if(Math.abs(player.x-bx)+Math.abs(player.y-by)<0.0001)blocked++; if(i%30===0)await new Promise(r=>setTimeout(r,0));} if(typeof window.__resetMovementTouchInput==='function')window.__resetMovementTouchInput('p7-real-session'); return {moved:Number((Math.abs(player.x-start.x)+Math.abs(player.y-start.y)).toFixed(3)),cameraMoved:Number((Math.abs(camera.x-start.camX)+Math.abs(camera.y-start.camY)).toFixed(3)),blocked,body:[...document.body.classList].join(' ')}})()`);
+ if(metrics.movement.moved<=0.5)issues.push('movement did not progress after stage enter');
+ // Camera can legitimately stay pinned at a dungeon boundary while player movement still works.
+ // Start a deterministic combat and click real combat controls.
+ metrics.combat=await win.eval(`(() => { if(typeof startCombat!=='function') return {missing:true}; startCombat({id:'p7_probe',name:'巡检假人',title:'巡检假人',hp:999,maxHp:999,atk:1,def:0,level:1,exp:0,gold:0}); if(typeof renderCombatDomPanel==='function')renderCombatDomPanel(); return {inCombat:isInCombat(),state:combatState,body:[...document.body.classList].join(' '),panel:!!document.getElementById('combat-dom-panel')}; })()`);
+ if(!metrics.combat.inCombat)issues.push('combat did not start');
+ const combatPanel=await waitFor(()=>win.document.getElementById('combat-dom-panel'),'combat panel');
+ metrics.combatPanel={visible:visible(win,combatPanel),rect:rectObj(combatPanel.getBoundingClientRect()),overflowX:overflow(win)};
+ if(!metrics.combatPanel.visible)issues.push('combat panel not visible');
+ if(metrics.combatPanel.overflowX>1)issues.push('combat overflow');
+ const attack=await waitFor(()=>win.document.getElementById('cbt-attack'),'attack button'); tap(win,attack); await sleep(360);
+ metrics.combatAfterAttack=win.eval(`(() => ({inCombat:isInCombat(), enemyHp: currentEnemy && currentEnemy.hp, log:(combatLogBuffer||[]).slice(-3).map(x=>x.text||x).join('|'), errors:(window.__errors||[]).length}))()`);
+ if(!metrics.combatAfterAttack.inCombat)issues.push('combat ended unexpectedly after one attack');
+ // Return to non-combat/panels, then visit inventory, skills, ascension resource-source jump.
+ await win.eval(`(() => { if(typeof playerFlee==='function' && isInCombat()) playerFlee(); combatState=COMBAT_STATE.IDLE; currentEnemy=null; if(typeof exitStage==='function' && isInStageRun) exitStage(); isInStageRun=false; if(player.stageProgress) player.stageProgress.currentRun=null; closeAllPanels(); if(typeof syncRunBodyClasses==='function')syncRunBodyClasses(); syncBodyPanelState(); if(typeof renderCombatDomPanel==='function')renderCombatDomPanel(); })()`); await sleep(360);
+ await clickId(win,'btn-bag'); const inv=await waitFor(()=>win.document.getElementById('inventory-dom-panel'),'inventory'); metrics.inventory={visible:visible(win,inv),overflowX:overflow(win)}; if(!metrics.inventory.visible)issues.push('inventory not visible'); tap(win,inv.querySelector('.pclose,.inv-close')); await sleep(220);
+ await openMore(win,'btn-skills'); const skills=await waitFor(()=>win.document.getElementById('skills-dom-panel'),'skills'); metrics.skills={visible:visible(win,skills),overflowX:overflow(win),hasRecommendation:!!skills.querySelector('.synergy-recommend-strip, .build-profile-card, [data-skill-recommend]')}; if(!metrics.skills.visible)issues.push('skills not visible'); tap(win,skills.querySelector('.pclose,.skills-close')); await sleep(220);
+ await openMore(win,'btn-ascension'); const asc=await waitFor(()=>win.document.getElementById('ascension-dom-panel'),'ascension'); const source=asc.querySelector('[data-asc-resource-source]'); metrics.ascension={visible:visible(win,asc),overflowX:overflow(win),hasSource:!!source}; if(!metrics.ascension.visible)issues.push('ascension not visible'); if(source){tap(win,source); await sleep(420); const sp=win.document.getElementById('stage-dom-panel'); metrics.ascSourceJump={stageVisible:visible(win,sp),body:[...win.document.body.classList].join(' '),selectedStage:win.eval('typeof selectedStageId!=="undefined"?selectedStageId:null')}; if(!metrics.ascSourceJump.stageVisible)issues.push('ascension source did not open stage detail');}
+ metrics.consoleErrors=(win.__p7Errors||[]).filter(e=>!/Failed to load resource/.test(e)); if(metrics.consoleErrors.length)issues.push('console errors: '+metrics.consoleErrors.slice(0,3).join(' || '));
+ if(issues.length)throw new Error(issues.join('; ')+' '+JSON.stringify(metrics));
+ document.body.dataset.result='passed'; document.body.dataset.metrics=JSON.stringify(metrics); result.textContent='p7 real session mobile smoke passed '+JSON.stringify(metrics); post(result.textContent); frame.remove();
+}catch(err){document.body.dataset.result='failed'; result.textContent='p7 real session mobile smoke failed '+(err&&err.stack||err)+'\n'+JSON.stringify(metrics,null,2); post(result.textContent); frame.remove();}})();
+</script></body></html>
