@@ -100,6 +100,18 @@
       await sleep(220);
       data.remainingVisible = visible(panel, win);
       if (data.remainingVisible) recordIssue(`${name} close did not hide panel`, data);
+      await opener();
+      const reopenedVisible = visible(panel, win);
+      data.reopenedVisible = reopenedVisible;
+      const reopenedStyle = panel && panel.getAttribute('style');
+      data.reopenedStyle = reopenedStyle || '';
+      if (!reopenedVisible) recordIssue(`${name} panel did not reopen after close`, data);
+      if (reopenedStyle && /display\s*:\s*none/i.test(reopenedStyle)) recordIssue(`${name} stale inline display none after reopen`, data);
+      const close2 = panel && firstClose(panel);
+      if (close2) {
+        tap(win, close2);
+        await sleep(180);
+      }
     }
     metrics[name] = data;
   }
