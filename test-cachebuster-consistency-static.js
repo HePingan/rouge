@@ -1,22 +1,56 @@
-const fs = require('fs');
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const CURRENT_TOKEN = '20260605combatp3';
-const PREVIOUS_TOKEN = '20260604charloop1';
-const index = fs.readFileSync('index.html', 'utf8');
-const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
-const css = fs.readFileSync('css/style.css', 'utf8');
+const KNOWN_PREVIOUS_TOKENS = [
+  '20260524endgame1',
+  '20260524secretQuick1',
+  '20260524secretQuick2',
+  '20260526ascsrc1',
+  '20260526closeright1',
+  '20260527detailfix1',
+  '20260530stageclose1',
+];
 
-const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
-assert(linkedTokens.length > 10, 'index should expose versioned JS/CSS assets');
-assert(linkedTokens.every(token => token === CURRENT_TOKEN), `all index assets should use ${CURRENT_TOKEN}`);
-assert(!index.includes(PREVIOUS_TOKEN), 'index should not keep previous synergy cachebuster');
-assert(mobile.includes(`./index.html?v=${CURRENT_TOKEN}`), 'mobile verify iframe should load current cachebuster');
-assert(!mobile.includes(PREVIOUS_TOKEN), 'mobile verify should not keep previous synergy cachebuster');
-assert(css.includes(`Mobile Universal Interface Layout ${CURRENT_TOKEN}`), 'mobile universal marker should bump with HUD guidance cachebuster');
-assert(css.includes(`Mobile Skill Compact Layout 20260601skillstrip1`), 'skill compact marker should remain at last skill layout change marker');
-assert(css.includes(`Mobile Stage Footer Readability + Scroll Fix 20260531resonance1`), 'stage footer marker should remain at last layout change marker');
-assert(css.includes(`Ascension Resource Source Navigation 20260605combatp3`), 'ascension source marker should remain at last layout change marker');
-assert(css.includes(`Combat Mobile Bottom Sheet 20260601drawercap1`), 'combat sheet marker should remain at last combat layout change marker');
+function read(file) { return fs.readFileSync(file, 'utf8'); }
+function tokensIn(text) { return Array.from(text.matchAll(/\?v=([^"'<>\s]+)/g), m => m[1]); }
 
-console.log('cachebuster consistency static checks passed');
+const index = read('index.html');
+const mobile = read('mobile-verify.html');
+const css = read('css/style.css');
+
+const indexTokens = tokensIn(index);
+assert(indexTokens.length > 10, 'index.html should expose versioned JS/CSS assets');
+assert(indexTokens.every(token => token === CURRENT_TOKEN), `all index.html assets should use ${CURRENT_TOKEN}: ${[...new Set(indexTokens)].join(', ')}`);
+assert(mobile.includes(`./index.html?v=${CURRENT_TOKEN}`), 'mobile-verify iframe should load the current cachebuster');
+
+const smokeFiles = fs.readdirSync('.').filter(name => /^test-.*\.html$/.test(name));
+const staleSmokeFiles = [];
+for (const file of smokeFiles) {
+  const fileTokens = tokensIn(read(file));
+  if (fileTokens.length && !fileTokens.every(token => token === CURRENT_TOKEN)) {
+    staleSmokeFiles.push(`${file}: ${[...new Set(fileTokens)].join(',')}`);
+  }
+}
+assert.deepStrictEqual(staleSmokeFiles, [], `browser smoke HTML entrypoints should use ${CURRENT_TOKEN}: ${staleSmokeFiles.join('; ')}`);
+
+for (const marker of [
+  'DOM Character Panel',
+  'Artifact Mobile Sheet',
+  'Global Panel Close Right',
+  'Stage Header Layout',
+  'Mobile Universal Interface Layout',
+  'Ascension Resource Source Navigation',
+  'Mobile Stage Compact Layout',
+  'Mobile Stage Detail Sheet Safe Area',
+]) {
+  assert(css.includes(`${marker} ${CURRENT_TOKEN}`), `CSS marker should include current token: ${marker}`);
+}
+
+for (const token of KNOWN_PREVIOUS_TOKENS) {
+  assert(!index.includes(token), `index.html should not include stale cachebuster ${token}`);
+  assert(!mobile.includes(token), `mobile-verify.html should not include stale cachebuster ${token}`);
+}
+
+console.log('cachebuster consistency static passed');
