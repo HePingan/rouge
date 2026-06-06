@@ -3384,7 +3384,33 @@ function generateNewFloor() {
       <div class="char-bonus-groups">${groups || `<div class="char-bonus-group"><div>${getEquipmentBonusRows(totals)}</div></div>`}</div>
     </div>`;
   }
+  function getEquippedTraitSkillHintDom() {
+    const map = {
+      pojun: { tree: 'sword', label: '剑修爆发', hint: '破军特质适合剑修破甲与首领斩杀', icon: '⚔️' },
+      guiyuan: { tree: 'water', label: '水系续航', hint: '归元特质适合水系回复与灵力循环', icon: '💧' },
+      jiying: { tree: 'thunder', label: '雷系机动', hint: '疾影特质适合雷系暴击与先手', icon: '💨' },
+      tieshan: { tree: 'earth', label: '土系守御', hint: '铁山特质适合土系护盾与稳推进', icon: '⛰️' },
+    };
+    const equipped = Object.values(player?.equipment || {}).filter(Boolean);
+    for (const item of equipped) {
+      const id = item?.trait?.id;
+      if (id && map[id]) return { ...map[id], trait: item.trait, item };
+    }
+    return null;
+  }
+  function getTraitSkillJumpTargetDom(hint = getEquippedTraitSkillHintDom()) {
+    if (!hint?.tree || typeof SKILL_TREES === 'undefined') return null;
+    const skills = SKILL_TREES[hint.tree]?.skills || [];
+    for (let index = 0; index < skills.length; index++) {
+      const st = typeof skillNodeState === 'function' ? skillNodeState(hint.tree, index) : null;
+      if (st?.canLearn || st?.learned || !st) return { tree: hint.tree, index, label: `${hint.trait?.name || '特质'}·${skills[index]?.name || hint.label}` };
+    }
+    return null;
+  }
   function getCharacterBuildJumpTargetDom() {
+    const traitHint = getEquippedTraitSkillHintDom();
+    const traitTarget = getTraitSkillJumpTargetDom(traitHint);
+    if (traitTarget) return traitTarget;
     const recs = typeof getRecommendedSkillNodesForBuild === 'function' ? getRecommendedSkillNodesForBuild(1) : [];
     const rec = recs && recs[0];
     if (rec?.tree && Number.isFinite(Number(rec.index))) return { tree: rec.tree, index: Number(rec.index), label: rec.skill?.name || '推荐技能' };
@@ -3417,12 +3443,14 @@ function generateNewFloor() {
     const activeSynergies = build?.synergies || (typeof getActiveSkillSynergies === 'function' ? getActiveSkillSynergies() : []);
     const activeMasteries = build?.masteries || (typeof getActiveSkillMasteries === 'function' ? getActiveSkillMasteries() : []);
     const next = build?.next || (typeof getNextSkillSynergyRecommendation === 'function' ? getNextSkillSynergyRecommendation() : null);
+    const traitHint = getEquippedTraitSkillHintDom();
     const jumpTarget = getCharacterBuildJumpTargetDom();
     const headline = activeSynergies.length
       ? activeSynergies.slice(0, 2).map(s => `${s.icon || '✦'}${s.name}`).join(' · ')
       : (activeMasteries.length ? activeMasteries.slice(0, 2).map(m => `${SKILL_TREES?.[m.tree]?.icon || '✦'}${m.shortName || SKILL_TREES?.[m.tree]?.name || '专精'}专精`).join(' · ') : '流派未成型');
     const tags = [];
     activeSynergies.slice(0, 3).forEach(s => tags.push({ label: s.name, icon: s.icon || '✦', tone: 'synergy' }));
+    if (traitHint) tags.unshift({ label: traitHint.label, icon: traitHint.icon || traitHint.trait?.icon || '✦', tone: 'trait' });
     activeMasteries.slice(0, 3).forEach(m => tags.push({ label: `${m.shortName || SKILL_TREES?.[m.tree]?.name || '单系'}专精`, icon: SKILL_TREES?.[m.tree]?.icon || '✦', tone: 'mastery' }));
     if (!tags.length && next) tags.push({ label: next.name || '路线推荐', icon: next.icon || '✦', tone: 'next' });
     const progressRows = (codex?.treeSummaries || []).filter(row => row.learned > 0 || row.mastery?.active)
@@ -3434,9 +3462,9 @@ function generateNewFloor() {
     }).join('') : '<div class="char-build-empty">尚未领悟技能，先去「技能」选择路线</div>';
     return {
       headline,
-      subline: build?.activeLabels?.length ? `已成型 ${build.activeLabels.length} 项` : (next?.hint || '继续领悟技能可解锁共鸣与专精'),
+      subline: traitHint ? traitHint.hint : (build?.activeLabels?.length ? `已成型 ${build.activeLabels.length} 项` : (next?.hint || '继续领悟技能可解锁共鸣与专精')),
       tags,
-      nextHint: next?.hint || build?.hint || '',
+      nextHint: traitHint?.hint || next?.hint || build?.hint || '',
       progressHtml,
       claimableCount: codex?.claimableCount || 0,
       jumpTarget,

@@ -1,0 +1,10 @@
+const assert=require('assert');const fs=require('fs');const main=fs.readFileSync('js/main.js','utf8');const css=fs.readFileSync('css/style.css','utf8');const html=fs.readFileSync('test-p83-trait-build-feedback-browser-smoke.html','utf8');
+assert(/function getEquippedTraitSkillHintDom/.test(main),'trait skill hint helper should exist');
+assert(/pojun:\s*\{ tree: 'sword'/.test(main),'pojun should recommend sword tree');
+assert(/guiyuan:\s*\{ tree: 'water'/.test(main),'guiyuan should recommend water tree');
+assert(/jiying:\s*\{ tree: 'thunder'/.test(main),'jiying should recommend thunder tree');
+assert(/tieshan:\s*\{ tree: 'earth'/.test(main),'tieshan should recommend earth tree');
+assert(/function getTraitSkillJumpTargetDom/.test(main)&&/getTraitSkillJumpTargetDom\(traitHint\)/.test(main),'trait hint should feed skill jump target');
+assert(/char-build-tag\.trait/.test(css),'trait build tag CSS should exist');
+assert(html.includes("traitId:'pojun'")&&html.includes("s.jump.tree==='sword'")&&html.includes('data-char-build-jump'),'P83 smoke should force Pojun and click real build jump');
+console.log('p83 trait build feedback static passed');

@@ -3690,6 +3690,7 @@ body.character-open #character-dom-panel {
 #character-dom-panel .char-build-tag { min-height: 20px; padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.055); color: #eee5ff; font-size: 11px; }
 #character-dom-panel .char-build-tag.synergy { color: #ffe7a5; border-color: rgba(255,214,128,0.24); background: rgba(255,214,128,0.08); }
 #character-dom-panel .char-build-tag.mastery { color: #bfffd4; border-color: rgba(120,255,165,0.22); background: rgba(80,220,120,0.07); }
+#character-dom-panel .char-build-tag.trait { color:#ffd98e; border-color:rgba(255,217,142,.30); background:linear-gradient(135deg,rgba(255,217,142,.13),rgba(255,138,85,.07)); }
 #character-dom-panel .char-build-tag.next, #character-dom-panel .char-build-tag.empty { color: #cfc2da; }
 #character-dom-panel .char-build-progress { margin-top: 8px; display: grid; gap: 5px; }
 #character-dom-panel .char-build-row { display: grid; grid-template-columns: 42px minmax(0,1fr) 34px; align-items: center; gap: 6px; color: #cfc2da; font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
