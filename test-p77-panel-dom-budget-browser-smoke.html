@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P77 panel DOM budget smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;font-size:11px}</style></head><body><iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">RUNNING</pre><script>
+(()=>{
+const resultEl=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const fail=m=>{throw new Error(m)};
+const assert=(c,m)=>{if(!c)fail(m)};
+const frame=document.getElementById('game');
+const w=()=>frame.contentWindow;
+const d=()=>w().document;
+async function waitFor(fn,label,timeout=9000){const end=Date.now()+timeout;let last;while(Date.now()<end){try{last=fn();if(last)return last}catch(e){last=e.message}await sleep(80)}fail('timed out waiting for '+label+'; last='+JSON.stringify(last))}
+function tap(el){assert(el,'tap target missing');const win=w();const r=el.getBoundingClientRect();const init={bubbles:true,cancelable:true,view:win,clientX:r.left+r.width/2,clientY:r.top+r.height/2,pointerId:17,pointerType:'touch',isPrimary:true};el.dispatchEvent(new win.PointerEvent('pointerdown',init));el.dispatchEvent(new win.PointerEvent('pointerup',init));el.dispatchEvent(new win.MouseEvent('click',init))}
+function visiblePanels(){return [...d().querySelectorAll('#inventory-dom-panel,#character-dom-panel,#skills-dom-panel,#stage-dom-panel,#secretrealm-dom-panel,#ascension-dom-panel,#combat-dom-panel')].filter(el=>{const cs=w().getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0}).map(el=>el.id)}
+function overflowX(){return Math.max(0,d().documentElement.scrollWidth-d().documentElement.clientWidth)}
+function installCounters(){return w().eval(`(() => {
+  const counters={innerHTML:0, appendChild:0, replaceChildren:0, textContent:0};
+  if(window.__p77RestoreDomCounters) window.__p77RestoreDomCounters();
+  const innerDesc=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+  const textDesc=Object.getOwnPropertyDescriptor(Node.prototype,'textContent');
+  const append=Node.prototype.appendChild;
+  const replace=Element.prototype.replaceChildren;
+  Object.defineProperty(Element.prototype,'innerHTML',{get:innerDesc.get,set(v){counters.innerHTML++;return innerDesc.set.call(this,v)},configurable:true});
+  if(textDesc&&textDesc.set&&textDesc.get) Object.defineProperty(Node.prototype,'textContent',{get:textDesc.get,set(v){counters.textContent++;return textDesc.set.call(this,v)},configurable:true});
+  Node.prototype.appendChild=function(n){counters.appendChild++;return append.call(this,n)};
+  Element.prototype.replaceChildren=function(...args){counters.replaceChildren++;return replace.apply(this,args)};
+  window.__p77Counters=counters;
+  window.__p77RestoreDomCounters=()=>{Object.defineProperty(Element.prototype,'innerHTML',innerDesc); if(textDesc&&textDesc.set&&textDesc.get) Object.defineProperty(Node.prototype,'textContent',textDesc); Node.prototype.appendChild=append; Element.prototype.replaceChildren=replace;};
+  return true;
+})()`)}
+function resetCounters(){w().eval(`__p77Counters.innerHTML=0;__p77Counters.appendChild=0;__p77Counters.replaceChildren=0;__p77Counters.textContent=0;`) }
+function counters(){return w().eval(`({...__p77Counters})`)}
+async function measure(name, fn){resetCounters();const start=performance.now();await fn();await sleep(180);const ms=performance.now()-start;return {name, ms:Number(ms.toFixed(1)), counters:counters(), visiblePanels:visiblePanels(), body:d().body.className, overflowX:overflowX()}}
+async function openMore(){const more=d().getElementById('btn-more');if(more&&!d().body.classList.contains('more-menu-open')){tap(more);await sleep(120)}}
+async function openByButton(id, bodyClass){const btn=d().getElementById(id);assert(btn,'missing '+id);tap(btn);await waitFor(()=>d().body.classList.contains(bodyClass),bodyClass)}
+async function run(){await waitFor(()=>w().gameReady===true,'gameReady');w().__p77Errors=[];w().addEventListener('error',e=>w().__p77Errors.push(e.message||'error'));w().addEventListener('unhandledrejection',e=>w().__p77Errors.push(String(e.reason||'unhandledrejection')));await waitFor(()=>w().eval('typeof openPanel==="function"&&typeof startCombat==="function"&&typeof renderCombatDomPanel==="function"'),'panel globals');
+w().eval(`closeAllPanels(); combatState=COMBAT_STATE.IDLE; currentEnemy=null; showInventory=false; showCharacterPanel=false; showSkillTreeUI=false; showAscensionUI=false; showStagePanel=false; if(typeof isInStageRun!=='undefined') isInStageRun=false; document.body.className=''; syncBodyPanelState();`);
+installCounters();
+const results=[];
+results.push(await measure('character-open-reopen',async()=>{for(let i=0;i<3;i++){await openByButton('btn-character','character-open');w().eval('renderCharacterDomPanel();');await sleep(40);w().eval('closeAllPanels();');await sleep(40)}}));
+results.push(await measure('inventory-open-reopen',async()=>{for(let i=0;i<3;i++){await openByButton('btn-bag','inventory-open');w().eval('renderInventoryDomPanel();');await sleep(60);w().eval('closeAllPanels();');await sleep(40)}}));
+results.push(await measure('skills-open-reopen',async()=>{for(let i=0;i<3;i++){await openMore();await openByButton('btn-skills','skills-open');w().eval('renderSkillsDomPanel();');await sleep(60);w().eval('closeAllPanels();');await sleep(40)}}));
+results.push(await measure('ascension-open-reopen',async()=>{for(let i=0;i<3;i++){await openMore();await openByButton('btn-ascension','ascension-open');w().eval('renderAscensionDomPanel();');await sleep(60);w().eval('closeAllPanels();');await sleep(40)}}));
+results.push(await measure('combat-three-refresh',async()=>{w().eval(`closeAllPanels(); currentEnemy={name:'预算木桩',hp:999,maxHp:999,attack:1,defense:1,speed:1,realm:'炼气期',level:1,intent:{type:'attack',label:'普攻',desc:'预算测试'}}; combatState=COMBAT_STATE.PLAYER_TURN; syncBodyPanelState(); renderCombatDomPanel();`);await waitFor(()=>visiblePanels().includes('combat-dom-panel'),'combat panel');for(let i=0;i<3;i++){w().eval(`combatLogBuffer.push({seq:${i+1},text:'预算刷新 ${i}',tone:'info',color:'#aaddff'}); renderCombatDomPanel();`);await sleep(50)}w().eval(`combatState=COMBAT_STATE.IDLE; currentEnemy=null; syncBodyPanelState(); renderCombatDomPanel();`)}));
+w().eval('__p77RestoreDomCounters&&__p77RestoreDomCounters()');
+const budgets={
+  'character-open-reopen':{innerHTML:45,appendChild:15,replaceChildren:5,ms:1200},
+  'inventory-open-reopen':{innerHTML:70,appendChild:20,replaceChildren:5,ms:1500},
+  'skills-open-reopen':{innerHTML:90,appendChild:35,replaceChildren:8,ms:1800},
+  'ascension-open-reopen':{innerHTML:90,appendChild:35,replaceChildren:8,ms:1800},
+  'combat-three-refresh':{innerHTML:50,appendChild:15,replaceChildren:5,ms:1000}
+};
+const issues=[];
+for(const r of results){const b=budgets[r.name];if(!b){issues.push('missing budget '+r.name);continue}if(r.counters.innerHTML>b.innerHTML)issues.push(`${r.name} innerHTML ${r.counters.innerHTML}>${b.innerHTML}`);if(r.counters.appendChild>b.appendChild)issues.push(`${r.name} appendChild ${r.counters.appendChild}>${b.appendChild}`);if(r.counters.replaceChildren>b.replaceChildren)issues.push(`${r.name} replaceChildren ${r.counters.replaceChildren}>${b.replaceChildren}`);if(r.ms>b.ms)issues.push(`${r.name} time ${r.ms}>${b.ms}`);if(r.overflowX>1)issues.push(`${r.name} overflowX ${r.overflowX}`)}
+const errs=w().__p77Errors||[];if(errs.length)issues.push('console errors: '+errs.slice(0,3).join(' || '));
+if(issues.length)fail(issues.join('; ')+' '+JSON.stringify(results));
+return {ok:true,message:'p77 panel dom budget smoke passed',results};}
+run().then(r=>{resultEl.textContent='SMOKE_RESULT:'+JSON.stringify(r);document.title='SMOKE_OK';fetch('/__result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r)}).catch(()=>{})}).catch(err=>{const payload={ok:false,message:err.message,stack:err.stack};try{payload.body=d().body.className;payload.visiblePanels=visiblePanels();payload.counters=counters()}catch(_){}resultEl.textContent='SMOKE_RESULT:'+JSON.stringify(payload);document.title='SMOKE_FAIL';fetch('/__result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{})});
+})();
+</script></body></html>

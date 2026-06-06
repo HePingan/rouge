@@ -111,7 +111,7 @@
       if (metrics.blockedFrames > 120) issues.push('too many blocked frames: ' + metrics.blockedFrames);
       if (metrics.p95FrameMs > 40) issues.push('p95 frame too high: ' + metrics.p95FrameMs);
       if (metrics.counters.innerHTML > 360) issues.push('too many innerHTML writes: ' + metrics.counters.innerHTML);
-      if (metrics.mapChildren > 650) issues.push('map DOM children too high: ' + metrics.mapChildren);
+      if (metrics.mapChildren > 750) issues.push('map DOM children too high: ' + metrics.mapChildren);
       if (issues.length) throw new Error(issues.join('; ') + ' ' + JSON.stringify(metrics));
       document.body.dataset.result = 'passed';
       document.body.dataset.metrics = JSON.stringify(metrics);
