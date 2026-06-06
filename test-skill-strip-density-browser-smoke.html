@@ -93,7 +93,7 @@ async function waitFor(fn, label, timeout = 9000) {
   if (metrics.cardsPerScreenApprox < 1.9) throw new Error('strip should show about two cards on 390px phone: ' + JSON.stringify(metrics));
   if (metrics.synergyHeight > 120 || metrics.masteryHeight > 100) throw new Error('synergy/mastery strips still too tall: ' + JSON.stringify(metrics));
   if (!metrics.visibleSynergy || !metrics.visibleMastery) throw new Error('synergy and mastery should both be visible in first viewport: ' + JSON.stringify(metrics));
-  if (metrics.titleSmallWhiteSpace !== 'nowrap') throw new Error('title hint should be compact single line: ' + JSON.stringify(metrics));
+  if (metrics.titleSmallWhiteSpace !== 'normal') throw new Error('title hint should wrap instead of clipping on mobile: ' + JSON.stringify(metrics));
   if (!metrics.claimButtonText.includes('领取')) throw new Error('claim button should remain visible after compression: ' + JSON.stringify(metrics));
   const payload = 'skill strip density browser smoke passed ' + JSON.stringify(metrics);
   document.body.setAttribute('data-result', 'passed');

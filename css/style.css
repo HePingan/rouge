@@ -2105,6 +2105,7 @@ body.breakthrough-open #breakthrough-dom-panel {
 .skill-action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .skill-learn-btn, .skill-forget-btn {
   width: 100%;
+  min-height: 34px;
   padding: 9px 10px;
   border: 1.5px solid color-mix(in srgb, var(--branch-color) 75%, #fff);
   border-radius: 12px;
@@ -2370,7 +2371,7 @@ body.breakthrough-open #breakthrough-dom-panel {
   #skills-dom-panel .skill-synergy-panel { padding: 3px 5px; border-radius: 12px; width: 100%; box-sizing: border-box; overflow: visible; flex: 0 0 auto; }
   #skills-dom-panel .mastery-milestone-panel { padding-top: 3px; }
   #skills-dom-panel .synergy-title { margin-bottom: 2px; font-size: 10.5px; line-height: 1.05; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  #skills-dom-panel .synergy-title small { margin-top: 0; font-size: 7.8px; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; min-width: 0; color: rgba(170,221,255,.82); }
+  #skills-dom-panel .synergy-title small { margin-top: 0; font-size: 7.8px; line-height: 1.05; white-space: normal; overflow: visible; text-overflow: clip; display: block; min-width: 0; color: rgba(170,221,255,.82); }
   #skills-dom-panel .synergy-list {
     display: flex;
     gap: 5px;
@@ -3181,6 +3182,7 @@ body.panel-open #combat-dom-panel { opacity: 0; pointer-events: none; }
   touch-action:pan-y;
 }
 .synergy-recommend-strip small { display:block; margin-top:3px; color:#aaddff; font-size:9px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#skills-dom-panel .synergy-recommend-strip small { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.15; }
 @media (max-width: 560px) { .synergy-list { grid-template-columns: 1fr; } .skill-synergy-panel { padding: 8px; } .synergy-recommend-strip button { flex-basis: 68%; } }
 @media (max-width: 380px) { .cbt-drawer-grid { grid-template-columns: 1fr; } .cbt-skill-drawer { max-height: 220px; } }
 .cbt-actions-row {
@@ -3677,7 +3679,7 @@ body.character-open #character-dom-panel {
 #character-dom-panel .char-build-profile.actionable { cursor: pointer; }
 #character-dom-panel .char-build-profile.actionable:active { transform: translateY(1px); }
 #character-dom-panel .char-build-actions { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
-#character-dom-panel .char-build-jump { flex: 0 0 auto; min-height: 24px; padding: 4px 9px; border: 1px solid rgba(255,226,138,0.32); border-radius: 999px; color: #ffe7a5; background: rgba(255,214,128,0.10); font: 900 11px/1 ui-monospace, monospace; touch-action: manipulation; }
+#character-dom-panel .char-build-jump { flex: 0 0 auto; min-height: 28px; padding: 4px 9px; border: 1px solid rgba(255,226,138,0.32); border-radius: 999px; color: #ffe7a5; background: rgba(255,214,128,0.10); font: 900 11px/1 ui-monospace, monospace; touch-action: manipulation; }
 #character-dom-panel .char-build-tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
 #character-dom-panel .char-build-tag { min-height: 20px; padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.055); color: #eee5ff; font-size: 11px; }
 #character-dom-panel .char-build-tag.synergy { color: #ffe7a5; border-color: rgba(255,214,128,0.24); background: rgba(255,214,128,0.08); }

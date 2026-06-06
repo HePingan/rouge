@@ -58,6 +58,6 @@ assert(!/position:\s*sticky/.test(mobileSkillAttrMatch[0]), 'mobile skill attr b
 
 mustMatch('recommended skill buttons use full readable touch rows', /#skills-dom-panel \.synergy-recommend-strip button\s*\{[^}]*min-height:\s*44px[^}]*white-space:\s*normal[^}]*touch-action:\s*manipulation/);
 mustMatch('recommended skill detail text wraps instead of clipping', /#skills-dom-panel \.synergy-recommend-strip button small\s*\{[^}]*white-space:\s*normal[^}]*overflow:\s*visible/);
-mustMatch('synergy title hint stays single-line compact on mobile', /#skills-dom-panel \.synergy-title small\s*\{[^}]*white-space:\s*nowrap[^}]*text-overflow:\s*ellipsis/);
+mustMatch('synergy title hint wraps instead of clipping on mobile', /#skills-dom-panel \.synergy-title small\s*\{[^}]*white-space:\s*normal[^}]*overflow:\s*visible[^}]*text-overflow:\s*clip/);
 
 console.log('mobile layout static assertions passed');

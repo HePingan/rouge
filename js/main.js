@@ -3385,6 +3385,8 @@ function generateNewFloor() {
     popPanelFromStack('character');
     characterPanelLastHtml = '';
     closeCharacterDetailPopupDom();
+    characterEquipmentDetailSlot = null;
+    characterEquipmentSlotHint = null;
     pushPanelToStack('skills');
     syncBodyPanelState();
     if (jump?.label && typeof showMessage === 'function') showMessage(`已定位：${jump.label}`, '#ffe28a');
