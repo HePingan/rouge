@@ -72,6 +72,13 @@
       const stageOpen = doc.body.classList.contains('stage-open') || !!doc.querySelector('#stage-dom-panel:not([style*="display: none"])');
       const bodyMask = win.getComputedStyle(doc.body, '::after');
       const gameMask = win.getComputedStyle(doc.querySelector('#game-container'), '::after');
+      const parsePx = value => Number.parseFloat(String(value || '0').replace('px', '')) || 0;
+      const bodyMaskHeight = parsePx(bodyMask.height);
+      const gameMaskHeight = parsePx(gameMask.height);
+      const bodyMaskBg = bodyMask.backgroundImage || bodyMask.backgroundColor || '';
+      const gameMaskBg = gameMask.backgroundImage || gameMask.backgroundColor || '';
+      const masksPainted = bodyMaskHeight >= 72 && gameMaskHeight >= 72 && /rgb\(36,\s*56,\s*86\)|rgb\(44,\s*69,\s*104\)|#243856|#2c4568/i.test(`${bodyMaskBg} ${gameMaskBg}`);
+      const masksNonBlocking = bodyMask.pointerEvents === 'none' && gameMask.pointerEvents === 'none';
       const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
       const gameMaskZ = Number.parseInt(gameMask.zIndex, 10) || 0;
@@ -84,7 +91,7 @@
       const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && maskAboveCanvas && navAboveMask && touchAboveMask && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchAboveMask && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -94,6 +101,14 @@
         allCurrent,
         bodyMaskDisplay: bodyMask.display,
         gameMaskDisplay: gameMask.display,
+        maskMetrics: {
+          bodyHeight: Math.round(bodyMaskHeight),
+          gameHeight: Math.round(gameMaskHeight),
+          bodyPointerEvents: bodyMask.pointerEvents,
+          gamePointerEvents: gameMask.pointerEvents,
+          masksPainted,
+          masksNonBlocking,
+        },
         zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ },
         maskAboveCanvas,
         navAboveMask,
