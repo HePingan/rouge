@@ -1,0 +1,45 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P74 ascension source to stage run smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;max-width:390px}</style></head>
+<body><iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">running</pre>
+<script>
+const frame=document.getElementById('game'); const result=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function post(text){try{fetch('/__p74_asc_source_result',{method:'POST',headers:{'Content-Type':'text/plain'},body:text})}catch(_){}}
+async function waitFor(fn,label,timeout=10000){const start=Date.now();let last;while(Date.now()-start<timeout){try{const v=fn();if(v)return v;}catch(e){last=e}await sleep(80)}throw new Error('timeout waiting for '+label+(last?': '+last.message:''));}
+function tap(win,el){if(!el)throw new Error('missing tap target');const r=el.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const opts={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,pointerId:74,pointerType:'touch',isPrimary:true};try{el.dispatchEvent(new win.PointerEvent('pointerdown',opts));}catch(_){}try{el.dispatchEvent(new win.PointerEvent('pointerup',opts));}catch(_){}el.dispatchEvent(new win.MouseEvent('click',opts));}
+async function clickId(win,id){const el=await waitFor(()=>win.document.getElementById(id),'#'+id);tap(win,el);await sleep(260);}
+function visible(win,el){if(!el)return false;const cs=win.getComputedStyle(el);const r=el.getBoundingClientRect();return cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>4&&r.height>4;}
+function rectObj(r){return{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height),bottom:Math.round(r.bottom)}}
+(async()=>{const metrics={};try{const win=frame.contentWindow;await waitFor(()=>win&&win.gameReady,'gameReady');await sleep(300);win.__p74Errors=[];const oldErr=win.console.error;win.console.error=(...a)=>{win.__p74Errors.push(a.map(String).join(' '));oldErr.apply(win.console,a)};
+  metrics.seed=win.eval(`(() => { closeAllPanels(); combatState=COMBAT_STATE.IDLE; if(typeof isInStageRun!=='undefined') isInStageRun=false; player.stageProgress=normalizeStageProgress(player.stageProgress||{}); const all=Object.keys(STAGES||{}); all.forEach(id=>{ player.stageProgress.unlockedStages[id]=true; player.stageProgress.clearedStages[id]=true; player.stageProgress.stageStars[id]=3; }); player.stageProgress.currentRun=null; player.level=Math.max(player.level||1,80); player.realmIndex=Math.max(player.realmIndex||0,99); player.realm=(Array.isArray(REALMS)&&REALMS[REALMS.length-1])||player.realm; if(!player.ascension) player.ascension={}; player.ascension.ascended=false; return {stageCount:all.length, unlocked:all.filter(id=>isStageUnlocked(player,id)).length, level:player.level, realmIndex:player.realmIndex}; })()`);
+  await clickId(win,'btn-more'); await clickId(win,'btn-ascension');
+  const asc=await waitFor(()=>win.document.getElementById('ascension-dom-panel'),'asc panel');
+  await waitFor(()=>visible(win,asc),'asc visible');
+  const source=await waitFor(()=>win.document.querySelector('[data-asc-resource-source]'),'asc source button');
+  metrics.sourceBefore={text:source.textContent.trim(), stageId:source.dataset.ascResourceSource, ascVisible:visible(win,asc), body:[...win.document.body.classList].join(' '), overflowX:win.document.documentElement.scrollWidth-win.innerWidth};
+  tap(win,source); await sleep(520);
+  const stagePanel=await waitFor(()=>win.document.getElementById('stage-dom-panel'),'stage panel');
+  await waitFor(()=>visible(win,stagePanel),'stage visible after source');
+  metrics.afterSource=win.eval(`(() => { const sp=document.getElementById('stage-dom-panel'); const ap=document.getElementById('ascension-dom-panel'); const sr=sp.getBoundingClientRect(); return {selectedStageId, selectedStageChapterId, stageDetailOpen, stageSweepOpen, showStageSelectUI, showAscensionUI, body:[...document.body.classList].join(' '), ascDisplay:getComputedStyle(ap).display, stageVisible:getComputedStyle(sp).display!=='none'&&sr.height>0, stageText:sp.textContent.slice(0,500), visiblePanels:[...document.querySelectorAll('#inventory-dom-panel,#character-dom-panel,#skills-dom-panel,#stage-dom-panel,#secretrealm-dom-panel,#ascension-dom-panel')].filter(el=>{const cs=getComputedStyle(el),r=el.getBoundingClientRect();return cs.display!=='none'&&r.width>4&&r.height>4}).map(el=>el.id)}; })()`);
+  const enter=await waitFor(()=>win.document.querySelector('[data-stage-enter]'),'stage enter after source');
+  metrics.enterBefore={text:enter.textContent.trim(), stageId:enter.dataset.stageEnter, rect:rectObj(enter.getBoundingClientRect())};
+  tap(win,enter); await sleep(650);
+  metrics.afterEnter=win.eval(`(() => ({isInStageRun, inCombat:isInCombat(), currentRun:!!(player.stageProgress&&player.stageProgress.currentRun), currentStage:player.stageProgress&&player.stageProgress.currentRun&&player.stageProgress.currentRun.stageId, body:[...document.body.classList].join(' '), panelOpen:document.body.classList.contains('panel-open'), stageVisible:(()=>{const p=document.getElementById('stage-dom-panel'); if(!p)return false; const cs=getComputedStyle(p),r=p.getBoundingClientRect(); return cs.display!=='none'&&r.height>4})(), movementBlocked:typeof isMovementBlockedByUi==='function'?isMovementBlockedByUi():null, errors:(window.__errors||[]).length}))()`);
+  metrics.consoleErrors=(win.__p74Errors||[]).filter(e=>!/Failed to load resource/.test(e));
+  const issues=[];
+  if(!metrics.sourceBefore.stageId)issues.push('source button missing stage id');
+  if(metrics.sourceBefore.overflowX>1)issues.push('ascension overflow before source');
+  if(!metrics.afterSource.stageVisible||!metrics.afterSource.stageDetailOpen)issues.push('source did not open stage detail');
+  if(metrics.afterSource.selectedStageId!==metrics.sourceBefore.stageId)issues.push('selected stage mismatch after source');
+  if(metrics.afterSource.showAscensionUI||metrics.afterSource.ascDisplay!=='none')issues.push('ascension panel remained visible after source');
+  if(metrics.afterSource.visiblePanels.length!==1||metrics.afterSource.visiblePanels[0]!=='stage-dom-panel')issues.push('unexpected visible panels after source '+metrics.afterSource.visiblePanels.join(','));
+  if(metrics.enterBefore.stageId!==metrics.sourceBefore.stageId)issues.push('enter button is not target source stage');
+  if(!metrics.afterEnter.isInStageRun||!metrics.afterEnter.currentRun)issues.push('enter did not start stage run');
+  if(metrics.afterEnter.currentStage!==metrics.sourceBefore.stageId)issues.push('run started wrong stage');
+  if(metrics.afterEnter.panelOpen||metrics.afterEnter.stageVisible)issues.push('stage selector still open after enter');
+  if(metrics.afterEnter.movementBlocked)issues.push('movement blocked after source enter');
+  if(metrics.consoleErrors.length)issues.push('console errors: '+metrics.consoleErrors.slice(0,3).join(' || '));
+  if(issues.length)throw new Error(issues.join('; ')+' '+JSON.stringify(metrics));
+  document.body.dataset.result='passed';document.body.dataset.metrics=JSON.stringify(metrics);result.textContent='p74 ascension source to stage run smoke passed '+JSON.stringify(metrics);post(result.textContent);frame.remove();
+}catch(err){document.body.dataset.result='failed';result.textContent='p74 ascension source to stage run smoke failed '+(err&&err.stack||err)+'\n'+JSON.stringify(metrics,null,2);post(result.textContent);frame.remove();}})();
+</script></body></html>
