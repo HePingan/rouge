@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P73 combat three-turn mobile smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;max-width:390px}</style></head>
+<body><iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">running</pre>
+<script>
+const frame=document.getElementById('game'); const result=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function post(text){try{fetch('/__p73_combat_result',{method:'POST',headers:{'Content-Type':'text/plain'},body:text})}catch(_){}}
+async function waitFor(fn,label,timeout=10000){const start=Date.now();let last;while(Date.now()-start<timeout){try{const v=fn();if(v)return v;}catch(e){last=e}await sleep(80)}throw new Error('timeout waiting for '+label+(last?': '+last.message:''));}
+function rectObj(r){return{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height),bottom:Math.round(r.bottom)}}
+function dispatchTap(win,el){const r=el.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const opts={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,pointerId:73,pointerType:'touch',isPrimary:true};try{el.dispatchEvent(new win.PointerEvent('pointerdown',opts));}catch(_){}try{el.dispatchEvent(new win.PointerEvent('pointerup',opts));}catch(_){}el.dispatchEvent(new win.MouseEvent('click',opts));}
+function panelMetrics(win){return win.eval(`(() => { const p=document.getElementById('combat-dom-panel'); const log=document.querySelector('.cbt-log'); const intent=document.querySelector('.cbt-intent'); const act=[...document.querySelectorAll('.cbt-act-btn')]; const r=p?p.getBoundingClientRect():{x:0,y:0,width:0,height:0,bottom:0}; const lr=log?log.getBoundingClientRect():{height:0}; return {visible:!!p&&getComputedStyle(p).display!=='none'&&r.height>0, rect:{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height),bottom:Math.round(r.bottom)}, overflowX:document.documentElement.scrollWidth-innerWidth, logH:Math.round(lr.height), logRows:document.querySelectorAll('.cbt-log-entry').length, intentText:intent?.textContent||'', skillBtn:document.querySelector('.cbt-skill-btn,#cbt-skill-toggle-action')?.textContent||'', disabled:act.map(a=>a.getAttribute('aria-disabled')), body:[...document.body.classList].join(' ')}; })()`)}
+(async()=>{const metrics={};try{const win=frame.contentWindow;await waitFor(()=>win&&win.gameReady,'gameReady');await sleep(300);win.__p73Errors=[];const oldErr=win.console.error;win.console.error=(...a)=>{win.__p73Errors.push(a.map(String).join(' '));oldErr.apply(win.console,a)};
+  metrics.setup=win.eval(`(() => { closeAllPanels(); combatState=COMBAT_STATE.IDLE; currentEnemy=null; player.hp=player.maxHp; player.mp=player.maxMp; learnedSkills = [{tree:'water',index:1},{tree:'fire',index:0},{tree:'earth',index:1},{tree:'thunder',index:0}]; window.__p73Counts={attack:0,defend:0,skill:0,flee:0}; const pa=playerAttack, pd=playerDefend, ps=playerUseSkill, pf=playerFlee; playerAttack=function(){window.__p73Counts.attack++; return pa.apply(this,arguments)}; playerDefend=function(){window.__p73Counts.defend++; return pd.apply(this,arguments)}; playerUseSkill=function(){window.__p73Counts.skill++; return ps.apply(this,arguments)}; playerFlee=function(){window.__p73Counts.flee++; return pf.apply(this,arguments)}; window.getEnemySkills=()=>[{ name:'重击', icon:'💥', type:'heavy', chance:1 }]; startCombat({id:'p73_dummy',name:'三回合假人',title:'三回合假人',hp:999,maxHp:999,atk:1,def:0,level:1,exp:0,gold:0,weaknesses:['water'],resists:[],_statusEffects:[],_skillCooldowns:{}}); renderCombatDomPanel(); return {inCombat:isInCombat(), state:combatState, skills:getCombatSkills().map(s=>s.name), body:[...document.body.classList].join(' ')}; })()`);
+  await waitFor(()=>win.document.getElementById('cbt-attack'),'attack');
+  metrics.initial=panelMetrics(win);
+  dispatchTap(win,win.document.getElementById('cbt-attack')); await sleep(260);
+  metrics.afterAttack={panel:panelMetrics(win), counts:win.eval('JSON.parse(JSON.stringify(window.__p73Counts))'), hp:win.eval('currentEnemy&&currentEnemy.hp'), log:win.eval('(combatLogBuffer||[]).slice(-4).map(x=>x.text||x).join("|")')};
+  win.eval(`(() => { combatState=COMBAT_STATE.PLAYER_TURN; if(currentEnemy) currentEnemy.hp=999; renderCombatDomPanel(); })()`); await sleep(120);
+  dispatchTap(win,win.document.getElementById('cbt-defend')); await sleep(260);
+  metrics.afterDefend={panel:panelMetrics(win), counts:win.eval('JSON.parse(JSON.stringify(window.__p73Counts))'), log:win.eval('(combatLogBuffer||[]).slice(-5).map(x=>x.text||x).join("|")')};
+  win.eval(`(() => { combatState=COMBAT_STATE.PLAYER_TURN; if(currentEnemy) currentEnemy.hp=999; player.mp=player.maxMp; renderCombatDomPanel(); })()`); await sleep(120);
+  const skill=await waitFor(()=>win.document.querySelector('.cbt-skill-btn:not(.disabled), #cbt-skill-toggle-action:not(.disabled)'),'skill button');
+  dispatchTap(win,skill); await sleep(300);
+  metrics.afterSkill={panel:panelMetrics(win), counts:win.eval('JSON.parse(JSON.stringify(window.__p73Counts))'), hp:win.eval('currentEnemy&&currentEnemy.hp'), log:win.eval('(combatLogBuffer||[]).slice(-6).map(x=>x.text||x).join("|")')};
+  metrics.cleanup=win.eval(`(() => { combatState=COMBAT_STATE.IDLE; currentEnemy=null; renderCombatDomPanel(); syncBodyPanelState(); return {inCombat:isInCombat(), body:[...document.body.classList].join(' '), panelDisplay:getComputedStyle(document.getElementById('combat-dom-panel')).display}; })()`);
+  metrics.consoleErrors=(win.__p73Errors||[]).filter(e=>!/Failed to load resource/.test(e));
+  const issues=[];
+  if(!metrics.setup.inCombat||!metrics.initial.visible)issues.push('combat panel did not start');
+  for(const [name,p] of [['initial',metrics.initial],['afterAttack',metrics.afterAttack.panel],['afterDefend',metrics.afterDefend.panel],['afterSkill',metrics.afterSkill.panel]]){if(!p.visible)issues.push(name+' panel hidden'); if(p.overflowX>1)issues.push(name+' overflowX '+p.overflowX); if(p.rect.h>380)issues.push(name+' panel too tall '+p.rect.h); if(p.logH>110)issues.push(name+' log too tall '+p.logH); if(!p.intentText.includes('下回合'))issues.push(name+' intent missing');}
+  if(metrics.afterAttack.counts.attack!==1||metrics.afterAttack.counts.defend!==0||metrics.afterAttack.counts.skill!==0)issues.push('attack double/misfire '+JSON.stringify(metrics.afterAttack.counts));
+  if(metrics.afterDefend.counts.attack!==1||metrics.afterDefend.counts.defend!==1||metrics.afterDefend.counts.skill!==0)issues.push('defend double/misfire '+JSON.stringify(metrics.afterDefend.counts));
+  if(metrics.afterSkill.counts.attack!==1||metrics.afterSkill.counts.defend!==1||metrics.afterSkill.counts.skill!==1)issues.push('skill double/misfire '+JSON.stringify(metrics.afterSkill.counts));
+  if(metrics.afterAttack.hp>=999)issues.push('attack did not damage enemy');
+  if(metrics.afterSkill.hp>=999)issues.push('skill did not damage enemy');
+  if(metrics.cleanup.body.includes('combat-active')||metrics.cleanup.panelDisplay!=='none')issues.push('combat cleanup stale '+JSON.stringify(metrics.cleanup));
+  if(metrics.consoleErrors.length)issues.push('console errors: '+metrics.consoleErrors.slice(0,3).join(' || '));
+  if(issues.length)throw new Error(issues.join('; ')+' '+JSON.stringify(metrics));
+  document.body.dataset.result='passed';document.body.dataset.metrics=JSON.stringify(metrics);result.textContent='p73 combat three-turn mobile smoke passed '+JSON.stringify(metrics);post(result.textContent);frame.remove();
+}catch(err){document.body.dataset.result='failed';result.textContent='p73 combat three-turn mobile smoke failed '+(err&&err.stack||err)+'\n'+JSON.stringify(metrics,null,2);post(result.textContent);frame.remove();}})();
+</script></body></html>
