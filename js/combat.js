@@ -88,6 +88,12 @@ function getEquippedTraitCombatHint(traitId) {
 function formatCombatPercentBonus(value) {
   return `${Math.round(Number(value || 0))}%`;
 }
+function refreshCombatDomPanelNow() {
+  if (typeof renderCombatDomPanel === 'function') {
+    if (typeof combatDomRenderCacheKey !== 'undefined') combatDomRenderCacheKey = '';
+    renderCombatDomPanel();
+  }
+}
 function activeArtifactIdForCombat(p = player) {
   return (typeof getActiveArtifact === 'function' && getActiveArtifact(p)?.id) || null;
 }
@@ -178,7 +184,12 @@ function applyEquipmentTurnRegen() {
     const mana = Math.min(Math.floor(mpRegen), player.maxMp - player.mp);
     if (mana > 0) { player.mp += mana; parts.push(`灵力+${mana}`); }
   }
-  if (parts.length) combatLog(`🌿 装备恢复：${parts.join('、')}`, '#90ee90');
+  if (parts.length) {
+    const guiYuan = getEquippedTraitCombatHint('guiyuan');
+    const prefix = guiYuan ? `${guiYuan.trait?.icon || '💧'} ${guiYuan.trait?.name || '归元'}回灵` : '🌿 装备恢复';
+    combatLog(`${prefix}：${parts.join('、')}`, guiYuan ? '#8bd7ff' : '#90ee90');
+    refreshCombatDomPanelNow();
+  }
 }
 function applyEquipmentOnVictory() {
   if (!player) return;
@@ -221,7 +232,7 @@ function playerAttack() {
   }
   const traitText = poJunTrait && bossDmgBonus > 0 ? `（${poJunTrait.trait?.icon || '⚔️'}${poJunTrait.trait?.name || '破军'}首领伤害+${formatCombatPercentBonus(bossDmgBonus)}）` : '';
   combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}${affinityText ? `（${affinityText}）` : ''}${traitText}`, '#ffaa44');
-  if (typeof renderCombatDomPanel === 'function') { if (typeof combatDomRenderCacheKey !== 'undefined') combatDomRenderCacheKey = ''; renderCombatDomPanel(); }
+  refreshCombatDomPanelNow();
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
   if (typeof applySynergyAfterPlayerHit === 'function') applySynergyAfterPlayerHit(dmg, crit, null);
   applyEquipmentOnHitEffects(dmg, crit);
@@ -346,13 +357,14 @@ function calculateEnemyDamage(mult = 1) {
   const takenMult = getPlayerTakenDamageMultiplier();
   if (takenMult !== 1) dmg = Math.max(1, Math.floor(dmg * takenMult));
   const reduce = equipmentAbilityValue('dmgReduce') / 100;
+  const traitReducePct = reduce > 0 && getEquippedTraitCombatHint('tieshan') ? Math.round(Math.min(0.7, reduce) * 100) : 0;
   if (reduce > 0) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.7, reduce))));
   if (equipmentAbilityValue('lowHpGuard') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - Math.min(0.5, equipmentAbilityValue('lowHpGuard') / 100))));
   if (equipmentAbilityValue('frostBarrier') > 0 && player.hp / Math.max(1, player.maxHp) <= 0.35) dmg = Math.max(1, Math.floor(dmg * (1 - equipmentAbilityValue('frostBarrier'))));
-  return { dmg, guardMult, takenMult };
+  return { dmg, guardMult, takenMult, traitReducePct };
 }
 
-function finishEnemyDamage(dmg, label, color = '#ff6666', crit = false, guardMult = 1, takenMult = 1) {
+function finishEnemyDamage(dmg, label, color = '#ff6666', crit = false, guardMult = 1, takenMult = 1, traitReducePct = 0) {
   player.hp -= dmg;
   const thorns = equipmentAbilityValue('thorns');
   if (thorns > 0 && currentEnemy) {
@@ -362,7 +374,9 @@ function finishEnemyDamage(dmg, label, color = '#ff6666', crit = false, guardMul
   }
   if (typeof applyPassiveAfterEnemyHit === 'function') applyPassiveAfterEnemyHit(dmg);
   if (typeof tickPlayerStatusesAfterHit === 'function') tickPlayerStatusesAfterHit();
-  combatLog(`${label}，造成 ${dmg} 点伤害${crit ? ' 💢重击！' : ''}${guardMult < 1 ? '（护体减免）' : ''}${takenMult > 1 ? '（负面状态加深）' : ''}`, color);
+  const traitReduceText = traitReducePct > 0 ? `（⛰️铁山减伤-${traitReducePct}%）` : '';
+  combatLog(`${label}，造成 ${dmg} 点伤害${crit ? ' 💢重击！' : ''}${guardMult < 1 ? '（护体减免）' : ''}${takenMult > 1 ? '（负面状态加深）' : ''}${traitReduceText}`, color);
+  if (traitReducePct > 0) refreshCombatDomPanelNow();
   const px = player.x * CELL_SIZE + CELL_SIZE / 2;
   const py = player.y * CELL_SIZE + CELL_SIZE / 2;
   if (crit) { spawnHitEffect(px, py); sfxCrit(); }
@@ -485,17 +499,19 @@ function useEnemySkill(skill) {
     let total = 0;
     let guardMult = 1;
     let takenMult = 1;
+    let traitReducePct = 0;
     for (let i = 0; i < hits; i++) {
       const result = calculateEnemyDamage(skill.mult || 0.6);
       total += result.dmg;
       guardMult = result.guardMult;
       takenMult = result.takenMult;
+      traitReducePct = Math.max(traitReducePct, result.traitReducePct || 0);
     }
-    finishEnemyDamage(total, `${label}（${hits}段）`, skill.color || '#ff6666', false, guardMult, takenMult);
+    finishEnemyDamage(total, `${label}（${hits}段）`, skill.color || '#ff6666', false, guardMult, takenMult, traitReducePct);
     return true;
   }
   const result = calculateEnemyDamage(skill.mult || 1);
-  finishEnemyDamage(result.dmg, label, skill.color || '#ff6666', false, result.guardMult, result.takenMult);
+  finishEnemyDamage(result.dmg, label, skill.color || '#ff6666', false, result.guardMult, result.takenMult, result.traitReducePct);
   if (skill.type === 'drain' && currentEnemy.hp > 0) {
     const heal = Math.max(1, Math.floor(result.dmg * (skill.healRatio || 0.45)));
     currentEnemy.hp = Math.min(currentEnemy.maxHp, currentEnemy.hp + heal);
@@ -571,7 +587,7 @@ function triggerBossMechanic(mechanic) {
   }
   if (effect.type === 'drainDebuff') {
     const result = calculateEnemyDamage(effect.mult || 0.75);
-    finishEnemyDamage(result.dmg, label, '#b086ff', false, result.guardMult, result.takenMult);
+    finishEnemyDamage(result.dmg, label, '#b086ff', false, result.guardMult, result.takenMult, result.traitReducePct);
     const heal = Math.max(1, Math.floor(result.dmg * (effect.healRatio || 0.4)));
     currentEnemy.hp = Math.min(currentEnemy.maxHp || currentEnemy.hp, currentEnemy.hp + heal);
     if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
@@ -579,9 +595,9 @@ function triggerBossMechanic(mechanic) {
     return true;
   }
   if (effect.type === 'multiHitDebuff') {
-    let total = 0, guardMult = 1, takenMult = 1;
-    for (let i = 0; i < (effect.hits || 2); i++) { const r = calculateEnemyDamage(effect.mult || 0.35); total += r.dmg; guardMult = r.guardMult; takenMult = r.takenMult; }
-    finishEnemyDamage(total, `${label}（${effect.hits || 2}段）`, '#f6e05e', false, guardMult, takenMult);
+    let total = 0, guardMult = 1, takenMult = 1, traitReducePct = 0;
+    for (let i = 0; i < (effect.hits || 2); i++) { const r = calculateEnemyDamage(effect.mult || 0.35); total += r.dmg; guardMult = r.guardMult; takenMult = r.takenMult; traitReducePct = Math.max(traitReducePct, r.traitReducePct || 0); }
+    finishEnemyDamage(total, `${label}（${effect.hits || 2}段）`, '#f6e05e', false, guardMult, takenMult, traitReducePct);
     if (effect.debuff) addPlayerDebuff({ ...effect.debuff });
     return true;
   }
@@ -668,7 +684,9 @@ function enemyAttack() {
   }
   const dodgeChance = Math.min(0.55, equipmentAbilityValue('dodge') / 100);
   if (dodgeChance > 0 && Math.random() < dodgeChance) {
-    combatLog(`${currentEnemy.name} 的攻击被你闪避！`, '#88ccff');
+    const jiYing = getEquippedTraitCombatHint('jiying');
+    combatLog(jiYing ? `💨 ${jiYing.trait?.name || '疾影'}身法：闪避攻击` : `${currentEnemy.name} 的攻击被你闪避！`, jiYing ? '#c9c3ff' : '#88ccff');
+    refreshCombatDomPanelNow();
     if (equipmentAbilityValue('shadowCounter') > 0) player._shadowCounterReady = true;
     finishEnemyTurn();
     return;
@@ -681,7 +699,7 @@ function enemyAttack() {
   const result = calculateEnemyDamage(1);
   const crit = Math.random() < (currentEnemy.isBoss ? 0.12 : 0.08);
   const dmg = crit ? Math.floor(result.dmg * 1.8) : result.dmg;
-  finishEnemyDamage(dmg, `${currentEnemy.name} 攻击你`, '#ff6666', crit, result.guardMult, result.takenMult);
+  finishEnemyDamage(dmg, `${currentEnemy.name} 攻击你`, '#ff6666', crit, result.guardMult, result.takenMult, result.traitReducePct);
   finishEnemyTurn();
 }
 function isAscensionTrialCombat() {
