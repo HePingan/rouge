@@ -1135,6 +1135,7 @@ function escapeHtml(value) {
           pushPanelToStack('character');
           characterPanelLastHtml = '';
           characterEquipmentDetailSlot = null;
+          characterEquipmentSlotHint = null;
           showMessage('已装备！前往角色页一览全身修为', '#d4a0ff');
           syncBodyPanelState();
         }

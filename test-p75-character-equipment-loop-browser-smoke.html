@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>P75 character equipment loop smoke</title><style>body{margin:0;background:#111;color:#d6ffd6;font:12px monospace}iframe{width:390px;height:844px;border:0;display:block}pre{white-space:pre-wrap;max-width:390px}</style></head>
+<body><iframe id="game" src="./index.html?v=20260605combatp3"></iframe><pre id="result">running</pre>
+<script>
+const frame=document.getElementById('game'); const result=document.getElementById('result');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function post(text){try{fetch('/__p75_equipment_loop_result',{method:'POST',headers:{'Content-Type':'text/plain'},body:text})}catch(_){}}
+async function waitFor(fn,label,timeout=10000){const start=Date.now();let last;while(Date.now()-start<timeout){try{const v=fn();if(v)return v;}catch(e){last=e}await sleep(80)}throw new Error('timeout waiting for '+label+(last?': '+last.message:''));}
+function tap(win,el){if(!el)throw new Error('missing tap target');const r=el.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const opts={bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,pointerId:75,pointerType:'touch',isPrimary:true};try{el.dispatchEvent(new win.PointerEvent('pointerdown',opts));}catch(_){}try{el.dispatchEvent(new win.PointerEvent('pointerup',opts));}catch(_){}el.dispatchEvent(new win.MouseEvent('click',opts));}
+async function clickId(win,id){const el=await waitFor(()=>win.document.getElementById(id),'#'+id);tap(win,el);await sleep(260);return el;}
+function visible(win,el){if(!el)return false;const cs=win.getComputedStyle(el);const r=el.getBoundingClientRect();return cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>4&&r.height>4;}
+function overflowX(win){return Math.max(0,win.document.documentElement.scrollWidth-win.innerWidth)}
+(async()=>{const metrics={};try{const win=frame.contentWindow;await waitFor(()=>win&&win.gameReady,'gameReady');await sleep(300);win.__p75Errors=[];const oldErr=win.console.error;win.console.error=(...a)=>{win.__p75Errors.push(a.map(String).join(' '));oldErr.apply(win.console,a)};
+  metrics.seed=win.eval(`(() => { closeAllPanels(); combatState=COMBAT_STATE.IDLE; if(typeof isInStageRun!=='undefined') isInStageRun=false; player.equipment.weapon={ name:'旧木剑·基线', slot:'weapon', rarity:'普通', rarityColor:'#aaa', stats:{ atk:1 }, floorLevel:1 }; player.equipment.armor=null; player.inventory=[ { name:'玄铁护甲·P75验证', slot:'armor', rarity:'传说', rarityColor:'#f6c453', stats:{ def:88, maxHp:188 }, floorLevel:12 }, { name:'错位长剑·不应出现', slot:'weapon', rarity:'传说', rarityColor:'#f6c453', stats:{ atk:99 }, floorLevel:12 } ]; inventorySlotFilter=''; inventoryTab='equipment'; inventoryDetailTarget=null; characterPanelLastHtml=''; characterEquipmentDetailSlot=null; characterEquipmentSlotHint=null; if(typeof invalidateInventoryListCacheDom==='function') invalidateInventoryListCacheDom(); if(typeof player.recalcStats==='function') player.recalcStats(); const power=Math.max(1, Math.round(Number(player.atk||0)*4+Number(player.def||0)*3+Number(player.maxHp||0)/8+Number(player.maxMp||0)/10)); return {power, inventory:player.inventory.map(i=>i.name), armor:player.equipment.armor}; })()`);
+  await clickId(win,'btn-character'); await waitFor(()=>win.document.body.classList.contains('character-open'),'character open');
+  const charPanel=await waitFor(()=>win.document.getElementById('character-dom-panel'),'character panel');
+  metrics.characterBefore={visible:visible(win,charPanel), overflowX:overflowX(win), text:charPanel.textContent.slice(0,500), body:[...win.document.body.classList].join(' ')};
+  const equipTab=await waitFor(()=>win.document.querySelector('#character-dom-panel .char-tab[data-char-tab="equipment"]'),'equipment tab'); tap(win,equipTab); await sleep(220);
+  const emptyArmor=await waitFor(()=>win.document.querySelector('#character-dom-panel .char-equip-card.empty[data-char-equip-slot="armor"]'),'empty armor slot'); tap(win,emptyArmor); await sleep(180);
+  const cta=await waitFor(()=>win.document.querySelector('#character-dom-panel [data-char-open-inventory-slot="armor"]'),'armor inventory cta'); metrics.slotHint={text:cta.textContent.trim()}; tap(win,cta); await sleep(360);
+  const invPanel=await waitFor(()=>win.document.getElementById('inventory-dom-panel'),'inventory panel'); await waitFor(()=>win.document.body.classList.contains('inventory-open')&&!win.document.body.classList.contains('character-open'),'inventory only');
+  metrics.inventoryFiltered={visible:visible(win,invPanel), body:[...win.document.body.classList].join(' '), filterText:win.document.querySelector('#inventory-dom-panel .bag-slot-filter')?.textContent.trim()||'', listText:win.document.querySelector('#inventory-dom-panel .bag-list')?.textContent||'', overflowX:overflowX(win)};
+  const card=await waitFor(()=>Array.from(win.document.querySelectorAll('#inventory-dom-panel .bag-item-card')).find(el=>el.textContent.includes('玄铁护甲')),'armor card'); tap(win,card); await sleep(220);
+  metrics.detailOpen={text:win.document.querySelector('#inventory-detail')?.textContent?.slice(0,500)||win.document.querySelector('#inventory-dom-panel')?.textContent?.slice(0,500)||'', overflowX:overflowX(win)};
+  const equip=await waitFor(()=>win.document.querySelector('#inventory-dom-panel [data-equip-action-index]'),'equip action'); tap(win,equip); await sleep(220);
+  const confirm=await waitFor(()=>win.document.querySelector('#inventory-dom-panel [data-confirm-equip-index]'),'confirm equip'); metrics.confirmText=confirm.textContent.trim(); tap(win,confirm); await sleep(520);
+  await waitFor(()=>win.document.body.classList.contains('character-open')&&!win.document.body.classList.contains('inventory-open'),'returned character');
+  metrics.after=win.eval(`(() => { const p=document.getElementById('character-dom-panel'); const txt=p?.textContent||''; const power=Math.max(1, Math.round(Number(player.atk||0)*4+Number(player.def||0)*3+Number(player.maxHp||0)/8+Number(player.maxMp||0)/10)); return {power, armor:player.equipment.armor&&player.equipment.armor.name, inventory:player.inventory.map(i=>i.name), body:[...document.body.classList].join(' '), visiblePanels:[...document.querySelectorAll('#inventory-dom-panel,#character-dom-panel,#skills-dom-panel,#stage-dom-panel,#secretrealm-dom-panel,#ascension-dom-panel')].filter(el=>{const cs=getComputedStyle(el),r=el.getBoundingClientRect();return cs.display!=='none'&&r.width>4&&r.height>4}).map(el=>el.id), text:txt.slice(0,800), overflowX:Math.max(0,document.documentElement.scrollWidth-innerWidth), detailVisible:inventoryDetailTarget!==null}; })()`);
+  metrics.consoleErrors=(win.__p75Errors||[]).filter(e=>!/Failed to load resource/.test(e));
+  const issues=[];
+  if(!metrics.characterBefore.visible||metrics.characterBefore.overflowX>1)issues.push('character before invalid');
+  if(!metrics.slotHint.text.includes('背包')&&!metrics.slotHint.text.includes('装备'))issues.push('slot hint CTA unclear: '+metrics.slotHint.text);
+  if(!metrics.inventoryFiltered.filterText.includes('护甲'))issues.push('armor filter missing '+metrics.inventoryFiltered.filterText);
+  if(!metrics.inventoryFiltered.listText.includes('玄铁护甲')||metrics.inventoryFiltered.listText.includes('错位长剑'))issues.push('slot filter broken');
+  if(metrics.inventoryFiltered.overflowX>1||metrics.detailOpen.overflowX>1)issues.push('inventory overflow during equip');
+  if(!metrics.confirmText.includes('确认'))issues.push('confirm route missing');
+  if(metrics.after.armor!=='玄铁护甲·P75验证')issues.push('armor not equipped');
+  if(metrics.after.inventory.includes('玄铁护甲·P75验证')||!metrics.after.inventory.includes('错位长剑·不应出现'))issues.push('inventory mutation wrong '+metrics.after.inventory.join(','));
+  if(metrics.after.power<=metrics.seed.power)issues.push('power did not increase '+metrics.seed.power+' -> '+metrics.after.power);
+  if(metrics.after.visiblePanels.length!==1||metrics.after.visiblePanels[0]!=='character-dom-panel')issues.push('visible panels wrong '+metrics.after.visiblePanels.join(','));
+  if(!metrics.after.text.includes('玄铁护甲'))issues.push('character panel did not rerender armor');
+  if(metrics.after.overflowX>1)issues.push('overflow after equip');
+  if(metrics.after.detailVisible)issues.push('inventory confirm detail still visible');
+  if(metrics.consoleErrors.length)issues.push('console errors: '+metrics.consoleErrors.slice(0,3).join(' || '));
+  if(issues.length)throw new Error(issues.join('; ')+' '+JSON.stringify(metrics));
+  document.body.dataset.result='passed';document.body.dataset.metrics=JSON.stringify(metrics);result.textContent='p75 character equipment loop smoke passed '+JSON.stringify(metrics);post(result.textContent);frame.remove();
+}catch(err){document.body.dataset.result='failed';result.textContent='p75 character equipment loop smoke failed '+(err&&err.stack||err)+'\n'+JSON.stringify(metrics,null,2);post(result.textContent);frame.remove();}})();
+</script></body></html>
