@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Bottom canvas safe-area browser smoke</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #111827; overflow: hidden; }
+    iframe { width: 390px; height: 844px; border: 0; display: block; }
+  </style>
+</head>
+<body data-result="running">
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area"></iframe>
+  <script>
+    const done = (payload) => {
+      document.body.dataset.result = payload.ok ? 'passed' : 'failed';
+      document.body.dataset.metrics = JSON.stringify(payload);
+      fetch('/__result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {});
+    };
+    const fail = (message, extra = {}) => done({ ok: false, message, ...extra });
+
+    window.addEventListener('error', (event) => fail('top-level error', { error: String(event.message || event.error || '') }));
+
+    (async () => {
+      const iframe = document.getElementById('phone');
+      await new Promise(resolve => iframe.addEventListener('load', resolve, { once: true }));
+      const win = iframe.contentWindow;
+      const doc = iframe.contentDocument;
+      const errors = [];
+      const originalError = win.console.error;
+      win.console.error = (...args) => { errors.push(args.map(String).join(' ')); originalError.apply(win.console, args); };
+      await new Promise(resolve => setTimeout(resolve, 1100));
+
+      const canvas = doc.querySelector('#game-canvas');
+      if (!canvas) return fail('game canvas missing');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return fail('2d context missing');
+      const w = canvas.width;
+      const h = canvas.height;
+      const bandHeight = Math.min(20, h);
+      const data = ctx.getImageData(0, h - bandHeight, w, bandHeight).data;
+      let r = 0, g = 0, b = 0, dark = 0, n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const R = data[i], G = data[i + 1], B = data[i + 2];
+        r += R; g += G; b += B; n++;
+        if (R < 25 && G < 25 && B < 35) dark++;
+      }
+      const avg = [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+      const darkPct = dark / n;
+      const overflowX = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth) - win.innerWidth;
+      const bodyMask = win.getComputedStyle(doc.body, '::after');
+      const gameMask = win.getComputedStyle(doc.querySelector('#game-container'), '::after');
+      const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
+
+      done({
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block',
+        message: 'bottom canvas safe-area smoke',
+        canvas: { w, h },
+        bottom20Avg: avg,
+        darkPct: Number((darkPct * 100).toFixed(2)),
+        overflowX,
+        errors,
+        allCurrent,
+        bodyMaskDisplay: bodyMask.display,
+        gameMaskDisplay: gameMask.display,
+        tokenCount: tokens.length,
+      });
+    })().catch(err => fail('exception', { error: String(err && err.stack || err) }));
+  </script>
+</body>
+</html>
