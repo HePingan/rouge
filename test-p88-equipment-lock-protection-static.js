@@ -1,0 +1,10 @@
+const assert=require('assert');const fs=require('fs');const main=fs.readFileSync('js/main.js','utf8');const css=fs.readFileSync('css/style.css','utf8');const html=fs.readFileSync('test-p88-equipment-lock-protection-browser-smoke.html','utf8');
+assert(main.includes('item.locked'),'equipment lock state should be stored on item.locked');
+assert(main.includes('data-toggle-lock'),'detail should expose lock toggle action');
+assert(main.includes('bag-lock-badge'),'bag card should show lock badge');
+assert(/entry\.item && entry\.item\.rarity === rarity && !entry\.item\.trait && !entry\.item\.locked/.test(main),'bulk processing should exclude locked and trait items');
+assert(main.includes('特质/锁定装备')&&main.includes('已锁定装备')&&main.includes('已解锁装备'),'UI should explain lock protection and toggle feedback');
+assert(css.includes('.bag-lock-badge')&&css.includes('.item-action.lock.active'),'css should style lock badge/action');
+for(const click of ['普通手动锁','[data-toggle-lock]','[data-inv-tab="process"]','[data-bulk-sell]','[data-bulk-confirm="sell"]']) assert(html.includes(click), `smoke should click/assert ${click}`);
+for(const phrase of ['locked:player.inventory','normalSellable','已保护特质\\/锁定装备 2 件','overflowX','__p88Errors']) assert(html.includes(phrase), `smoke should verify ${phrase}`);
+console.log('p88 equipment lock protection static passed');

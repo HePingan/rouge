@@ -676,7 +676,7 @@ function escapeHtml(value) {
   }
   function inventoryItemsByRarityDom(rarity) {
     if (!player?.inventory) return [];
-    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item && entry.item.rarity === rarity && !entry.item.trait);
+    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item && entry.item.rarity === rarity && !entry.item.trait && !entry.item.locked);
   }
   function bulkBreakdownTotalDom(entries) {
     const totalGains = {};
@@ -688,12 +688,12 @@ function escapeHtml(value) {
   }
   function bulkPreviewDom(rarity = inventoryBulkRarity) {
     const entries = inventoryItemsByRarityDom(rarity);
-    const protectedTraitCount = (player?.inventory || []).filter(item => item?.rarity === rarity && item?.trait).length;
+    const protectedItemCount = (player?.inventory || []).filter(item => item?.rarity === rarity && (item?.trait || item?.locked)).length;
     const sellValue = entries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
     const gains = bulkBreakdownTotalDom(entries);
     const power = entries.reduce((sum, entry) => sum + itemPowerDom(entry.item), 0);
     const names = entries.slice(0, 4).map(entry => entry.item?.name || '装备');
-    return { rarity, entries, count: entries.length, protectedTraitCount, sellValue, gains, power, names };
+    return { rarity, entries, count: entries.length, protectedItemCount, sellValue, gains, power, names };
   }
   function bulkPreviewHtmlDom(preview, mode = inventoryBulkMode) {
     const count = Number(preview?.count || 0);
@@ -721,7 +721,7 @@ function escapeHtml(value) {
       ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
       ${count ? `<div class="bulk-preview-meta"><span>总战力 ${escapeHtml(preview?.power || 0)}</span><span>${escapeHtml(sample)}</span></div>` : ''}
       <button class="bulk-primary ${escapeHtml(mode)}" type="button" data-bulk-${isSell ? 'sell' : 'decompose'}="1" ${count ? '' : 'disabled'}>${count ? `确认${action}（${count}件）` : `无可${action}装备`}</button>
-      <div class="bulk-safe-tip">仅处理背包库存；已穿装备不会受影响。${Number(preview?.protectedTraitCount || 0) ? `已保护特质装备 ${escapeHtml(preview.protectedTraitCount)} 件。` : '特质装备不会被批量处理。'}</div>
+      <div class="bulk-safe-tip">仅处理背包库存；已穿装备不会受影响。${Number(preview?.protectedItemCount || 0) ? `已保护特质/锁定装备 ${escapeHtml(preview.protectedItemCount)} 件。` : '特质/锁定装备不会被批量处理。'}</div>
     </div>`;
   }
   function openBulkConfirmDom(mode, rarity) {
@@ -771,7 +771,7 @@ function escapeHtml(value) {
         <div class="bulk-confirm-reward"><span>预计获得</span><b>${rewardHtml}</b></div>
         ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
         <div class="bulk-confirm-list">${sample}</div>
-        <div class="bulk-warning">操作后装备会从背包移除；特质装备已自动保护，不会被批量处理。</div>
+        <div class="bulk-warning">操作后装备会从背包移除；特质/锁定装备已自动保护，不会被批量处理。</div>
         <div class="bulk-confirm-actions">
           <button type="button" class="bulk-cancel" data-bulk-cancel="1">取消</button>
           <button type="button" class="bulk-confirm-btn ${isSell ? 'sell' : 'decompose'}" data-bulk-confirm="${escapeHtml(mode)}">确认${isSell ? '售卖' : '分解'} · ${isSell ? preview.sellValue + ' 灵石' : materialTextDom(preview.gains)}</button>
@@ -861,12 +861,13 @@ function escapeHtml(value) {
     const delta = itemPowerDeltaDom(item);
     const primaryStats = itemPrimaryStatsHtmlDom(item, 2);
     const traitBadge = item?.trait ? `<span class="bag-trait-badge" style="--trait-color:${escapeHtml(item.trait.color || color)}">${escapeHtml(item.trait.icon || '✦')}${escapeHtml(item.trait.name || '特质')}</span>` : '';
+    const lockBadge = item?.locked ? '<span class="bag-lock-badge" title="已锁定">🔒锁</span>' : '';
     const floorText = item?.floorLevel ? `${item.floorLevel}层` : (item?.subType || typeName);
     return `<button class="bag-item-card scan-card${active ? ' active' : ''}" type="button" data-index="${index}" aria-label="查看${escapeHtml(name)}详情，战力${escapeHtml(power)}，${escapeHtml(delta.text)}" title="${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
       <div class="bag-icon"><span>${escapeHtml(itemIconDom(item))}</span><i>${escapeHtml(rarityShortDom(item.rarity))}</i></div>
       ${level > 0 ? `<span class="enhance-badge">+${level}</span>` : ''}
       <span class="bag-slot-tag">${escapeHtml(typeName.slice(0, 1))}</span>
-      <div class="bag-main"><div class="bag-name-row"><b>${escapeHtml(item.name || '装备')}</b>${traitBadge}</div><div class="bag-meta"><span>${escapeHtml(typeName)}</span><em>${escapeHtml(floorText)}</em></div></div>
+      <div class="bag-main"><div class="bag-name-row"><b>${escapeHtml(item.name || '装备')}</b>${lockBadge}${traitBadge}</div><div class="bag-meta"><span>${escapeHtml(typeName)}</span><em>${escapeHtml(floorText)}</em></div></div>
       <div class="bag-power"><b>战力 ${escapeHtml(power)}</b><strong class="${escapeHtml(delta.tone)}">${escapeHtml(delta.text)}</strong></div>
       <div class="bag-stats">${primaryStats}</div>
     </button>`;
@@ -1038,8 +1039,10 @@ function escapeHtml(value) {
     const enhancedName = `${item.name}${level > 0 ? ` +${level}` : ''}`;
     const maxLevel = typeof getCurrentEquipmentEnhanceCap === 'function' ? getCurrentEquipmentEnhanceCap() : (typeof MAX_EQUIPMENT_ENHANCE_LEVEL !== 'undefined' ? MAX_EQUIPMENT_ENHANCE_LEVEL : 15);
     const enhanceButton = level >= maxLevel ? `<button class="item-action enhance disabled" type="button" disabled>已满级</button>` : `<button class="item-action enhance" type="button" data-enhance-target="1">强化</button>`;
+    const lockButton = Number.isInteger(detail.index) ? `<button class="item-action lock ${item.locked ? 'active' : ''}" type="button" data-toggle-lock="1">${item.locked ? '解锁' : '锁定'}</button>` : '';
     const bagActions = Number.isInteger(detail.index) ? `<div class="detail-actions enhance-actions bag-detail-actions">
         ${enhanceButton}
+        ${lockButton}
         <button class="item-action equip primary-equip" type="button" data-equip-action-index="${detail.index}">装备</button>
       </div>` : '';
     const equipActions = detail.slot ? `<div class="detail-actions enhance-actions">${enhanceButton}<button class="item-action unequip" type="button" data-unequip-slot="${escapeHtml(detail.slot)}">卸下</button></div>` : '';
@@ -1049,7 +1052,7 @@ function escapeHtml(value) {
         <div class="item-icon-box detail-icon"><span>${escapeHtml(itemIconDom(item))}</span><span class="rarity-corner">${escapeHtml(rarityShortDom(item.rarity))}</span></div>
         <div class="detail-main">
           <div class="detail-name">${escapeHtml(enhancedName)}</div>
-          <div class="detail-meta">${escapeHtml(typeText)} · ${escapeHtml(item.rarity || '未知')} · 强化 +${level} · 战力 ${itemPowerDom(item)}</div>
+          <div class="detail-meta">${escapeHtml(typeText)} · ${escapeHtml(item.rarity || '未知')} · 强化 +${level} · 战力 ${itemPowerDom(item)}${item.locked ? ' · 已锁定' : ''}</div>
         </div>
       </div>
       ${itemDetailSummaryHtmlDom(item, detail)}
@@ -1163,6 +1166,16 @@ function escapeHtml(value) {
           syncBodyPanelState();
         }
         refreshEquipmentPanelsDom();
+      });
+    });
+    detailWrap.querySelectorAll('[data-toggle-lock]').forEach(btn => {
+      bindPanelActionDom(btn, () => {
+        const detail = getDetail();
+        if (!detail?.item || !Number.isInteger(detail.index)) return;
+        detail.item.locked = !detail.item.locked;
+        invalidateInventoryListCacheDom();
+        showMessage(detail.item.locked ? '已锁定装备' : '已解锁装备', detail.item.locked ? '#ffe3a1' : '#aaa');
+        rerender();
       });
     });
     detailWrap.querySelectorAll('[data-enhance-target]').forEach(btn => {

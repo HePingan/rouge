@@ -2583,6 +2583,8 @@ body.inventory-open #inventory-dom-panel { display: flex; flex-direction: column
 #inventory-dom-panel .bag-main { min-width: 0; }
 #inventory-dom-panel .bag-name-row { min-width: 0; display: flex; align-items: center; gap: 5px; }
 #inventory-dom-panel .bag-trait-badge { flex:0 0 auto; color:var(--trait-color,#ffd98e); border:1px solid color-mix(in srgb,var(--trait-color,#ffd98e) 42%,transparent); background:color-mix(in srgb,var(--trait-color,#ffd98e) 12%,transparent); border-radius:999px; padding:1px 5px; font:900 10px/1.35 ui-monospace,monospace; }
+#inventory-dom-panel .bag-lock-badge { flex:0 0 auto; color:#ffe7a5; border:1px solid rgba(255,226,140,.46); background:rgba(255,226,140,.14); border-radius:999px; padding:1px 5px; font:900 10px/1.35 ui-monospace,monospace; }
+#inventory-dom-panel .item-action.lock.active { border-color:rgba(255,226,140,.56); background:rgba(255,226,140,.16); color:#ffe7a5; }
 #inventory-dom-panel .bag-meta { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a99ab8; font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #inventory-dom-panel .bag-stats,
 #inventory-dom-panel .slot-stats,
