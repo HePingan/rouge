@@ -1005,12 +1005,24 @@ function escapeHtml(value) {
     if (extra) sections.push(`<div class="detail-stat-group"><h4>其他</h4><div>${extra}</div></div>`);
     return sections.length ? `<div class="detail-stats grouped">${sections.join('')}</div>` : `<div class="detail-stats">${itemStatsHtmlDom(item)}</div>`;
   }
+  function getTraitExplainHtmlDom(trait, item = null) {
+    if (!trait) return '';
+    const battleMap = {
+      pojun: '打首领时显示首领伤害反馈，适合破甲/斩杀路线',
+      guiyuan: '回合恢复时显示回灵反馈，适合续航/灵力循环',
+      jiying: '闪避触发时显示身法反馈，适合机动/先手路线',
+      tieshan: '受击时显示减伤反馈，适合护盾/稳推路线',
+    };
+    const source = `${item?.rarity || '传说'}及以上装备有概率生成特质；高层掉落数值更高`;
+    const battle = battleMap[trait.id] || '进入战斗后按属性提供额外反馈';
+    return `<div class="trait-meta"><span>来源：${escapeHtml(source)}</span><span>战斗定位：${escapeHtml(battle)}</span><span>闭环：背包查看 → 装备生效 → 角色流派 → 战斗日志</span></div>`;
+  }
   function itemTraitHtmlDom(item) {
     const trait = item?.trait;
     if (!trait) return '';
     const stats = item?.traitStats || {};
     const statText = Object.entries(stats).map(([k, v]) => `${statLabelDom(k)} ${formatStatValueDom(k, v)}`).join(' · ');
-    return `<div class="trait-panel" style="--trait-color:${escapeHtml(trait.color || item.rarityColor || '#ffd98e')}"><div class="trait-title"><b>${escapeHtml(trait.icon || '✦')} ${escapeHtml(trait.name || '装备特质')}</b><span>${escapeHtml(trait.desc || '特殊属性')}</span></div>${statText ? `<div class="trait-stats">${escapeHtml(statText)}</div>` : ''}</div>`;
+    return `<div class="trait-panel" style="--trait-color:${escapeHtml(trait.color || item.rarityColor || '#ffd98e')}"><div class="trait-title"><b>${escapeHtml(trait.icon || '✦')} ${escapeHtml(trait.name || '装备特质')}</b><span>${escapeHtml(trait.desc || '特殊属性')}</span></div>${statText ? `<div class="trait-stats">${escapeHtml(statText)}</div>` : ''}${getTraitExplainHtmlDom(trait, item)}</div>`;
   }
   function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上') {
     if (!detail?.item) return `<div class="item-detail empty">${escapeHtml(emptyText)}</div>`;
@@ -3386,10 +3398,10 @@ function generateNewFloor() {
   }
   function getEquippedTraitSkillHintDom() {
     const map = {
-      pojun: { tree: 'sword', label: '剑修爆发', hint: '破军特质适合剑修破甲与首领斩杀', icon: '⚔️' },
-      guiyuan: { tree: 'water', label: '水系续航', hint: '归元特质适合水系回复与灵力循环', icon: '💧' },
-      jiying: { tree: 'thunder', label: '雷系机动', hint: '疾影特质适合雷系暴击与先手', icon: '💨' },
-      tieshan: { tree: 'earth', label: '土系守御', hint: '铁山特质适合土系护盾与稳推进', icon: '⛰️' },
+      pojun: { tree: 'sword', label: '剑修爆发', hint: '破军特质适合剑修破甲与首领斩杀', icon: '⚔️', battle: '战斗中显示首领伤害反馈' },
+      guiyuan: { tree: 'water', label: '水系续航', hint: '归元特质适合水系回复与灵力循环', icon: '💧', battle: '回合恢复时显示归元回灵' },
+      jiying: { tree: 'thunder', label: '雷系机动', hint: '疾影特质适合雷系暴击与先手', icon: '💨', battle: '闪避时显示疾影身法' },
+      tieshan: { tree: 'earth', label: '土系守御', hint: '铁山特质适合土系护盾与稳推进', icon: '⛰️', battle: '受击时显示铁山减伤' },
     };
     const equipped = Object.values(player?.equipment || {}).filter(Boolean);
     for (const item of equipped) {
@@ -3464,7 +3476,7 @@ function generateNewFloor() {
       headline,
       subline: traitHint ? traitHint.hint : (build?.activeLabels?.length ? `已成型 ${build.activeLabels.length} 项` : (next?.hint || '继续领悟技能可解锁共鸣与专精')),
       tags,
-      nextHint: traitHint?.hint || next?.hint || build?.hint || '',
+      nextHint: traitHint ? `${traitHint.hint}；${traitHint.battle || '战斗中有特质反馈'}` : (next?.hint || build?.hint || ''),
       progressHtml,
       claimableCount: codex?.claimableCount || 0,
       jumpTarget,

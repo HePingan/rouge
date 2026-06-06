@@ -2660,6 +2660,8 @@ body.inventory-open #inventory-dom-panel { display: flex; flex-direction: column
 #inventory-dom-panel .trait-title, #character-dom-panel .trait-title { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--trait-color,#ffd98e); }
 #inventory-dom-panel .trait-title span, #character-dom-panel .trait-title span { color:#cfc6aa; font-size:11px; text-align:right; }
 #inventory-dom-panel .trait-stats, #character-dom-panel .trait-stats { margin-top:5px; color:#f5e6b8; font-size:11px; }
+#inventory-dom-panel .trait-meta, #character-dom-panel .trait-meta { margin-top:6px; display:grid; gap:4px; color:#cfc7aa; font-size:10.5px; line-height:1.35; }
+#inventory-dom-panel .trait-meta span, #character-dom-panel .trait-meta span { border:1px solid rgba(255,255,255,.08); border-radius:7px; padding:4px 6px; background:rgba(0,0,0,.13); }
 #inventory-dom-panel .affix-list { margin-top: 7px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 5px; }
 #inventory-dom-panel .affix-list.empty { color: #8f829b; font-size: 11px; }
 #inventory-dom-panel .affix-chip { display: grid; grid-template-columns: auto 1fr auto; gap: 4px; align-items: center; padding: 4px 6px; border-radius: 8px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09); font-size: 10.5px; }
