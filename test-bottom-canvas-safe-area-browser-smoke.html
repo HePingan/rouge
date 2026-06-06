@@ -48,13 +48,24 @@
       const avg = [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
       const darkPct = dark / n;
       const overflowX = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth) - win.innerWidth;
+      const menuBar = doc.querySelector('#menu-bar');
+      const stageButton = doc.querySelector('#btn-stages');
+      if (!menuBar || !stageButton) return fail('bottom nav missing');
+      const stageRect = stageButton.getBoundingClientRect();
+      const navHit = doc.elementFromPoint(stageRect.left + stageRect.width / 2, stageRect.top + stageRect.height / 2);
+      const navHitOk = navHit === stageButton || !!navHit?.closest?.('#btn-stages');
+      stageButton.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 906, pointerType: 'touch', isPrimary: true, clientX: stageRect.left + stageRect.width / 2, clientY: stageRect.top + stageRect.height / 2 }));
+      stageButton.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 906, pointerType: 'touch', isPrimary: true, clientX: stageRect.left + stageRect.width / 2, clientY: stageRect.top + stageRect.height / 2 }));
+      stageButton.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true, clientX: stageRect.left + stageRect.width / 2, clientY: stageRect.top + stageRect.height / 2 }));
+      await new Promise(resolve => setTimeout(resolve, 160));
+      const stageOpen = doc.body.classList.contains('stage-open') || !!doc.querySelector('#stage-dom-panel:not([style*="display: none"])');
       const bodyMask = win.getComputedStyle(doc.body, '::after');
       const gameMask = win.getComputedStyle(doc.querySelector('#game-container'), '::after');
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
       const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block',
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && navHitOk && stageOpen,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -64,6 +75,10 @@
         allCurrent,
         bodyMaskDisplay: bodyMask.display,
         gameMaskDisplay: gameMask.display,
+        navHitOk,
+        stageOpen,
+        stageButtonRect: { left: Math.round(stageRect.left), top: Math.round(stageRect.top), right: Math.round(stageRect.right), bottom: Math.round(stageRect.bottom) },
+        hitTag: navHit?.id || navHit?.className || navHit?.tagName || '',
         tokenCount: tokens.length,
       });
     })().catch(err => fail('exception', { error: String(err && err.stack || err) }));

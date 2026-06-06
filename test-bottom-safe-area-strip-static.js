@@ -11,5 +11,5 @@ assert(css.includes('body::after') && css.includes('#game-container::after') && 
 assert(css.includes('height: 100dvh'), 'game container should fill the dynamic viewport height');
 assert(css.includes('bottom: var(--menu-bottom)'), 'menu should stay above the safe-area via menu-bottom token');
 assert(css.includes('bottom: var(--control-bottom)'), 'touch controls should stay above the safe-area via control-bottom token');
-assert(css.includes('#touch-controls') && css.includes('#touch-controls,\n#joystick-zone { z-index: 33 !important; }'), 'touch controls should render above the bottom mask');
+assert(css.includes('#touch-controls { z-index: 33 !important; pointer-events: none !important; }') && css.includes('#joystick-zone { z-index: 33 !important; pointer-events: auto !important; }'), 'touch controls shell should not block nav while joystick renders above the bottom mask');
 console.log('bottom safe-area strip static passed');
