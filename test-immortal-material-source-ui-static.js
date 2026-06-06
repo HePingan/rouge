@@ -20,6 +20,6 @@ for (const text of ['材料来源', '万器仙宫', '幽都裂界', '仙魔战�
   mustInclude(main + stages, text, `material source UI text ${text}`);
 }
 mustInclude(css, 'stage-material-source', 'material source CSS class');
-assert(index.includes('20260606safearea4'), 'cachebuster should bump to drain2 for material source UI');
+assert(index.includes('20260606safearea5'), 'cachebuster should bump to drain2 for material source UI');
 assert(!index.includes('20260525drain1'), 'index should not keep stale drain1 token');
 console.log('immortal material source UI static assertions passed');
