@@ -1,0 +1,11 @@
+const assert=require('assert');const fs=require('fs');const combat=fs.readFileSync('js/combat.js','utf8');const main=fs.readFileSync('js/main.js','utf8');const css=fs.readFileSync('css/style.css','utf8');const html=fs.readFileSync('test-p89-poison-status-intent-browser-smoke.html','utf8');
+assert(combat.includes('function getPlayerStatusCounterHint'),'missing counter hint helper');
+assert(combat.includes('无驱散技能，建议防御'),'poison/debuff intent should explain no cleanse fallback');
+assert(combat.includes('每回合约')&&combat.includes('skill.status?.turns'),'status intent should include turn/dot estimate');
+assert(combat.includes('每回合损失')&&combat.includes('dotDmg'),'status application log should explain per-turn loss');
+assert(main.includes('statusTitle')&&main.includes('-${escapeHtml(dotDmg)}/回'),'status chip should expose dot damage per turn');
+assert(css.includes('.cbt-status-chip small')&&css.includes('.cbt-status-chip.status-poison'),'poison chip styles missing');
+assert(html.includes('毒蝠')&&html.includes('venomFang'),'smoke should seed venom enemy');
+assert(html.includes('无驱散技能，建议防御')&&html.includes('中毒')&&html.includes('after-dot'),'smoke should assert intent, status and dot tick');
+assert(html.includes('overflowX')&&html.includes('__p89Errors'),'smoke should check mobile overflow and console errors');
+console.log('p89 poison status intent static passed');

@@ -411,6 +411,17 @@ function chooseEnemySkill() {
   return remaining;
 }
 
+function getPlayerStatusCounterHint(skill) {
+  const type = skill?.status?.type || skill?.debuff?.type || '';
+  const combatSkills = typeof getCombatSkills === 'function' ? getCombatSkills() : [];
+  const hasCleanse = combatSkills.some(s => /净化|驱散|清心|解毒|祛毒/.test(`${s.name || ''}${s.desc || ''}${s.effectText || ''}`) || (s.effects || []).some(e => ['cleanse','dispel','purify'].includes(e.type)));
+  if (hasCleanse) return type === 'poison' ? '建议防御或驱散' : '建议防御或驱散';
+  if (type === 'poison') return '无驱散技能，建议防御';
+  if (type === 'burn') return '无驱散技能，建议防御';
+  if (type === 'curse' || type === 'slow' || type === 'entangle') return '无驱散技能，建议防御';
+  return '建议防御';
+}
+
 function generateEnemyIntent() {
   if (!currentEnemy || !currentEnemy.hp || currentEnemy.hp <= 0) return;
   if (currentEnemy._skipEnemyTurn) {
@@ -447,8 +458,8 @@ function generateEnemyIntent() {
         selfBuff: ['蓄势', '强化自身', '建议速杀或控场'],
         multiHit: ['连击', `${skill.hits || 2}段攻击`, '建议防御'],
         drain: ['吸血', '造成伤害并回复', '建议速杀'],
-        damageStatus: [skill.status?.type === 'poison' ? '施毒' : '灼烧', '伤害并附加持续伤害', '建议防御或驱散'],
-        damageDebuff: [skill.debuff?.type === 'slow' ? '迟缓' : skill.debuff?.type === 'curse' ? '诅咒' : '压制', '伤害并附加负面状态', '建议防御或驱散'],
+        damageStatus: [skill.status?.type === 'poison' ? '施毒' : '灼烧', `${skill.status?.type === 'poison' ? '中毒' : '持续伤害'}${skill.status?.turns || 2}回合 · 每回合约${Math.max(1, Math.floor((currentEnemy.atk || 1) * (skill.status?.ratio || 0.08)))}伤`, getPlayerStatusCounterHint(skill)],
+        damageDebuff: [skill.debuff?.type === 'slow' ? '迟缓' : skill.debuff?.type === 'curse' ? '诅咒' : '压制', `负面状态${skill.debuff?.turns || 1}回合 · 受伤加深`, getPlayerStatusCounterHint(skill)],
       };
       const [label, detail, suggestion] = map[skill.type] || ['技能', skill.name || '特殊攻击', '建议注意'];
       currentEnemy._nextIntent = { type: 'skill', icon: skill.icon || '✦', label, suggestion, detail: `${skill.name || '技能'} · ${detail}`, skill };
@@ -519,7 +530,8 @@ function useEnemySkill(skill) {
   }
   if ((skill.type === 'damageStatus' || skill.type === 'damageDebuff') && skill.status) {
     addPlayerDebuff({ ...skill.status, sourceAtk: currentEnemy.atk });
-    combatLog(`${skill.status.type === 'poison' ? '☠️ 毒素' : '🔥 灼烧'}缠身 ${skill.status.turns || 2} 回合`, skill.color || '#ff8844');
+    const dotDmg = Math.max(1, Math.floor((currentEnemy?.atk || 1) * (skill.status.ratio || 0.08)));
+    combatLog(`${skill.status.type === 'poison' ? '☠️ 中毒' : '🔥 灼烧'} ${skill.status.turns || 2} 回合，每回合损失 ${dotDmg} 生命`, skill.color || '#ff8844');
   }
   if ((skill.type === 'damageStatus' || skill.type === 'damageDebuff') && skill.debuff) {
     addPlayerDebuff({ ...skill.debuff });

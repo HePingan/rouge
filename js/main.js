@@ -5045,7 +5045,9 @@ function generateNewFloor() {
     };
     const statusChipsHtml = (list = []) => (list || []).slice(0, 5).map(st => {
       const [icon, label] = statusLabelMap[st.type] || ['✦', st.type || '状态'];
-      return `<span class="cbt-status-chip status-${cssClassToken(st.type || 'x')}">${escapeHtml(icon)}${escapeHtml(label)}<em>${escapeHtml(st.turns || 1)}</em></span>`;
+      const dotDmg = (st.type === 'poison' || st.type === 'burn') ? Math.max(1, Math.floor((Number(st.sourceAtk || currentEnemy?.atk || 1)) * (Number(st.ratio || 0.08)))) : 0;
+      const statusTitle = dotDmg ? `${label}${st.turns || 1}回合 · 每回合损失${dotDmg}生命` : `${label}${st.turns || 1}回合`;
+      return `<span class="cbt-status-chip status-${cssClassToken(st.type || 'x')}" title="${escapeHtml(statusTitle)}">${escapeHtml(icon)}${escapeHtml(label)}<em>${escapeHtml(st.turns || 1)}</em>${dotDmg ? `<small>-${escapeHtml(dotDmg)}/回</small>` : ''}</span>`;
     }).join('');
     const enemyStatusHtml = statusChipsHtml(currentEnemy._statusEffects || []);
     const playerStatusHtml = statusChipsHtml(player._statusEffects || []);
