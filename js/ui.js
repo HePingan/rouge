@@ -72,7 +72,8 @@ function getHudNextStepHint(player) {
 }
 
 function updateHUD(player, dungeonLevel) {
-  setTextIfChanged(document.getElementById('hud-realm'), `境界: ${player.realm.name}`);
+  const realmName = player?.realm?.name || (typeof REALMS !== 'undefined' && REALMS?.[player?.realmIndex]?.name) || '未知境界';
+  setTextIfChanged(document.getElementById('hud-realm'), `境界: ${realmName}`);
   const nextStepEl = document.getElementById('hud-next-step');
   setTextIfChanged(nextStepEl, getHudNextStepHint(player));
   const skillClaimCount = typeof getSkillCodexSummary === 'function' ? (getSkillCodexSummary().claimableCount || 0) : 0;
@@ -118,7 +119,8 @@ function updateHUD(player, dungeonLevel) {
   // Stat bars
   const hpPct = player.maxHp > 0 ? (player.hp / player.maxHp * 100) : 0;
   const mpPct = player.maxMp > 0 ? (player.mp / player.maxMp * 100) : 0;
-  const xpNeeded = player.realm.xpNeeded || 100;
+  const realmForXp = player?.realm || (typeof REALMS !== 'undefined' && REALMS?.[player?.realmIndex]) || {};
+  const xpNeeded = realmForXp.xpNeeded || 100;
   const xpPct = xpNeeded > 0 ? (player.xp / xpNeeded * 100) : 0;
 
   setWidthIfChanged(document.getElementById('hp-fill'), hpPct + '%');
