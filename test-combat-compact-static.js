@@ -7,7 +7,7 @@ const combat = fs.readFileSync('js/combat.js', 'utf8');
 const skills = fs.readFileSync('js/skills.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260605combatp3';
+const CURRENT_TOKEN = '20260606safearea1';
 
 assert(html.includes(CURRENT_TOKEN), 'index cachebuster should include current combat compact token');
 assert(combat.includes('function generateEnemyIntent'), 'enemy intent generation helper missing');
