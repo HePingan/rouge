@@ -81,6 +81,13 @@ function combatLog(text, color = '#d4c8b0') {
 function equipmentAbilityValue(key) {
   return typeof getEquipmentAbility === 'function' ? Number(getEquipmentAbility(key) || 0) : 0;
 }
+function getEquippedTraitCombatHint(traitId) {
+  const item = Object.values(player?.equipment || {}).find(eq => eq?.trait?.id === traitId);
+  return item ? { item, trait: item.trait, stats: item.traitStats || {} } : null;
+}
+function formatCombatPercentBonus(value) {
+  return `${Math.round(Number(value || 0))}%`;
+}
 function activeArtifactIdForCombat(p = player) {
   return (typeof getActiveArtifact === 'function' && getActiveArtifact(p)?.id) || null;
 }
@@ -190,7 +197,9 @@ function playerAttack() {
   const buffDefMult = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
   const effectiveDef = Math.max(0, Math.floor(currentEnemy.def * buffDefMult * defMult * (1 - Math.min(0.85, pierce))));
   let baseDmg = Math.max(1, player.atk - effectiveDef);
-  if (currentEnemy.isBoss) baseDmg = Math.floor(baseDmg * (1 + equipmentAbilityValue('bossDmg') / 100));
+  const poJunTrait = currentEnemy.isBoss ? getEquippedTraitCombatHint('pojun') : null;
+  const bossDmgBonus = currentEnemy.isBoss ? equipmentAbilityValue('bossDmg') : 0;
+  if (currentEnemy.isBoss) baseDmg = Math.floor(baseDmg * (1 + bossDmgBonus / 100));
   const affinityMult = typeof getEnemyAffinityMultiplier === 'function' ? getEnemyAffinityMultiplier(currentEnemy, 'sword') : 1;
   const affinityText = typeof getSkillAffinityText === 'function' ? getSkillAffinityText({ tree: 'sword' }, currentEnemy) : '';
   const critBonus = (typeof getPassiveCritBonus === 'function' ? getPassiveCritBonus() : 0) + equipmentAbilityValue('crit') / 100;
@@ -210,7 +219,9 @@ function playerAttack() {
     const ey = currentEnemy.y * CELL_SIZE + CELL_SIZE / 2;
     notifyArtifactTrigger({ label: effect.label, icon: effect.icon || '🗡️', color: effect.color || '#ffdd66', text: `追加 ${effect.damage} 点伤害`, worldX: ex, worldY: ey });
   }
-  combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}${affinityText ? `（${affinityText}）` : ''}`, '#ffaa44');
+  const traitText = poJunTrait && bossDmgBonus > 0 ? `（${poJunTrait.trait?.icon || '⚔️'}${poJunTrait.trait?.name || '破军'}首领伤害+${formatCombatPercentBonus(bossDmgBonus)}）` : '';
+  combatLog(`你攻击 ${currentEnemy.name}，造成 ${dmg} 点伤害${crit ? ' 💥暴击！' : ''}${pierce > 0 || defMult < 1 ? '（破防）' : ''}${affinityText ? `（${affinityText}）` : ''}${traitText}`, '#ffaa44');
+  if (typeof renderCombatDomPanel === 'function') { if (typeof combatDomRenderCacheKey !== 'undefined') combatDomRenderCacheKey = ''; renderCombatDomPanel(); }
   if (typeof applyPassiveAfterPlayerHit === 'function') applyPassiveAfterPlayerHit(dmg, crit);
   if (typeof applySynergyAfterPlayerHit === 'function') applySynergyAfterPlayerHit(dmg, crit, null);
   applyEquipmentOnHitEffects(dmg, crit);
