@@ -5,7 +5,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea1';
+const CURRENT_TOKEN = '20260606safearea2';
 const PREVIOUS_TOKEN = '20260530stageclose1';
 
 assert(css.includes(`Mobile Stage Footer Readability + Scroll Fix 20260531resonance1`), 'stage top overlay CSS marker should be current');

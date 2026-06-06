@@ -5,7 +5,7 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea1';
+const CURRENT_TOKEN = '20260606safearea2';
 const PREVIOUS_TOKEN = '20260527invfix' + '1';
 
 assert(main.includes("emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上'"), 'empty detail hint should mention equip instead of sell/decompose');

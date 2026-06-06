@@ -9,7 +9,7 @@ const save = fs.readFileSync('js/save.js', 'utf8');
 const stages = fs.readFileSync('js/stages.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea1';
+const CURRENT_TOKEN = '20260606safearea2';
 
 assert(index.includes(`js/ascension.js?v=${CURRENT_TOKEN}`), 'index loads ascension.js with current cachebuster');
 assert(asc.includes('function normalizeAscensionState'), 'ascension state normalizer exists');
