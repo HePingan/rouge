@@ -1,6 +1,6 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-bottom: max(24px, env(safe-area-inset-bottom, 0px));
   --safe-top: env(safe-area-inset-top, 0px);
   --panel-bg: rgba(10,5,20,0.86);
   --panel-border: rgba(200,180,150,0.22);
