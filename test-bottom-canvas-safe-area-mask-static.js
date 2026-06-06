@@ -8,6 +8,7 @@ assert(main.includes('function drawBottomSafeAreaCanvasMask()'), 'main.js should
 assert(main.includes("g.addColorStop(0.22, 'rgba(36,56,86,0.88)')"), 'canvas bottom mask should use visible blue-purple gradient');
 assert(main.includes('ctx.fillRect(0, y, canvasW, h);'), 'canvas bottom mask should cover full width');
 assert(main.includes('drawBottomSafeAreaCanvasMask();\n    drawParticlesDom(camera);'), 'canvas bottom mask should run late in the render loop after normal canvas UI');
+assert(smokeHtml.includes('index.html?v=20260606safearea6&smoke=bottom-canvas-safe-area'), 'browser smoke iframe should load the current cachebuster token explicitly');
 assert(smokeHtml.includes('getImageData(0, h - bandHeight, w, bandHeight)'), 'browser smoke should inspect the rendered canvas bottom pixel band');
 assert(smokeHtml.includes('darkPct === 0'), 'browser smoke should fail if the bottom strip contains dark/black pixels');
 assert(smokeHtml.includes('navHitOk') && smokeHtml.includes("doc.elementFromPoint"), 'browser smoke should prove the bottom nav remains above the mask and hit-testable');
