@@ -16,4 +16,5 @@ assert(css.includes('#touch-controls { z-index: 33 !important; pointer-events: n
 assert(smokeHtml.includes('stageButtonBottomGap >= 30'), 'bottom canvas smoke should require nav to stay at least 30px above the phone bottom gesture area');
 assert(smokeHtml.includes('overflowX <= 0') && smokeHtml.includes('errors.length === 0'), 'bottom canvas smoke should guard horizontal overflow and console errors');
 assert(smokeHtml.includes('darkPct === 0') && smokeHtml.includes('bottom20Avg'), 'bottom canvas smoke should sample bottom canvas pixels, not only CSS strings');
+assert(smokeHtml.includes('maskAboveCanvas') && smokeHtml.includes('navAboveMask') && smokeHtml.includes('touchAboveMask') && smokeHtml.includes('zIndex'), 'bottom canvas smoke should verify mask/nav/touch z-index ordering, not only visibility');
 console.log('bottom safe-area strip static passed');

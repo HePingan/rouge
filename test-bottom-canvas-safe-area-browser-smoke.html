@@ -72,11 +72,19 @@
       const stageOpen = doc.body.classList.contains('stage-open') || !!doc.querySelector('#stage-dom-panel:not([style*="display: none"])');
       const bodyMask = win.getComputedStyle(doc.body, '::after');
       const gameMask = win.getComputedStyle(doc.querySelector('#game-container'), '::after');
+      const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
+      const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
+      const gameMaskZ = Number.parseInt(gameMask.zIndex, 10) || 0;
+      const menuZ = Number.parseInt(win.getComputedStyle(menuBar).zIndex, 10) || 0;
+      const touchZ = Number.parseInt(win.getComputedStyle(doc.querySelector('#touch-controls')).zIndex, 10) || 0;
+      const maskAboveCanvas = bodyMaskZ > canvasZ && gameMaskZ > canvasZ;
+      const navAboveMask = menuZ > bodyMaskZ && menuZ > gameMaskZ;
+      const touchAboveMask = touchZ > bodyMaskZ && touchZ > gameMaskZ;
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
       const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && maskAboveCanvas && navAboveMask && touchAboveMask && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -86,6 +94,10 @@
         allCurrent,
         bodyMaskDisplay: bodyMask.display,
         gameMaskDisplay: gameMask.display,
+        zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ },
+        maskAboveCanvas,
+        navAboveMask,
+        touchAboveMask,
         navHitOk,
         joyHitOk,
         quickHitOk,
