@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const index = fs.readFileSync('index.html', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
+const smokeHtml = fs.readFileSync('test-bottom-canvas-safe-area-browser-smoke.html', 'utf8');
 
 assert(index.includes('viewport-fit=cover'), 'viewport meta should opt into covering the mobile safe-area instead of leaving a black bottom strip');
 assert(index.includes('<meta name="theme-color" content="#243856">'), 'browser/system bottom bar should be tinted to the brighter game background instead of default black');
@@ -12,4 +13,7 @@ assert(css.includes('height: 100dvh'), 'game container should fill the dynamic v
 assert(css.includes('bottom: var(--menu-bottom)'), 'menu should stay above the safe-area via menu-bottom token');
 assert(css.includes('bottom: var(--control-bottom)'), 'touch controls should stay above the safe-area via control-bottom token');
 assert(css.includes('#touch-controls { z-index: 33 !important; pointer-events: none !important; }') && css.includes('#joystick-zone { z-index: 33 !important; pointer-events: auto !important; }'), 'touch controls shell should not block nav while joystick renders above the bottom mask');
+assert(smokeHtml.includes('stageButtonBottomGap >= 30'), 'bottom canvas smoke should require nav to stay at least 30px above the phone bottom gesture area');
+assert(smokeHtml.includes('overflowX <= 0') && smokeHtml.includes('errors.length === 0'), 'bottom canvas smoke should guard horizontal overflow and console errors');
+assert(smokeHtml.includes('darkPct === 0') && smokeHtml.includes('bottom20Avg'), 'bottom canvas smoke should sample bottom canvas pixels, not only CSS strings');
 console.log('bottom safe-area strip static passed');

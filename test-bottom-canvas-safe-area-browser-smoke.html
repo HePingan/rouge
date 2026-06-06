@@ -52,6 +52,7 @@
       const stageButton = doc.querySelector('#btn-stages');
       if (!menuBar || !stageButton) return fail('bottom nav missing');
       const stageRect = stageButton.getBoundingClientRect();
+      const stageButtonBottomGap = Math.round(win.innerHeight - stageRect.bottom);
       const joystick = doc.querySelector('#joystick-zone');
       const quickButton = doc.querySelector('#btn-stage-quick-clear');
       if (!joystick) return fail('joystick missing');
@@ -75,7 +76,7 @@
       const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && navHitOk && joyHitOk && quickHitOk && stageOpen,
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -90,6 +91,7 @@
         quickHitOk,
         quickVisible,
         stageOpen,
+        stageButtonBottomGap,
         stageButtonRect: { left: Math.round(stageRect.left), top: Math.round(stageRect.top), right: Math.round(stageRect.right), bottom: Math.round(stageRect.bottom) },
         joystickRect: { left: Math.round(joyRect.left), top: Math.round(joyRect.top), right: Math.round(joyRect.right), bottom: Math.round(joyRect.bottom) },
         hitTag: navHit?.id || navHit?.className || navHit?.tagName || '',
