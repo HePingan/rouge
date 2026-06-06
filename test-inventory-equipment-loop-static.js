@@ -9,7 +9,7 @@ assert(main.includes('data-char-open-inventory-slot'), 'empty character equipmen
 assert(main.includes('let inventorySlotFilter'), 'inventory slot filter state should exist');
 assert(main.includes("inventoryListHtmlCacheKeyDom = ''"), 'inventory list cache should be invalidatable');
 assert(/return `\$\{inventorySortMode\}:\$\{inventorySlotFilter \|\| 'all'\}/.test(main), 'inventory list cache key should include slot filter');
-assert(/\.filter\(entry => !inventorySlotFilter \|\| entry\.item\?\.slot === inventorySlotFilter\)/.test(main), 'inventory entries should be filtered by slot');
+assert(/\.filter\(entry => .*inventorySlotFilter.*entry\.item\?\.slot === inventorySlotFilter/.test(main), 'inventory entries should be filtered by slot');
 assert(main.includes('data-clear-slot-filter'), 'inventory filtered view should expose clear filter control');
 assert(main.includes('data-confirm-equip-index'), 'inventory compare route should expose confirm equip action');
 assert(main.includes("popPanelFromStack('inventory')") && main.includes("pushPanelToStack('character')"), 'confirmed equip should return from inventory to character panel');

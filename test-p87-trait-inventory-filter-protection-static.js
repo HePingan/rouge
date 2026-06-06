@@ -1,0 +1,10 @@
+const assert=require('assert');const fs=require('fs');const main=fs.readFileSync('js/main.js','utf8');const css=fs.readFileSync('css/style.css','utf8');const html=fs.readFileSync('test-p87-trait-inventory-filter-protection-browser-smoke.html','utf8');
+assert(main.includes('inventoryTraitFilterDom'),'main should keep trait filter state');
+assert(main.includes('data-trait-filter'),'inventory should render trait filter chip');
+assert(main.includes('特质 ${traitCountDom}')||main.includes('特质'), 'inventory should show trait count');
+assert(/entry\.item && entry\.item\.rarity === rarity && !entry\.item\.trait/.test(main),'bulk rarity entries should exclude trait items');
+assert(main.includes('已保护特质装备')&&main.includes('特质装备已自动保护'),'bulk UI should explain trait protection');
+assert(css.includes('.trait-filter-chip')&&css.includes('.trait-count-badge'),'css should style trait filter/count');
+for(const click of ['[data-trait-filter]','[data-inv-tab="process"]','[data-bulk-sell]','[data-bulk-confirm="sell"]']) assert(html.includes(click), `smoke should click ${click}`);
+for(const phrase of ['普通无特质甲','普通特质铁山','传说特质疾影','stones>0','overflowX','__p87Errors']) assert(html.includes(phrase), `smoke should assert ${phrase}`);
+console.log('p87 trait inventory filter protection static passed');

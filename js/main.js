@@ -61,6 +61,7 @@ if (typeof SECRET_REALMS === 'undefined') console.error('[致命] secretRealms.j
     let selectedTribulationId = 'minor';
     let inventoryTab = 'equipment';
     let inventoryBulkConfirm = null;
+    let inventoryTraitFilterDom = false;
     let inventoryDetailScrollKey = '';
     let selectedSkillTreeNode = null;
     let skillDetailModalOpen = false;
@@ -547,13 +548,13 @@ function escapeHtml(value) {
     ].join('|');
   }
   function inventoryItemsVersionDom() {
-    return `${inventorySortMode}:${inventorySlotFilter || 'all'}:${(player?.inventory || []).map(inventoryItemStableKeyDom).join('~')}`;
+    return `${inventorySortMode}:${inventorySlotFilter || 'all'}:${inventoryTraitFilterDom ? 'trait' : 'all-traits'}:${(player?.inventory || []).map(inventoryItemStableKeyDom).join('~')}`;
   }
   function sortedInventoryEntriesDom() {
     return (player?.inventory || []).map((item, index) => {
       if (item && typeof rebuildEquipmentStats === 'function') rebuildEquipmentStats(item);
       return { item, index, power: itemPowerDom(item), rarityRank: rarityRankDom(item?.rarity), floor: Number(item?.floorLevel) || 0 };
-    }).filter(entry => !inventorySlotFilter || entry.item?.slot === inventorySlotFilter).sort((a, b) => {
+    }).filter(entry => (!inventorySlotFilter || entry.item?.slot === inventorySlotFilter) && (!inventoryTraitFilterDom || !!entry.item?.trait)).sort((a, b) => {
       if (inventorySortMode === 'rarity') {
         const rarityDiff = b.rarityRank - a.rarityRank;
         if (rarityDiff) return rarityDiff;
@@ -578,7 +579,7 @@ function escapeHtml(value) {
       const targetIndex = Number(inventoryDetailTarget?.index);
       const active = (inventoryDetailTarget?.type === 'bag' || inventoryDetailTarget?.type === 'compare') && targetIndex === index;
       return drawBagItemCardDom(item, index, active);
-    }).join('') : `<div class="empty-note">${escapeHtml(inventorySlotFilter ? `暂无${SLOT_NAMES?.[inventorySlotFilter]?.name || inventorySlotFilter}装备` : '暂无装备，击败怪物可掉落')}</div>`;
+    }).join('') : `<div class="empty-note">${escapeHtml(inventoryTraitFilterDom ? '暂无特质装备' : (inventorySlotFilter ? `暂无${SLOT_NAMES?.[inventorySlotFilter]?.name || inventorySlotFilter}装备` : '暂无装备，击败怪物可掉落'))}</div>`;
     return inventoryListHtmlCacheDom;
   }
   function invalidateInventoryListCacheDom() {
@@ -675,7 +676,7 @@ function escapeHtml(value) {
   }
   function inventoryItemsByRarityDom(rarity) {
     if (!player?.inventory) return [];
-    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item && entry.item.rarity === rarity);
+    return player.inventory.map((item, index) => ({ item, index })).filter(entry => entry.item && entry.item.rarity === rarity && !entry.item.trait);
   }
   function bulkBreakdownTotalDom(entries) {
     const totalGains = {};
@@ -687,11 +688,12 @@ function escapeHtml(value) {
   }
   function bulkPreviewDom(rarity = inventoryBulkRarity) {
     const entries = inventoryItemsByRarityDom(rarity);
+    const protectedTraitCount = (player?.inventory || []).filter(item => item?.rarity === rarity && item?.trait).length;
     const sellValue = entries.reduce((sum, entry) => sum + itemSellValueDom(entry.item), 0);
     const gains = bulkBreakdownTotalDom(entries);
     const power = entries.reduce((sum, entry) => sum + itemPowerDom(entry.item), 0);
     const names = entries.slice(0, 4).map(entry => entry.item?.name || '装备');
-    return { rarity, entries, count: entries.length, sellValue, gains, power, names };
+    return { rarity, entries, count: entries.length, protectedTraitCount, sellValue, gains, power, names };
   }
   function bulkPreviewHtmlDom(preview, mode = inventoryBulkMode) {
     const count = Number(preview?.count || 0);
@@ -719,7 +721,7 @@ function escapeHtml(value) {
       ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
       ${count ? `<div class="bulk-preview-meta"><span>总战力 ${escapeHtml(preview?.power || 0)}</span><span>${escapeHtml(sample)}</span></div>` : ''}
       <button class="bulk-primary ${escapeHtml(mode)}" type="button" data-bulk-${isSell ? 'sell' : 'decompose'}="1" ${count ? '' : 'disabled'}>${count ? `确认${action}（${count}件）` : `无可${action}装备`}</button>
-      <div class="bulk-safe-tip">仅处理背包库存；已穿装备不会受影响。</div>
+      <div class="bulk-safe-tip">仅处理背包库存；已穿装备不会受影响。${Number(preview?.protectedTraitCount || 0) ? `已保护特质装备 ${escapeHtml(preview.protectedTraitCount)} 件。` : '特质装备不会被批量处理。'}</div>
     </div>`;
   }
   function openBulkConfirmDom(mode, rarity) {
@@ -769,7 +771,7 @@ function escapeHtml(value) {
         <div class="bulk-confirm-reward"><span>预计获得</span><b>${rewardHtml}</b></div>
         ${rewardDetail ? `<div class="bulk-reward-detail">${rewardDetail}</div>` : ''}
         <div class="bulk-confirm-list">${sample}</div>
-        <div class="bulk-warning">操作后装备会从背包移除，请确认这些品质装备都不需要保留。</div>
+        <div class="bulk-warning">操作后装备会从背包移除；特质装备已自动保护，不会被批量处理。</div>
         <div class="bulk-confirm-actions">
           <button type="button" class="bulk-cancel" data-bulk-cancel="1">取消</button>
           <button type="button" class="bulk-confirm-btn ${isSell ? 'sell' : 'decompose'}" data-bulk-confirm="${escapeHtml(mode)}">确认${isSell ? '售卖' : '分解'} · ${isSell ? preview.sellValue + ' 灵石' : materialTextDom(preview.gains)}</button>
@@ -1290,6 +1292,7 @@ function escapeHtml(value) {
     const closest = sel => target.closest(sel);
     if (closest('[data-inv-tab]')) { e.preventDefault(); e.stopPropagation(); inventoryTab = closest('[data-inv-tab]').dataset.invTab || 'equipment'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
     if (closest('[data-clear-slot-filter]')) { e.preventDefault(); e.stopPropagation(); inventorySlotFilter = ''; inventoryDetailTarget = null; invalidateInventoryListCacheDom(); renderInventoryDomPanel(); return; }
+    if (closest('[data-trait-filter]')) { e.preventDefault(); e.stopPropagation(); inventoryTraitFilterDom = !inventoryTraitFilterDom; inventoryDetailTarget = null; invalidateInventoryListCacheDom(); renderInventoryDomPanel(); return; }
     if (closest('[data-bag-sort]')) { e.preventDefault(); e.stopPropagation(); const mode = closest('[data-bag-sort]').dataset.bagSort || 'power'; if (inventorySortMode === mode) return; inventorySortMode = mode; inventoryDetailTarget = null; scheduleInventoryRenderDom('sort'); return; }
     if (closest('[data-bulk-rarity-chip]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkRarity = closest('[data-bulk-rarity-chip]').dataset.bulkRarityChip || inventoryBulkRarity; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
     if (closest('[data-bulk-mode]')) { e.preventDefault(); e.stopPropagation(); inventoryBulkMode = closest('[data-bulk-mode]').dataset.bulkMode || 'sell'; inventoryBulkConfirm = null; renderInventoryDomPanel(); return; }
@@ -1308,12 +1311,16 @@ function escapeHtml(value) {
     const bulkSummary = panel.querySelector('.bulk-summary');
     const inventoryCapacity = typeof getInventoryCapacity === 'function' ? getInventoryCapacity(player) : 36;
     const nextCapacityUnlock = typeof getNextInventoryCapacityUnlock === 'function' ? getNextInventoryCapacityUnlock(player) : null;
-    panel.querySelector('.bag-title').innerHTML = `装备库存 <span class="cap-num">${player.inventory.length}</span>/<span class="cap-max">${inventoryCapacity}</span><span class="cap-bar"><span class="cap-fill${player.inventory.length >= inventoryCapacity ? ' full' : ''}" style="width:${Math.min(100, (player.inventory.length / inventoryCapacity) * 100).toFixed(1)}%"></span></span>`;
+    const traitCountDom = (player.inventory || []).filter(item => item?.trait).length;
+    panel.querySelector('.bag-title').innerHTML = `装备库存 <span class="cap-num">${player.inventory.length}</span>/<span class="cap-max">${inventoryCapacity}</span><span class="trait-count-badge${traitCountDom ? '' : ' empty'}">特质 ${traitCountDom}</span><span class="cap-bar"><span class="cap-fill${player.inventory.length >= inventoryCapacity ? ' full' : ''}" style="width:${Math.min(100, (player.inventory.length / inventoryCapacity) * 100).toFixed(1)}%"></span></span>`;
     const filterWrap = panel.querySelector('.bag-slot-filter');
     if (filterWrap) {
       const filterName = inventorySlotFilter ? (SLOT_NAMES?.[inventorySlotFilter]?.name || inventorySlotFilter) : '';
-      filterWrap.innerHTML = inventorySlotFilter ? `<span>筛选：${escapeHtml(filterName)}</span><button type="button" data-clear-slot-filter="1" aria-label="清除${escapeHtml(filterName)}筛选" title="清除筛选，显示全部装备">全部装备</button>` : '';
-      filterWrap.classList.toggle('active', !!inventorySlotFilter);
+      const pieces = [];
+      if (inventorySlotFilter) pieces.push(`<span>筛选：${escapeHtml(filterName)}</span><button type="button" data-clear-slot-filter="1" aria-label="清除${escapeHtml(filterName)}筛选" title="清除筛选，显示全部装备">全部装备</button>`);
+      pieces.push(`<button type="button" class="trait-filter-chip${inventoryTraitFilterDom ? ' active' : ''}" data-trait-filter="1" aria-pressed="${inventoryTraitFilterDom ? 'true' : 'false'}" title="只看特质装备">特质 <b>${traitCountDom}</b></button>`);
+      filterWrap.innerHTML = pieces.join('');
+      filterWrap.classList.toggle('active', !!inventorySlotFilter || inventoryTraitFilterDom || traitCountDom > 0);
     }
     const invSub = panel.querySelector('.inv-sub');
     if (invSub) {
