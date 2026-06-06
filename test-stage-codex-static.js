@@ -20,7 +20,7 @@ assert(css.includes('.stage-codex'), 'codex css missing');
 assert(css.includes('.codex-stats'), 'codex stat css missing');
 const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
 assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');
-assert(linkedTokens.every(token => token === '20260606safearea2'), 'all linked assets should use current panel audit cachebuster');
+assert(linkedTokens.every(token => token === '20260606safearea3'), 'all linked assets should use current panel audit cachebuster');
 assert(!index.includes('20260527detailfix1'), 'index should not keep stale detailfix token');
 
 console.log('stage codex static ok');

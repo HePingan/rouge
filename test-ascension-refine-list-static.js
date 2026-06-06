@@ -23,6 +23,6 @@ for (const text of ['仙炼装备列表', '已装备', '背包', '可仙炼', '�
 mustInclude(css, 'asc-refine-list', 'refine list CSS missing');
 mustInclude(css, 'asc-refine-item', 'refine item CSS missing');
 const PREVIOUS_TOKEN = '20260525drain' + '3';
-assert(index.includes('20260606safearea2'), 'cachebuster should bump to drain4 for ascension refine list');
+assert(index.includes('20260606safearea3'), 'cachebuster should bump to drain4 for ascension refine list');
 assert(!index.includes(PREVIOUS_TOKEN), 'index should not keep stale drain3 token');
 console.log('ascension refine list static assertions passed');

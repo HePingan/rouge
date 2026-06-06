@@ -5,7 +5,7 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const indexHtml = fs.readFileSync('index.html', 'utf8');
 const mobileVerify = fs.readFileSync('mobile-verify.html', 'utf8');
-const CURRENT_TOKEN = '20260606safearea2';
+const CURRENT_TOKEN = '20260606safearea3';
 const STALE_STAGE_TOP_TOKEN = '20260530stagetop1';
 
 function sliceFunction(name, nextMarker) {

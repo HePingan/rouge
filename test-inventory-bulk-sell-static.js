@@ -12,7 +12,7 @@ assert(main.includes('allRarities.map(rarity => {'), 'bulk rarity chips should i
 assert(main.includes('data-bulk-rarity-chip="${escapeHtml(rarity)}"'), 'bulk chips should preserve exact rarity values for action routing');
 assert(main.includes('executeBulkInventoryActionDom(mode, rarity)'), 'confirm button should execute the selected bulk action');
 
-const CURRENT_TOKEN = '20260606safearea2';
+const CURRENT_TOKEN = '20260606safearea3';
 const PREVIOUS_TOKEN = '20260527bulk' + 'sell1';
 assert(html.includes(CURRENT_TOKEN), 'index cachebuster should use bulk sell fix token');
 assert(!html.includes(PREVIOUS_TOKEN), 'index cachebuster should be bumped from inventory cleanup token');

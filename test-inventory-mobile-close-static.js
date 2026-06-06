@@ -5,7 +5,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const main = fs.readFileSync('js/main.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
-const CURRENT_TOKEN = '20260606safearea2';
+const CURRENT_TOKEN = '20260606safearea3';
 
 assert(css.includes('Inventory Mobile Close Hitbox 20260604charclose1'), 'inventory close hitbox marker should document current polish pass');
 assert(/const closeFallback = e => \{[\s\S]*closest\('\.inv-close'\)[\s\S]*panel\.addEventListener\('pointerdown', closeFallback, \{ passive: false, capture: true \}\)[\s\S]*panel\.addEventListener\('touchstart', closeFallback, \{ passive: false, capture: true \}\)[\s\S]*panel\.addEventListener\('click', closeFallback, \{ capture: true \}\)/.test(main), 'inventory close should use capture-phase root fallback for real mobile taps before panel suppression');

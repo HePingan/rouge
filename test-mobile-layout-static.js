@@ -13,7 +13,7 @@ function mustMatch(label, regex) {
 }
 
 // Cache token must be bumped when mobile layout changes.
-const CURRENT_TOKEN = '20260606safearea2';
+const CURRENT_TOKEN = '20260606safearea3';
 assert(html.includes(CURRENT_TOKEN), 'index cachebuster should include current mobile layout token');
 assert(!html.includes('20260601skillstrip1'), 'index should not keep stale skill strip token');
 assert(!html.includes('20260530stageclose1'), 'index should not keep stale stage close token');
