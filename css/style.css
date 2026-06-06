@@ -2925,6 +2925,7 @@ body.panel-open #combat-dom-panel { opacity: 0; pointer-events: none; }
 .cbt-threat-line span { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; padding:2px 5px; border-radius:999px; background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.09); }
 .cbt-threat-line .weak { color:#9dffb8; border-color:rgba(157,255,184,.25); }
 .cbt-threat-line .resist { color:#ffb0b0; border-color:rgba(255,176,176,.25); }
+.cbt-threat-line .affix { color:var(--affix-color,#ffdd88); border-color:color-mix(in srgb, var(--affix-color,#ffdd88) 34%, transparent); background:color-mix(in srgb, var(--affix-color,#ffdd88) 12%, rgba(255,255,255,.055)); font-weight:900; }
 .cbt-intent { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:3px 7px; margin:2px 0 3px; padding:4px 7px; border-radius:9px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.085); color:#e8dfd4; font-size:10px; line-height:1.1; overflow:hidden; }
 .cbt-intent b { color:#a99bb8; font-size:9px; white-space:nowrap; }
 .cbt-intent .cbt-intent-main { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:900; }

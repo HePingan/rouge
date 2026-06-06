@@ -4929,7 +4929,7 @@ function generateNewFloor() {
     const isPlayerTurn = combatState === COMBAT_STATE.PLAYER_TURN;
     const feedbackKey = combatActionFeedback.until > Date.now() ? `${combatActionFeedback.id}:${combatActionFeedback.until}` : '';
     const cacheKey = [
-      currentEnemy.name, currentEnemy.title || '', Math.ceil(Number(currentEnemy.hp || 0)), Number(currentEnemy.maxHp || 0),
+      currentEnemy.name, currentEnemy.title || '', currentEnemy.affix?.id || '', Math.ceil(Number(currentEnemy.hp || 0)), Number(currentEnemy.maxHp || 0),
       Math.ceil(Number(player.hp || 0)), Number(player.maxHp || 0), Math.ceil(Number(player.mp || 0)), Number(player.maxMp || 0), player.def || 0,
       combatState, combatSkillDrawerOpen ? 1 : 0, feedbackKey, combatLogBuffer.slice(-6).map(l => `${l.seq}:${l.text}:${l.tone}:${l.color}`).join('|'),
       (currentEnemy._statusEffects || []).map(s => `${s.type}:${s.turns}`).join('|'),
@@ -4951,6 +4951,8 @@ function generateNewFloor() {
     const defenseHintHtml = defensePreview ? `<span class="cbt-defense-hint ${escapeHtml(defensePreview.tone || 'safe')}" title="预计受${escapeHtml(defensePreview.normal)}伤；防御后约${escapeHtml(defensePreview.defended)}伤">🛡️${escapeHtml(defensePreview.text)}</span>` : '';
     const enemyIntentHtml = enemyIntent ? `<div class="cbt-intent intent-${cssClassToken(enemyIntent.type || 'attack')}" title="${escapeHtml(enemyIntent.detail || '')}"><b>下回合</b><span class="cbt-intent-main">${escapeHtml(enemyIntent.icon || '⚔️')}${escapeHtml(enemyIntent.label || '普攻')}</span><div class="cbt-intent-hints">${suggestionHtml}${defenseHintHtml}</div></div>` : '';
     const enemyAffinity = typeof getEnemyAffinitySummary === 'function' ? getEnemyAffinitySummary(currentEnemy) : null;
+    const enemyAffix = currentEnemy.affix || null;
+    const enemyAffixHtml = enemyAffix ? `<span class="affix" style="--affix-color:${safeCssColor(enemyAffix.color, '#ffdd88')}" title="${escapeHtml(enemyAffix.note || '词缀妖物')}">${escapeHtml(enemyAffix.icon || '✦')}${escapeHtml(enemyAffix.label || '词缀')}</span>` : '';
     const enemyBuffDef = typeof getEnemyDefenseBuffMultiplier === 'function' ? getEnemyDefenseBuffMultiplier() : 1;
     const enemyBuffAtk = typeof getEnemyAttackBuffMultiplier === 'function' ? getEnemyAttackBuffMultiplier() : 1;
     const enemyAtkText = Math.floor(Number(currentEnemy.atk || 0) * enemyBuffAtk);
@@ -5026,7 +5028,7 @@ function generateNewFloor() {
     p.innerHTML = `<div class="cbt-topline">
       <div class="cbt-enemy-block">
         <div class="cbt-enemy-name">${escapeHtml(pEnemyName)}</div>
-        <div class="cbt-threat-line" title="${escapeHtml([enemySkillText !== '无' ? `技能：${enemySkillText}` : '', enemyAffinity?.text || ''].filter(Boolean).join(' · '))}">${enemyAffinity?.weakText ? `<span class="weak">弱${escapeHtml(enemyAffinity.weakText)}</span>` : ''}${enemyAffinity?.resistText ? `<span class="resist">抗${escapeHtml(enemyAffinity.resistText)}</span>` : ''}${enemySkills.length ? `<span>技${escapeHtml(enemySkills.length)}</span>` : ''}${!enemyAffinity?.weakText && !enemyAffinity?.resistText && !enemySkills.length ? '<span>常规妖物</span>' : ''}</div>
+        <div class="cbt-threat-line" title="${escapeHtml([enemyAffix?.note ? `词缀：${enemyAffix.note}` : '', enemySkillText !== '无' ? `技能：${enemySkillText}` : '', enemyAffinity?.text || ''].filter(Boolean).join(' · '))}">${enemyAffixHtml}${enemyAffinity?.weakText ? `<span class="weak">弱${escapeHtml(enemyAffinity.weakText)}</span>` : ''}${enemyAffinity?.resistText ? `<span class="resist">抗${escapeHtml(enemyAffinity.resistText)}</span>` : ''}${enemySkills.length ? `<span>技${escapeHtml(enemySkills.length)}</span>` : ''}${!enemyAffix && !enemyAffinity?.weakText && !enemyAffinity?.resistText && !enemySkills.length ? '<span>常规妖物</span>' : ''}</div>
       </div>
       <div class="cbt-turn ${isPlayerTurn ? 'player' : 'enemy'}">${isPlayerTurn ? '我方回合' : '敌方行动'}</div>
     </div>

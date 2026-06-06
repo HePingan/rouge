@@ -213,6 +213,36 @@ function getEnemySkills(enemy) {
   return (enemy?.skillIds || []).map(getMonsterSkill).filter(Boolean);
 }
 
+const ENEMY_AFFIXES = [
+  { id: 'raging', label: '狂暴', icon: '🔥', color: '#ff7744', hp: 1.12, atk: 1.22, def: 0.96, xp: 1.18, stones: 1.18, weakAdd: ['water'], note: '攻击更高，弱水' },
+  { id: 'armored', label: '玄甲', icon: '🛡️', color: '#c8d4ff', hp: 1.18, atk: 1.04, def: 1.35, xp: 1.20, stones: 1.20, weakAdd: ['thunder'], note: '防御更高，弱雷' },
+  { id: 'swift', label: '疾行', icon: '💨', color: '#aaddff', hp: 0.96, atk: 1.16, def: 1.02, xp: 1.16, stones: 1.16, resistAdd: ['wood'], note: '出手更凶，抗木' },
+];
+function getEnemyAffix(id) { return ENEMY_AFFIXES.find(a => a.id === id) || null; }
+function pickEnemyAffix(level, enemy = null, rng = Math.random) {
+  if (enemy?.isBoss) return null;
+  const chance = enemy?.isElite ? 0.85 : Math.min(0.34, 0.08 + Math.max(0, Number(level || 1) - 1) * 0.018);
+  if (rng() >= chance) return null;
+  return ENEMY_AFFIXES[Math.floor(rng() * ENEMY_AFFIXES.length)] || ENEMY_AFFIXES[0];
+}
+function applyEnemyAffix(enemy, affixId) {
+  const affix = typeof affixId === 'string' ? getEnemyAffix(affixId) : affixId;
+  if (!enemy || !affix || enemy.affix?.id === affix.id) return enemy;
+  const mul = (v, key) => Math.max(1, Math.floor(Number(v || 1) * Number(affix[key] || 1)));
+  enemy.affix = { id: affix.id, label: affix.label, icon: affix.icon, color: affix.color, note: affix.note };
+  enemy.name = `${affix.label}·${enemy.name}`;
+  enemy.title = `${affix.icon}${enemy.title || enemy.name}`;
+  enemy.maxHp = mul(enemy.maxHp || enemy.hp, 'hp');
+  enemy.hp = enemy.maxHp;
+  enemy.atk = mul(enemy.atk, 'atk');
+  enemy.def = mul(enemy.def, 'def');
+  enemy.xp = mul(enemy.xp, 'xp');
+  enemy.stones = mul(enemy.stones, 'stones');
+  enemy.weaknesses = [...new Set([...(enemy.weaknesses || []), ...(affix.weakAdd || [])])];
+  enemy.resists = [...new Set([...(enemy.resists || []), ...(affix.resistAdd || [])])];
+  return enemy;
+}
+
 const ENEMY_AFFINITY_LABELS = {
   fire: '火', water: '水', thunder: '雷', sword: '剑', wood: '木', earth: '土',
 };
@@ -274,7 +304,7 @@ function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0, extra 
   const skillIds = [...(template.skillIds || [])];
   if (isElite && !skillIds.includes('eliteFury')) skillIds.push('eliteFury');
   if (template.isBoss && !skillIds.includes('bossEnrage')) skillIds.push('bossEnrage');
-  return {
+  const enemy = {
     ...template,
     ...extra,
     name: isElite ? `精英·${template.name}` : template.name,
@@ -289,6 +319,9 @@ function createScaledEnemy(template, level, biomeMult = {}, x = 0, y = 0, extra 
     x,
     y,
   };
+  const affix = extra.affixId ? getEnemyAffix(extra.affixId) : (extra.affix === false ? null : pickEnemyAffix(level, enemy));
+  if (affix) applyEnemyAffix(enemy, affix);
+  return enemy;
 }
 
 function spawnMonsters(dungeonObj, level) {

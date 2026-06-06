@@ -58,8 +58,9 @@ function startCombat(enemy) {
   const mechanicText = bossMechanic ? ` · 机制：${bossMechanic.icon || '👑'}${bossMechanic.name}` : '';
   const affinity = typeof getEnemyAffinitySummary === 'function' ? getEnemyAffinitySummary(enemy) : null;
   const affinityText = affinity?.text && affinity.text !== '无明显克制' ? ` · ${affinity.text}` : '';
-  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : '#ff6644');
-  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${affinityText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : '#ff6644');
+  const affixText = enemy.affix?.label ? ` · 词缀：${enemy.affix.icon || '✦'}${enemy.affix.label}${enemy.affix.note ? `（${enemy.affix.note}）` : ''}` : '';
+  combatLog(`⚔️ ${enemy.title || enemy.name} 出现了！${affinityText}${affixText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff3333' : (enemy.affix?.color || '#ff6644'));
+  showMessage(`${enemy.isBoss ? '👑 ' : ''}${enemy.title || enemy.name} 挡住了去路！${affinityText}${affixText}${skillText}${mechanicText}`, enemy.isBoss ? '#ff2200' : (enemy.affix?.color || '#ff6644'));
   document.body.classList.add('combat-active');
   generateEnemyIntent();
 }
