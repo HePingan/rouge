@@ -1,0 +1,10 @@
+const assert=require('assert');const fs=require('fs');const loot=fs.readFileSync('js/loot.js','utf8');const main=fs.readFileSync('js/main.js','utf8');const css=fs.readFileSync('css/style.css','utf8');const html=fs.readFileSync('test-p82-equipment-trait-inventory-browser-smoke.html','utf8');
+assert(/const EQUIPMENT_TRAITS\s*=\s*\{/.test(loot),'equipment trait table should exist');
+['pojun','guiyuan','jiying','tieshan'].forEach(id=>assert(loot.includes(`${id}:`),`missing trait ${id}`));
+assert(/function pickEquipmentTrait/.test(loot)&&/function applyEquipmentTrait/.test(loot),'trait pick/apply helpers should exist');
+assert(/options\.traitId/.test(loot)&&/pickEquipmentTrait\(rarity\.name, floorLevel\)/.test(loot),'generateEquipment should support forced/random trait');
+assert(/item\.traitStats/.test(loot)&&/stats\[traitStat\]/.test(loot),'rebuildEquipmentStats should include trait stats');
+assert(/bag-trait-badge/.test(main)&&/function itemTraitHtmlDom/.test(main)&&/trait-panel/.test(main),'inventory should render trait badge and detail panel');
+assert(/#inventory-dom-panel \.bag-trait-badge/.test(css)&&/\.trait-panel/.test(css),'trait CSS should exist');
+assert(html.includes("traitId:'pojun'")&&html.includes('data-confirm-equip-index')&&html.includes('bossDmg'),'P82 smoke should force trait, confirm equip, and verify stat');
+console.log('p82 equipment trait static passed');

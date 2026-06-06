@@ -323,6 +323,40 @@ function equipmentSlotKeys() {
   return EQUIPMENT_SLOT_ORDER.slice();
 }
 
+const EQUIPMENT_TRAITS = {
+  pojun: { name: '破军', icon: '⚔️', color: '#ff8a55', minRarity: '传说', weight: 30, stats: { bossDmg: 5 }, perFloor: { bossDmg: 0.22 }, desc: '首领伤害提升' },
+  guiyuan: { name: '归元', icon: '💧', color: '#88ddff', minRarity: '稀有', weight: 28, stats: { mpRegen: 2 }, perFloor: { mpRegen: 0.08 }, desc: '回元更稳' },
+  jiying: { name: '疾影', icon: '💨', color: '#c8f7ff', minRarity: '稀有', weight: 24, stats: { speed: 1, dodge: 2 }, perFloor: { dodge: 0.08 }, desc: '速度与闪避提升' },
+  tieshan: { name: '铁山', icon: '⛰️', color: '#d8d8ff', minRarity: '稀有', weight: 26, stats: { dmgReduce: 2 }, perFloor: { dmgReduce: 0.10 }, desc: '减伤更高' },
+};
+function getEquipmentTrait(id) { const trait = EQUIPMENT_TRAITS?.[id]; return trait ? { id, ...trait } : null; }
+function getEquipmentTraitStats(trait, floorLevel = 1) {
+  const out = {};
+  const floor = Math.max(1, Number(floorLevel || 1));
+  for (const [stat, value] of Object.entries(trait?.stats || {})) {
+    const growth = Number(trait?.perFloor?.[stat] || 0) * Math.max(0, floor - 1);
+    out[stat] = Math.max(1, Math.floor(Number(value || 0) + growth));
+  }
+  return out;
+}
+function pickEquipmentTrait(rarityName, floorLevel = 1, rng = Math.random) {
+  const rank = rarityRank(rarityName || '普通');
+  if (rank < rarityRank('稀有')) return null;
+  const chance = Math.min(0.45, 0.10 + rank * 0.055 + Math.max(0, Number(floorLevel || 1) - 1) * 0.006);
+  if (rng() > chance) return null;
+  const pool = Object.entries(EQUIPMENT_TRAITS).filter(([, trait]) => rank >= rarityRank(trait.minRarity || '稀有')).map(([id, trait]) => ({ id, ...trait }));
+  return weightedPick(pool, 'weight');
+}
+function applyEquipmentTrait(item, traitId, floorLevel = item?.floorLevel || 1) {
+  const trait = typeof traitId === 'string' ? getEquipmentTrait(traitId) : traitId;
+  if (!item || !trait || item.trait?.id === trait.id) return item;
+  const id = trait.id || Object.entries(EQUIPMENT_TRAITS).find(([, v]) => v === trait)?.[0];
+  item.trait = { id, name: trait.name, icon: trait.icon, color: trait.color, desc: trait.desc };
+  item.traitStats = getEquipmentTraitStats(trait, floorLevel);
+  item.name = `${trait.name}·${item.name}`;
+  return item;
+}
+
 const MAX_EQUIPMENT_ENHANCE_LEVEL = 30;
 function getCurrentEquipmentEnhanceCap() {
   return typeof getRealmEnhanceCap === 'function' ? getRealmEnhanceCap(player?.realmIndex || 0) : MAX_EQUIPMENT_ENHANCE_LEVEL;
@@ -380,6 +414,9 @@ function rebuildEquipmentStats(item) {
   item.enhanceLevel = level;
   item.enhanceBonus = bonusValue > 0 ? { [stat]: bonusValue } : {};
   if (bonusValue > 0) stats[stat] = Number(stats[stat] || 0) + bonusValue;
+  for (const [traitStat, traitValue] of Object.entries(item.traitStats || {})) {
+    stats[traitStat] = Number(stats[traitStat] || 0) + Number(traitValue || 0);
+  }
   if (item.immortalRefined) {
     const refinedPower = Number(item.immortalRefinePower || item.immortalPowerBonus || item.stats?.immortalPower || 0);
     stats.immortalPower = Number(stats.immortalPower || 0) + Math.max(1, refinedPower);
@@ -569,6 +606,8 @@ function generateEquipment(floorLevel = 1, options = {}) {
     setIcon: set?.icon || null,
     floorLevel: floorLevel,
   };
+  const trait = options.traitId === false ? null : (options.traitId ? getEquipmentTrait(options.traitId) : pickEquipmentTrait(rarity.name, floorLevel));
+  if (trait) applyEquipmentTrait(item, trait, floorLevel);
   return rebuildEquipmentStats(item);
 }
 

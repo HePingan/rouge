@@ -858,12 +858,13 @@ function escapeHtml(value) {
     const power = itemPowerDom(item);
     const delta = itemPowerDeltaDom(item);
     const primaryStats = itemPrimaryStatsHtmlDom(item, 2);
+    const traitBadge = item?.trait ? `<span class="bag-trait-badge" style="--trait-color:${escapeHtml(item.trait.color || color)}">${escapeHtml(item.trait.icon || '✦')}${escapeHtml(item.trait.name || '特质')}</span>` : '';
     const floorText = item?.floorLevel ? `${item.floorLevel}层` : (item?.subType || typeName);
     return `<button class="bag-item-card scan-card${active ? ' active' : ''}" type="button" data-index="${index}" aria-label="查看${escapeHtml(name)}详情，战力${escapeHtml(power)}，${escapeHtml(delta.text)}" title="${escapeHtml(name)}" style="--rarity-color:${escapeHtml(color)}">
       <div class="bag-icon"><span>${escapeHtml(itemIconDom(item))}</span><i>${escapeHtml(rarityShortDom(item.rarity))}</i></div>
       ${level > 0 ? `<span class="enhance-badge">+${level}</span>` : ''}
       <span class="bag-slot-tag">${escapeHtml(typeName.slice(0, 1))}</span>
-      <div class="bag-main"><div class="bag-name-row"><b>${escapeHtml(item.name || '装备')}</b></div><div class="bag-meta"><span>${escapeHtml(typeName)}</span><em>${escapeHtml(floorText)}</em></div></div>
+      <div class="bag-main"><div class="bag-name-row"><b>${escapeHtml(item.name || '装备')}</b>${traitBadge}</div><div class="bag-meta"><span>${escapeHtml(typeName)}</span><em>${escapeHtml(floorText)}</em></div></div>
       <div class="bag-power"><b>战力 ${escapeHtml(power)}</b><strong class="${escapeHtml(delta.tone)}">${escapeHtml(delta.text)}</strong></div>
       <div class="bag-stats">${primaryStats}</div>
     </button>`;
@@ -1004,6 +1005,13 @@ function escapeHtml(value) {
     if (extra) sections.push(`<div class="detail-stat-group"><h4>其他</h4><div>${extra}</div></div>`);
     return sections.length ? `<div class="detail-stats grouped">${sections.join('')}</div>` : `<div class="detail-stats">${itemStatsHtmlDom(item)}</div>`;
   }
+  function itemTraitHtmlDom(item) {
+    const trait = item?.trait;
+    if (!trait) return '';
+    const stats = item?.traitStats || {};
+    const statText = Object.entries(stats).map(([k, v]) => `${statLabelDom(k)} ${formatStatValueDom(k, v)}`).join(' · ');
+    return `<div class="trait-panel" style="--trait-color:${escapeHtml(trait.color || item.rarityColor || '#ffd98e')}"><div class="trait-title"><b>${escapeHtml(trait.icon || '✦')} ${escapeHtml(trait.name || '装备特质')}</b><span>${escapeHtml(trait.desc || '特殊属性')}</span></div>${statText ? `<div class="trait-stats">${escapeHtml(statText)}</div>` : ''}</div>`;
+  }
   function itemDetailHtmlDom(detail, emptyText = '点背包小图标查看详情；点「装备」进入属性对比，确认后才会穿上') {
     if (!detail?.item) return `<div class="item-detail empty">${escapeHtml(emptyText)}</div>`;
     if (detail.type === 'compare') return itemCompareHtmlDom(detail);
@@ -1032,6 +1040,7 @@ function escapeHtml(value) {
       </div>
       ${itemDetailSummaryHtmlDom(item, detail)}
       ${itemGroupedStatsHtmlDom(item)}
+      ${itemTraitHtmlDom(item)}
       ${itemEnhanceHtmlDom(item)}
       ${itemAffixesHtmlDom(item)}
       ${itemSetHtmlDom(item)}

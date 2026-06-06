@@ -2582,6 +2582,7 @@ body.inventory-open #inventory-dom-panel { display: flex; flex-direction: column
 #inventory-dom-panel .bag-item-card { min-height: 44px; aspect-ratio: 1 / 1; display: grid; place-items: center; padding: 4px; cursor: pointer; touch-action: pan-y; appearance: none; text-align: center; border-radius: 8px; border: 1.5px solid color-mix(in srgb, var(--rarity-color) 56%, rgba(255,255,255,.07)); background: radial-gradient(circle at 40% 30%, color-mix(in srgb, var(--rarity-color) 10%, rgba(20,10,35,.92)), rgba(8,4,14,.96)); }
 #inventory-dom-panel .bag-main { min-width: 0; }
 #inventory-dom-panel .bag-name-row { min-width: 0; display: flex; align-items: center; gap: 5px; }
+#inventory-dom-panel .bag-trait-badge { flex:0 0 auto; color:var(--trait-color,#ffd98e); border:1px solid color-mix(in srgb,var(--trait-color,#ffd98e) 42%,transparent); background:color-mix(in srgb,var(--trait-color,#ffd98e) 12%,transparent); border-radius:999px; padding:1px 5px; font:900 10px/1.35 ui-monospace,monospace; }
 #inventory-dom-panel .bag-meta { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a99ab8; font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #inventory-dom-panel .bag-stats,
 #inventory-dom-panel .slot-stats,
@@ -2655,6 +2656,10 @@ body.inventory-open #inventory-dom-panel { display: flex; flex-direction: column
 #inventory-dom-panel .detail-stat-group h4, #character-dom-panel .detail-stat-group h4 { margin:0 0 5px; color:#ffcf7a; font-size:10px; }
 #inventory-dom-panel .detail-stat-group div, #character-dom-panel .detail-stat-group div { display:flex; flex-wrap:wrap; gap:4px; }
 @media (max-width: 420px) { #inventory-dom-panel .detail-summary-row, #character-dom-panel .detail-summary-row { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+#inventory-dom-panel .trait-panel, #character-dom-panel .trait-panel { border:1px solid color-mix(in srgb,var(--trait-color,#ffd98e) 38%,transparent); background:linear-gradient(135deg,color-mix(in srgb,var(--trait-color,#ffd98e) 13%,transparent),rgba(255,255,255,.025)); border-radius:10px; padding:8px; margin:7px 0; }
+#inventory-dom-panel .trait-title, #character-dom-panel .trait-title { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--trait-color,#ffd98e); }
+#inventory-dom-panel .trait-title span, #character-dom-panel .trait-title span { color:#cfc6aa; font-size:11px; text-align:right; }
+#inventory-dom-panel .trait-stats, #character-dom-panel .trait-stats { margin-top:5px; color:#f5e6b8; font-size:11px; }
 #inventory-dom-panel .affix-list { margin-top: 7px; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 5px; }
 #inventory-dom-panel .affix-list.empty { color: #8f829b; font-size: 11px; }
 #inventory-dom-panel .affix-chip { display: grid; grid-template-columns: auto 1fr auto; gap: 4px; align-items: center; padding: 4px 6px; border-radius: 8px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09); font-size: 10.5px; }
