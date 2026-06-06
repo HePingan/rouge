@@ -5,7 +5,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea3';
+const CURRENT_TOKEN = '20260606safearea4';
 const PREVIOUS_TOKEN = '20260527detailfix1';
 
 function mustInclude(label, needle) {

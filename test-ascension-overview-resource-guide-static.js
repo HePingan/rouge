@@ -20,7 +20,7 @@ assert(
   main.includes('aria-disabled="true"'),
   'disabled ascension actions should expose aria-disabled for mobile/accessibility state checks'
 );
-assert(index.includes('20260606safearea3'), 'cachebuster should be bumped for ascension overview guide changes');
+assert(index.includes('20260606safearea4'), 'cachebuster should be bumped for ascension overview guide changes');
 assert(!index.includes('20260526' + 'stagetap1'), 'index should not keep previous stagetap cachebuster after production change');
 
 console.log('ascension overview resource guide static assertions passed');
