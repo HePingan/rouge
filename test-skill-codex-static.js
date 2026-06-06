@@ -27,6 +27,6 @@ assert(css.includes('.synergy-card.claimable'), 'claimable synergy card CSS miss
 
 const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
 assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');
-assert(linkedTokens.every(token => token === '20260606safearea5'), 'all linked assets should use current cachebuster');
+assert(linkedTokens.every(token => token === '20260606safearea6'), 'all linked assets should use current cachebuster');
 
 console.log('skill codex static checks passed');

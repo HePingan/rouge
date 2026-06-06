@@ -5177,6 +5177,21 @@ function generateNewFloor() {
       runBodyClassCache.secret = nextSecret;
     }
   }
+  function drawBottomSafeAreaCanvasMask() {
+    if (!ctx || isInCombat()) return;
+    const h = Math.max(72, Math.min(120, Math.floor(canvasH * 0.1)));
+    const y = Math.max(0, canvasH - h);
+    const g = ctx.createLinearGradient(0, y, 0, canvasH);
+    g.addColorStop(0, 'rgba(36,56,86,0)');
+    g.addColorStop(0.22, 'rgba(36,56,86,0.88)');
+    g.addColorStop(1, 'rgba(44,69,104,1)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y, canvasW, h);
+    ctx.restore();
+  }
+
   function gameLoop() {
      gameTicks++;
      const hudTick = gameTicks % 4 === 0;
@@ -5210,6 +5225,7 @@ function generateNewFloor() {
     drawDeathScreen();
     drawSecretRealmUI();
     drawTribulationUI();
+    drawBottomSafeAreaCanvasMask();
     drawParticlesDom(camera);
     if (hudTick) {
       renderMessageLog();
