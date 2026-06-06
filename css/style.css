@@ -5,8 +5,11 @@
   --panel-bg: rgba(10,5,20,0.86);
   --panel-border: rgba(200,180,150,0.22);
 }
+html {
+  background: linear-gradient(180deg, #151022 0%, #101827 58%, #12111f 100%);
+}
 body {
-  background: #0a0a0f;
+  background: linear-gradient(180deg, #151022 0%, #101827 58%, #12111f 100%);
   overflow: hidden;
   font-family: 'SimSun', 'KaiTi', 'STKaiti', serif;
   color: #c8b8a0;
