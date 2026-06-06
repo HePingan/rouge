@@ -1506,6 +1506,17 @@ function escapeHtml(value) {
       syncBodyPanelState();
       return;
     }
+    const primaryPanelTypes = new Set(['inventory', 'character', 'skills', 'stages', 'ascension', 'secretrealm']);
+    const topType = panelStack.length > 0 ? panelStack[panelStack.length - 1] : null;
+    if (primaryPanelTypes.has(panel) && primaryPanelTypes.has(topType)) {
+      panelStack = [];
+      updatePanelFlagsFromStack();
+      characterPanelLastHtml = '';
+      inventoryDetailTarget = null;
+      characterEquipmentDetailSlot = null;
+      characterEquipmentSlotHint = null;
+      if (typeof closeSkillDetailModal === 'function') closeSkillDetailModal();
+    }
     ensureDomPanelForType(panel);
     pushPanelToStack(panel);
     if (panel === 'stages') {
@@ -6194,6 +6205,8 @@ p.innerHTML = `<div class="stage-head"><b>🗺️ 副本</b><div class="stage-ta
     player.stageProgress.currentRun = { stageId, roomIndex: 0, startedAt: Date.now(), turns: 0, events: [] };
     selectedStageId = stageId;
     player.stageProgress.selectedStageId = stageId;
+    stageDetailOpen = false;
+    stageSweepOpen = false;
     popPanelFromStack('stages');
     closeAllPanels({ sync: false });
     showStageSelectUI = false;
