@@ -62,7 +62,7 @@ function bandStats(raw, w, h, y0, y1) {
     const child = spawn(chromium(), [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--window-size=1080,2400',
       `--screenshot=${SHOT}`,
-      `http://127.0.0.1:${PORT}/index.html?fullpage-bottom-strip=1&v=20260607safearea11`,
+      `http://127.0.0.1:${PORT}/index.html?fullpage-bottom-strip=1&v=20260607safearea12`,
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', chunk => stderr += chunk);

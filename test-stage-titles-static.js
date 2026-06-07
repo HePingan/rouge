@@ -8,7 +8,7 @@ const save = fs.readFileSync('js/save.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260607safearea11';
+const CURRENT_TOKEN = '20260607safearea12';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 assert(stages.includes('const PLAYER_TITLES'), 'title data missing');

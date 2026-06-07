@@ -5,7 +5,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 const main = fs.readFileSync('js/main.js', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
-const CURRENT_TOKEN = '20260607safearea11';
+const CURRENT_TOKEN = '20260607safearea12';
 
 assert(css.includes(`DOM Character Panel ${CURRENT_TOKEN}`), 'character panel CSS marker should document current polish pass');
 assert(/#character-dom-panel \.char-close \{[\s\S]*width:\s*44px;[\s\S]*height:\s*44px;[\s\S]*touch-action:\s*manipulation;/.test(css), 'character close button should be a reliable 44px mobile touch target');

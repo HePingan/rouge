@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea11"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea12"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -81,8 +81,8 @@
       const gameMaskBg = gameMask.backgroundImage || gameMask.backgroundColor || '';
       const safeFillHeight = parsePx(safeFillStyle.height);
       const safeFillBg = safeFillStyle.backgroundImage || safeFillStyle.backgroundColor || '';
-      const safeFillPainted = safeFillHeight >= 132 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(safeFillBg);
-      const masksPainted = bodyMaskHeight >= 132 && gameMaskHeight >= 132 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(`${bodyMaskBg} ${gameMaskBg}`);
+      const safeFillPainted = safeFillHeight >= 240 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(safeFillBg);
+      const masksPainted = bodyMaskHeight >= 240 && gameMaskHeight >= 240 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(`${bodyMaskBg} ${gameMaskBg}`);
       const masksNonBlocking = bodyMask.pointerEvents === 'none' && gameMask.pointerEvents === 'none';
       const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
@@ -140,7 +140,7 @@
       touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
       const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
-      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea11'));
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea12'));
 
       done({
         ok: darkPct === 0 && avg[1] >= 145 && avg[2] >= 200 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && safeFillPainted && masksNonBlocking && menuBgBlueOk && menuBtnNotBlack && menuShadowBlueOk && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
