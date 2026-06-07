@@ -15,6 +15,7 @@ assert(css.includes('height: 100dvh'), 'game container should fill the dynamic v
 assert(css.includes('bottom: var(--menu-bottom)'), 'menu should stay above the safe-area via menu-bottom token');
 assert(css.includes('bottom: var(--control-bottom)'), 'touch controls should stay above the safe-area via control-bottom token');
 assert(css.includes('#touch-controls { z-index: 30 !important; pointer-events: auto !important; }') && css.includes('#menu-bar,\n#more-menu { z-index: 32 !important; }') && css.includes('#joystick-zone { z-index: 33 !important; pointer-events: auto !important; }'), 'touch controls shell should remain below nav but still receive full-screen movement touches');
+assert(css.includes('#menu-bar {') && css.includes('background: linear-gradient(180deg, rgba(96,152,205,0.36), rgba(111,168,216,0.28))') && css.includes('.menu-btn {') && css.includes('background: linear-gradient(180deg, rgba(92,151,203,0.68), rgba(70,123,176,0.64))'), 'bottom nav chrome/buttons should be blue-tinted instead of reading as a black bar in phone screenshots');
 assert(smokeHtml.includes('stageButtonBottomGap >= 30'), 'bottom canvas smoke should require nav to stay at least 30px above the phone bottom gesture area');
 assert(smokeHtml.includes('overflowX <= 0') && smokeHtml.includes('errors.length === 0'), 'bottom canvas smoke should guard horizontal overflow and console errors');
 assert(smokeHtml.includes('darkPct === 0') && smokeHtml.includes('bottom20Avg'), 'bottom canvas smoke should sample bottom canvas pixels, not only CSS strings');

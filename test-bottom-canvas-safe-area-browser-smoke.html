@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea8"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea9"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -87,7 +87,13 @@
       const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
       const gameMaskZ = Number.parseInt(gameMask.zIndex, 10) || 0;
-      const menuZ = Number.parseInt(win.getComputedStyle(menuBar).zIndex, 10) || 0;
+      const menuStyle = win.getComputedStyle(menuBar);
+      const menuBtnStyle = win.getComputedStyle(stageButton);
+      const menuBg = menuStyle.backgroundImage || menuStyle.backgroundColor || '';
+      const menuBtnBg = menuBtnStyle.backgroundImage || menuBtnStyle.backgroundColor || '';
+      const menuBgBlueOk = /rgba?\(96,\s*152,\s*205|rgba?\(111,\s*168,\s*216|rgba?\(92,\s*151,\s*203|rgba?\(70,\s*123,\s*176|#6fa8d8|#568fc0/i.test(`${menuBg} ${menuBtnBg}`);
+      const menuBtnNotBlack = !/rgba?\((?:1?\d|2\d|3\d),\s*(?:1?\d|2\d|3\d),\s*(?:1?\d|2\d|3\d)/i.test(menuBtnBg);
+      const menuZ = Number.parseInt(menuStyle.zIndex, 10) || 0;
       const touchControls = doc.querySelector('#touch-controls');
       const touchZ = Number.parseInt(win.getComputedStyle(touchControls).zIndex, 10) || 0;
       const joystickZ = Number.parseInt(win.getComputedStyle(joystick).zIndex, 10) || 0;
@@ -132,10 +138,10 @@
       touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
       const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
-      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea8'));
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea9'));
 
       done({
-        ok: darkPct === 0 && avg[1] >= 145 && avg[2] >= 200 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && safeFillPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[1] >= 145 && avg[2] >= 200 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && safeFillPainted && masksNonBlocking && menuBgBlueOk && menuBtnNotBlack && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -157,6 +163,10 @@
           masksNonBlocking,
         },
         zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ, joystick: joystickZ },
+        menuBgBlueOk,
+        menuBtnNotBlack,
+        menuBg,
+        menuBtnBg,
         maskAboveCanvas,
         navAboveMask,
         touchPlaneBelowNav,

@@ -55,6 +55,6 @@ const handleInputTurn = main.indexOf(turnIncrement, handleInputStart);
 assert(handleInputStart >= 0 && handleInputMovement > handleInputStart && handleInputTurn > handleInputMovement, 'stage turn counter must not increment before dx/dy movement checks or idle frames will make stage entry look frozen');
 const linkedTokens = Array.from(index.matchAll(/\?v=([^"']+)/g), m => m[1]);
 assert(linkedTokens.length >= 10, 'index should expose cache tokens for linked assets');
-assert(linkedTokens.every(token => token === '20260607safearea8'), 'all linked assets should use current stage enter cachebuster');
+assert(linkedTokens.every(token => token === '20260607safearea9'), 'all linked assets should use current stage enter cachebuster');
 assert(!index.includes('20260530stageclose1'), 'index should not keep stale stage close cache token');
 console.log('stage static integration ok');

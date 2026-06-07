@@ -20,7 +20,7 @@ function extractFunction(name) {
   throw new Error(`could not extract ${name}`);
 }
 
-assert(p77.includes('./index.html?v=20260607safearea8'), 'P77 smoke should use current cachebuster token');
+assert(p77.includes('./index.html?v=20260607safearea9'), 'P77 smoke should use current cachebuster token');
 assert(p77.includes("Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML')"), 'P77 smoke should count innerHTML writes');
 assert(p77.includes('Node.prototype.appendChild'), 'P77 smoke should count appendChild calls');
 assert(p77.includes('Element.prototype.replaceChildren'), 'P77 smoke should count replaceChildren calls');

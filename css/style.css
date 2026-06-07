@@ -2,8 +2,8 @@
 :root {
   --safe-bottom: max(44px, env(safe-area-inset-bottom, 0px));
   --safe-top: env(safe-area-inset-top, 0px);
-  --panel-bg: rgba(10,5,20,0.86);
-  --panel-border: rgba(200,180,150,0.22);
+  --panel-bg: linear-gradient(180deg, rgba(96,152,205,0.34), rgba(111,168,216,0.28));
+  --panel-border: rgba(220,238,255,0.42);
 }
 html {
   background-color: #6fa8d8;
@@ -303,8 +303,8 @@ body.combat-active #hud-next-step {
 }
 .menu-btn {
   width: 54px; height: 38px;
-  background: rgba(20,10,30,0.88);
-  border: 1px solid rgba(200,180,150,0.35);
+  background: linear-gradient(180deg, rgba(86,143,192,0.62), rgba(65,114,166,0.58));
+  border: 1px solid rgba(232,246,255,0.55);
   border-radius: 11px;
   color: #c8b8a0;
   font-size: 12px;
@@ -1207,15 +1207,15 @@ body.combat-active
   padding: 5px;
   gap: 5px;
   border-radius: 16px;
-  background: rgba(10,5,20,0.68);
+  background: linear-gradient(180deg, rgba(96,152,205,0.36), rgba(111,168,216,0.28));
   backdrop-filter: blur(5px);
 }
 .menu-btn {
   width: 52px;
   height: 36px;
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(43,25,62,0.9), rgba(19,10,30,0.92));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(92,151,203,0.68), rgba(70,123,176,0.64));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
 }
 
 #joystick-zone {
@@ -1822,9 +1822,9 @@ body.combat-active #hud-bottom { display: block; }
     gap: 5px !important;
     padding: 5px !important;
     border-radius: 14px !important;
-    background: rgba(8, 6, 14, 0.42) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.28) !important;
+    background: linear-gradient(180deg, rgba(96,152,205,0.40), rgba(111,168,216,0.32)) !important;
+    border: 1px solid rgba(220,238,255,0.30) !important;
+    box-shadow: 0 6px 18px rgba(27,71,112,0.18) !important;
     backdrop-filter: blur(4px);
     max-width: none !important;
   }
@@ -1841,9 +1841,9 @@ body.combat-active #hud-bottom { display: block; }
     align-items: center !important;
     justify-content: center !important;
     gap: 1px !important;
-    background: linear-gradient(180deg, rgba(32,18,48,0.86), rgba(12,8,22,0.78)) !important;
-    border: 1px solid rgba(212,160,255,0.24) !important;
-    color: #f1e7ff !important;
+    background: linear-gradient(180deg, rgba(92,151,203,0.68), rgba(70,123,176,0.62)) !important;
+    border: 1px solid rgba(232,246,255,0.46) !important;
+    color: #eef8ff !important;
     text-shadow: 0 1px 2px rgba(0,0,0,.65);
   }
 
@@ -3570,7 +3570,7 @@ body.combat-active #map-layer-container { filter: brightness(.62) saturate(.8); 
 /* Save button */
 #btn-save { font-size: 14px; }
 #btn-save.saved { transform: scale(0.92); }
-/* ─── DOM Character Panel 20260607safearea8 ─── */
+/* ─── DOM Character Panel 20260607safearea9 ─── */
 #character-dom-panel {
   display: none;
   position: fixed;
@@ -7067,9 +7067,9 @@ body.stage-open #stage-dom-panel {
     gap: 4px;
     padding: 5px;
     border-radius: 22px;
-    background: rgba(9,6,18,.66);
-    border: 1px solid rgba(255,255,255,.10);
-    box-shadow: 0 10px 26px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+    background: linear-gradient(180deg, rgba(96,152,205,.38), rgba(111,168,216,.30));
+    border: 1px solid rgba(220,238,255,.30);
+    box-shadow: 0 10px 26px rgba(27,71,112,.18), inset 0 1px 0 rgba(255,255,255,.12);
     z-index: 32;
   }
   .menu-btn {
@@ -7077,9 +7077,9 @@ body.stage-open #stage-dom-panel {
     height: 43px;
     min-width: 0;
     border-radius: 17px;
-    border-color: rgba(255,255,255,.10);
-    background: rgba(255,255,255,.045);
-    color: #d8cadf;
+    border-color: rgba(220,238,255,.28);
+    background: linear-gradient(180deg, rgba(92,151,203,.60), rgba(70,123,176,.54));
+    color: #eef8ff;
     font-size: 11px;
     font-weight: 900;
   }
@@ -7179,7 +7179,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Artifact Mobile Sheet 20260607safearea8 ─── */
+/* ─── Artifact Mobile Sheet 20260607safearea9 ─── */
 @media (max-width: 620px) {
   #artifact-dom-panel {
     width: 100vw !important;
@@ -7238,7 +7238,7 @@ body.stage-open #stage-dom-panel {
   #artifact-dom-panel .artifact-body { padding-bottom: calc(142px + env(safe-area-inset-bottom)); }
 }
 
-/* ─── Global Panel Close Right 20260607safearea8 ─── */
+/* ─── Global Panel Close Right 20260607safearea9 ─── */
 .panel-head,
 #secretrealm-dom-panel .sr-head,
 #tribulation-dom-panel .trib-head,
@@ -7313,7 +7313,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Stage Header Layout 20260607safearea8 ─── */
+/* ─── Stage Header Layout 20260607safearea9 ─── */
 #stage-dom-panel .stage-head {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) 34px;
@@ -7381,7 +7381,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Mobile Universal Interface Layout 20260607safearea8 ─── */
+/* ─── Mobile Universal Interface Layout 20260607safearea9 ─── */
 @media (max-width: 620px), (pointer: coarse) {
   /* 所有功能面板统一为手机原生底部抽屉：上方留出地图/状态呼吸感，底部按钮固定，内容单独滚动。 */
   #character-dom-panel,
@@ -7931,7 +7931,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Ascension Resource Source Navigation 20260607safearea8 ─── */
+/* ─── Ascension Resource Source Navigation 20260607safearea9 ─── */
 .asc-source-actions {
   grid-column: 1 / -1;
   display: grid;
@@ -8043,7 +8043,7 @@ body.stage-open #stage-dom-panel {
     font-size: 12px;
   }
 }
-/* ─── Mobile Stage Compact Layout 20260607safearea8 ─── */
+/* ─── Mobile Stage Compact Layout 20260607safearea9 ─── */
 #stage-dom-panel .stage-body.stage-select-body {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
@@ -8172,7 +8172,7 @@ body.stage-open #stage-dom-panel {
     height: 34px;
   }
 }
-/* ─── Mobile Stage Detail Sheet Safe Area 20260607safearea8 ─── */
+/* ─── Mobile Stage Detail Sheet Safe Area 20260607safearea9 ─── */
 #stage-dom-panel .stage-detail-sheet,
 #stage-dom-panel .stage-sweep-sheet {
   bottom: calc(max(10px, env(safe-area-inset-bottom)) + 8px);
@@ -8389,7 +8389,7 @@ body.stage-open #stage-dom-panel {
   #stage-dom-panel .stage-card-affinity { max-width: 46vw; font-size: 9.5px; }
 }
 
-/* ─── P8 mobile bottom safe-area hard override 20260607safearea8 ─── */
+/* ─── P8 mobile bottom safe-area hard override 20260607safearea9 ─── */
 body::after,
 #game-container::after {
   content: "" !important;

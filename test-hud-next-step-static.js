@@ -6,7 +6,7 @@ const ui = fs.readFileSync('js/ui.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const mobile = fs.readFileSync('mobile-verify.html', 'utf8');
 
-const CURRENT_TOKEN = '20260607safearea8';
+const CURRENT_TOKEN = '20260607safearea9';
 const PREVIOUS_TOKEN = '20260526ascsrc1';
 
 assert(html.includes('id="hud-next-step"'), 'index should include a lightweight next-step HUD hint');
