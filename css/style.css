@@ -1,17 +1,17 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --safe-bottom: max(32px, env(safe-area-inset-bottom, 0px));
+  --safe-bottom: max(44px, env(safe-area-inset-bottom, 0px));
   --safe-top: env(safe-area-inset-top, 0px);
   --panel-bg: rgba(10,5,20,0.86);
   --panel-border: rgba(200,180,150,0.22);
 }
 html {
-  background-color: #3f6f9e;
-  background: linear-gradient(180deg, #151022 0%, #1f3758 52%, #3f6f9e 100%);
+  background-color: #6fa8d8;
+  background: linear-gradient(180deg, #151022 0%, #284f78 50%, #6fa8d8 100%);
 }
 body {
-  background-color: #3f6f9e;
-  background: linear-gradient(180deg, #151022 0%, #1f3758 52%, #3f6f9e 100%);
+  background-color: #6fa8d8;
+  background: linear-gradient(180deg, #151022 0%, #284f78 50%, #6fa8d8 100%);
   overflow: hidden;
   font-family: 'SimSun', 'KaiTi', 'STKaiti', serif;
   color: #c8b8a0;
@@ -25,10 +25,10 @@ body::after {
   left: 0;
   right: 0;
   bottom: 0;
-  height: max(104px, calc(env(safe-area-inset-bottom, 0px) + 64px));
+  height: max(132px, calc(env(safe-area-inset-bottom, 0px) + 88px));
   pointer-events: none;
   z-index: 24;
-  background: linear-gradient(180deg, rgba(48,86,128,0), #356392 14%, #3f6f9e 100%);
+  background: linear-gradient(180deg, rgba(86,143,192,0), #568fc0 14%, #6fa8d8 100%);
 }
 #game-container {
   position: relative;
@@ -44,15 +44,26 @@ body::after {
   left: 0;
   right: 0;
   bottom: 0;
-  height: max(104px, calc(env(safe-area-inset-bottom, 0px) + 64px));
+  height: max(132px, calc(env(safe-area-inset-bottom, 0px) + 88px));
   pointer-events: none;
   z-index: 24;
-  background: linear-gradient(180deg, rgba(48,86,128,0), #356392 14%, #3f6f9e 100%);
+  background: linear-gradient(180deg, rgba(86,143,192,0), #568fc0 14%, #6fa8d8 100%);
 }
 #game-canvas {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+#bottom-safe-area-fill {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: max(132px, calc(env(safe-area-inset-bottom, 0px) + 88px));
+  pointer-events: none;
+  z-index: 31;
+  background: linear-gradient(180deg, rgba(86,143,192,0), #568fc0 10%, #6fa8d8 100%);
 }
 
 /* ─── HUD Overlay ─── */
@@ -3559,7 +3570,7 @@ body.combat-active #map-layer-container { filter: brightness(.62) saturate(.8); 
 /* Save button */
 #btn-save { font-size: 14px; }
 #btn-save.saved { transform: scale(0.92); }
-/* ─── DOM Character Panel 20260607safearea7 ─── */
+/* ─── DOM Character Panel 20260607safearea8 ─── */
 #character-dom-panel {
   display: none;
   position: fixed;
@@ -7168,7 +7179,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Artifact Mobile Sheet 20260607safearea7 ─── */
+/* ─── Artifact Mobile Sheet 20260607safearea8 ─── */
 @media (max-width: 620px) {
   #artifact-dom-panel {
     width: 100vw !important;
@@ -7227,7 +7238,7 @@ body.stage-open #stage-dom-panel {
   #artifact-dom-panel .artifact-body { padding-bottom: calc(142px + env(safe-area-inset-bottom)); }
 }
 
-/* ─── Global Panel Close Right 20260607safearea7 ─── */
+/* ─── Global Panel Close Right 20260607safearea8 ─── */
 .panel-head,
 #secretrealm-dom-panel .sr-head,
 #tribulation-dom-panel .trib-head,
@@ -7302,7 +7313,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Stage Header Layout 20260607safearea7 ─── */
+/* ─── Stage Header Layout 20260607safearea8 ─── */
 #stage-dom-panel .stage-head {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) 34px;
@@ -7370,7 +7381,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Mobile Universal Interface Layout 20260607safearea7 ─── */
+/* ─── Mobile Universal Interface Layout 20260607safearea8 ─── */
 @media (max-width: 620px), (pointer: coarse) {
   /* 所有功能面板统一为手机原生底部抽屉：上方留出地图/状态呼吸感，底部按钮固定，内容单独滚动。 */
   #character-dom-panel,
@@ -7920,7 +7931,7 @@ body.stage-open #stage-dom-panel {
 }
 
 
-/* ─── Ascension Resource Source Navigation 20260607safearea7 ─── */
+/* ─── Ascension Resource Source Navigation 20260607safearea8 ─── */
 .asc-source-actions {
   grid-column: 1 / -1;
   display: grid;
@@ -8032,7 +8043,7 @@ body.stage-open #stage-dom-panel {
     font-size: 12px;
   }
 }
-/* ─── Mobile Stage Compact Layout 20260607safearea7 ─── */
+/* ─── Mobile Stage Compact Layout 20260607safearea8 ─── */
 #stage-dom-panel .stage-body.stage-select-body {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
@@ -8161,7 +8172,7 @@ body.stage-open #stage-dom-panel {
     height: 34px;
   }
 }
-/* ─── Mobile Stage Detail Sheet Safe Area 20260607safearea7 ─── */
+/* ─── Mobile Stage Detail Sheet Safe Area 20260607safearea8 ─── */
 #stage-dom-panel .stage-detail-sheet,
 #stage-dom-panel .stage-sweep-sheet {
   bottom: calc(max(10px, env(safe-area-inset-bottom)) + 8px);
@@ -8378,7 +8389,7 @@ body.stage-open #stage-dom-panel {
   #stage-dom-panel .stage-card-affinity { max-width: 46vw; font-size: 9.5px; }
 }
 
-/* ─── P8 mobile bottom safe-area hard override 20260607safearea7 ─── */
+/* ─── P8 mobile bottom safe-area hard override 20260607safearea8 ─── */
 body::after,
 #game-container::after {
   content: "" !important;
@@ -8387,10 +8398,10 @@ body::after,
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
-  height: max(104px, calc(env(safe-area-inset-bottom, 0px) + 64px)) !important;
+  height: max(132px, calc(env(safe-area-inset-bottom, 0px) + 88px)) !important;
   pointer-events: none !important;
   z-index: 31 !important;
-  background: linear-gradient(180deg, rgba(48,86,128,0), #356392 14%, #3f6f9e 100%) !important;
+  background: linear-gradient(180deg, rgba(86,143,192,0), #568fc0 14%, #6fa8d8 100%) !important;
 }
 #menu-bar,
 #more-menu { z-index: 32 !important; }

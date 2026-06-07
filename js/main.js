@@ -5179,12 +5179,12 @@ function generateNewFloor() {
   }
   function drawBottomSafeAreaCanvasMask() {
     if (!ctx || isInCombat()) return;
-    const h = Math.max(112, Math.min(156, Math.floor(canvasH * 0.14)));
+    const h = Math.max(144, Math.min(196, Math.floor(canvasH * 0.18)));
     const y = Math.max(0, canvasH - h);
     const g = ctx.createLinearGradient(0, y, 0, canvasH);
-    g.addColorStop(0, 'rgba(48,86,128,0)');
-    g.addColorStop(0.14, 'rgba(53,99,146,0.94)');
-    g.addColorStop(1, 'rgba(63,111,158,1)');
+    g.addColorStop(0, 'rgba(86,143,192,0)');
+    g.addColorStop(0.1, 'rgba(86,143,192,0.96)');
+    g.addColorStop(1, 'rgba(111,168,216,1)');
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = g;

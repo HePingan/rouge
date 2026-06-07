@@ -5,7 +5,7 @@ const html = fs.readFileSync('test-p78-mobile-super-session-browser-smoke.html',
 const js = fs.readFileSync('test-p78-mobile-super-session-browser-smoke.js', 'utf8');
 const ui = fs.readFileSync('js/ui.js', 'utf8');
 
-assert(html.includes('index.html?v=20260607safearea7'), 'P78 smoke should use current cachebuster token');
+assert(html.includes('index.html?v=20260607safearea8'), 'P78 smoke should use current cachebuster token');
 assert(html.includes('stage-run-active') && html.includes('combatStep') && html.includes('equipStep') && html.includes('skillStep') && html.includes('ascensionSourceStep'), 'P78 should cover movement/combat/equip/skill/ascension chain');
 assert(html.includes('__p78Errors') && html.includes('overflowX') && html.includes('movementBlocked'), 'P78 should guard console errors, horizontal overflow, and movement blocking');
 assert(html.includes('[data-char-equip-slot="armor"]') && html.includes('[data-confirm-equip-index]'), 'P78 should use real character slot and equip confirmation controls');

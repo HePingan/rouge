@@ -2,7 +2,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 
-const CURRENT_TOKEN = '20260607safearea7';
+const CURRENT_TOKEN = '20260607safearea8';
 const PREVIOUS_TOKEN = '20260525trialtoken1';
 
 const context = { console, Math, Date };

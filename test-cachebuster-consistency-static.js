@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const CURRENT_TOKEN = '20260607safearea7';
+const CURRENT_TOKEN = '20260607safearea8';
 const KNOWN_PREVIOUS_TOKENS = [
   '20260524endgame1',
   '20260524secretQuick1',
@@ -18,6 +18,7 @@ const KNOWN_PREVIOUS_TOKENS = [
   '20260606safearea4',
   '20260606safearea5',
   '20260606safearea6',
+  '20260607safearea7',
 ];
 
 function read(file) { return fs.readFileSync(file, 'utf8'); }

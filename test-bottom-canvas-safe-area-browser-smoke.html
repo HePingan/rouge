@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea7"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea8"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -70,6 +70,8 @@
       stageButton.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true, clientX: stageRect.left + stageRect.width / 2, clientY: stageRect.top + stageRect.height / 2 }));
       await new Promise(resolve => setTimeout(resolve, 160));
       const stageOpen = doc.body.classList.contains('stage-open') || !!doc.querySelector('#stage-dom-panel:not([style*="display: none"])');
+      const safeFill = doc.querySelector('#bottom-safe-area-fill');
+      const safeFillStyle = win.getComputedStyle(safeFill);
       const bodyMask = win.getComputedStyle(doc.body, '::after');
       const gameMask = win.getComputedStyle(doc.querySelector('#game-container'), '::after');
       const parsePx = value => Number.parseFloat(String(value || '0').replace('px', '')) || 0;
@@ -77,7 +79,10 @@
       const gameMaskHeight = parsePx(gameMask.height);
       const bodyMaskBg = bodyMask.backgroundImage || bodyMask.backgroundColor || '';
       const gameMaskBg = gameMask.backgroundImage || gameMask.backgroundColor || '';
-      const masksPainted = bodyMaskHeight >= 104 && gameMaskHeight >= 104 && /rgb\(53,\s*99,\s*146\)|rgb\(63,\s*111,\s*158\)|#356392|#3f6f9e/i.test(`${bodyMaskBg} ${gameMaskBg}`);
+      const safeFillHeight = parsePx(safeFillStyle.height);
+      const safeFillBg = safeFillStyle.backgroundImage || safeFillStyle.backgroundColor || '';
+      const safeFillPainted = safeFillHeight >= 132 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(safeFillBg);
+      const masksPainted = bodyMaskHeight >= 132 && gameMaskHeight >= 132 && /rgb\(86,\s*143,\s*192\)|rgb\(111,\s*168,\s*216\)|#568fc0|#6fa8d8/i.test(`${bodyMaskBg} ${gameMaskBg}`);
       const masksNonBlocking = bodyMask.pointerEvents === 'none' && gameMask.pointerEvents === 'none';
       const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
@@ -127,10 +132,10 @@
       touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
       const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
-      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea7'));
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea8'));
 
       done({
-        ok: darkPct === 0 && avg[1] >= 95 && avg[2] >= 145 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[1] >= 145 && avg[2] >= 200 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && safeFillPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -143,9 +148,12 @@
         maskMetrics: {
           bodyHeight: Math.round(bodyMaskHeight),
           gameHeight: Math.round(gameMaskHeight),
+          safeFillHeight: Math.round(safeFillHeight),
           bodyPointerEvents: bodyMask.pointerEvents,
           gamePointerEvents: gameMask.pointerEvents,
+          safeFillPointerEvents: safeFillStyle.pointerEvents,
           masksPainted,
+          safeFillPainted,
           masksNonBlocking,
         },
         zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ, joystick: joystickZ },
