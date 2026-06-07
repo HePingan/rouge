@@ -5,7 +5,7 @@ const stages = fs.readFileSync('js/stages.js', 'utf8');
 const main = fs.readFileSync('js/main.js', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea6';
+const CURRENT_TOKEN = '20260607safearea7';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 for (const key of ['STAGE_ROOM_EVENTS', 'treasure', 'rest', 'trap', 'fortune']) {

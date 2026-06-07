@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260606safearea6"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea7"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -77,7 +77,7 @@
       const gameMaskHeight = parsePx(gameMask.height);
       const bodyMaskBg = bodyMask.backgroundImage || bodyMask.backgroundColor || '';
       const gameMaskBg = gameMask.backgroundImage || gameMask.backgroundColor || '';
-      const masksPainted = bodyMaskHeight >= 72 && gameMaskHeight >= 72 && /rgb\(36,\s*56,\s*86\)|rgb\(44,\s*69,\s*104\)|#243856|#2c4568/i.test(`${bodyMaskBg} ${gameMaskBg}`);
+      const masksPainted = bodyMaskHeight >= 104 && gameMaskHeight >= 104 && /rgb\(53,\s*99,\s*146\)|rgb\(63,\s*111,\s*158\)|#356392|#3f6f9e/i.test(`${bodyMaskBg} ${gameMaskBg}`);
       const masksNonBlocking = bodyMask.pointerEvents === 'none' && gameMask.pointerEvents === 'none';
       const canvasZ = Number.parseInt(win.getComputedStyle(canvas).zIndex, 10) || 0;
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
@@ -127,10 +127,10 @@
       touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
       const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
-      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea7'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[1] >= 95 && avg[2] >= 145 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,

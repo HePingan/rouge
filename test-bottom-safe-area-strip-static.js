@@ -5,10 +5,10 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 const smokeHtml = fs.readFileSync('test-bottom-canvas-safe-area-browser-smoke.html', 'utf8');
 
 assert(index.includes('viewport-fit=cover'), 'viewport meta should opt into covering the mobile safe-area instead of leaving a black bottom strip');
-assert(index.includes('<meta name="theme-color" content="#243856">'), 'browser/system bottom bar should be tinted to the brighter game background instead of default black');
-assert(css.includes('--safe-bottom: max(24px, env(safe-area-inset-bottom, 0px))'), 'CSS should reserve a minimum 24px bottom gesture area when env(safe-area-inset-bottom) is 0');
-assert(css.includes('html {') && css.includes('linear-gradient(180deg, #151022 0%, #182743 58%, #243856 100%)'), 'html/body background should paint the exposed bottom safe-area with a non-black game gradient');
-assert(css.includes('body::after') && css.includes('#game-container::after') && css.includes('height: max(72px, calc(env(safe-area-inset-bottom, 0px) + 42px))') && css.includes('z-index: 31 !important') && css.includes('background: linear-gradient(180deg, rgba(36,56,86,0), #243856 22%, #2c4568 100%) !important') && css.includes('pointer-events: none'), 'body/game-container should draw a non-interactive hard-override bottom mask above canvas and below menu');
+assert(index.includes('<meta name="theme-color" content="#3f6f9e">'), 'browser/system bottom bar should be tinted to the brighter game background instead of default black');
+assert(css.includes('--safe-bottom: max(32px, env(safe-area-inset-bottom, 0px))'), 'CSS should reserve a minimum 32px bottom gesture area when env(safe-area-inset-bottom) is 0');
+assert(css.includes('html {') && css.includes('linear-gradient(180deg, #151022 0%, #1f3758 52%, #3f6f9e 100%)'), 'html/body background should paint the exposed bottom safe-area with a clearly non-black game gradient');
+assert(css.includes('body::after') && css.includes('#game-container::after') && css.includes('height: max(104px, calc(env(safe-area-inset-bottom, 0px) + 64px))') && css.includes('z-index: 31 !important') && css.includes('background: linear-gradient(180deg, rgba(48,86,128,0), #356392 14%, #3f6f9e 100%) !important') && css.includes('pointer-events: none'), 'body/game-container should draw a bright non-interactive hard-override bottom mask above canvas and below menu');
 assert(css.includes('height: 100dvh'), 'game container should fill the dynamic viewport height');
 assert(css.includes('bottom: var(--menu-bottom)'), 'menu should stay above the safe-area via menu-bottom token');
 assert(css.includes('bottom: var(--control-bottom)'), 'touch controls should stay above the safe-area via control-bottom token');
@@ -16,6 +16,6 @@ assert(css.includes('#touch-controls { z-index: 30 !important; pointer-events: a
 assert(smokeHtml.includes('stageButtonBottomGap >= 30'), 'bottom canvas smoke should require nav to stay at least 30px above the phone bottom gesture area');
 assert(smokeHtml.includes('overflowX <= 0') && smokeHtml.includes('errors.length === 0'), 'bottom canvas smoke should guard horizontal overflow and console errors');
 assert(smokeHtml.includes('darkPct === 0') && smokeHtml.includes('bottom20Avg'), 'bottom canvas smoke should sample bottom canvas pixels, not only CSS strings');
-assert(smokeHtml.includes('masksPainted') && smokeHtml.includes('masksNonBlocking') && smokeHtml.includes('bodyMaskHeight >= 72') && smokeHtml.includes("pointerEvents === 'none'"), 'bottom canvas smoke should verify mask height/color and non-blocking pointer-events');
+assert(smokeHtml.includes('masksPainted') && smokeHtml.includes('masksNonBlocking') && smokeHtml.includes('bodyMaskHeight >= 104') && smokeHtml.includes("pointerEvents === 'none'"), 'bottom canvas smoke should verify mask height/color and non-blocking pointer-events');
 assert(smokeHtml.includes('maskAboveCanvas') && smokeHtml.includes('navAboveMask') && smokeHtml.includes('touchPlaneBelowNav') && smokeHtml.includes('joystickAboveMask') && smokeHtml.includes('zIndex'), 'bottom canvas smoke should verify mask/nav/touch z-index ordering, not only visibility');
 console.log('bottom safe-area strip static passed');

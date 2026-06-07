@@ -5,7 +5,7 @@ const main = fs.readFileSync('js/main.js','utf8');
 const css = fs.readFileSync('css/style.css','utf8');
 const html = fs.readFileSync('test-p79-panel-backstack-audit-browser-smoke.html','utf8');
 
-assert(html.includes('index.html?v=20260606safearea6'), 'P79 smoke should use current cachebuster token');
+assert(html.includes('index.html?v=20260607safearea7'), 'P79 smoke should use current cachebuster token');
 assert(html.includes('skills-after-char-jump') && html.includes('character-after-skill-return'), 'P79 should audit character-skill backstack');
 assert(html.includes('inventory-from-character') && html.includes('character-after-equip'), 'P79 should audit character-inventory equip backstack');
 assert(html.includes('stage-run-after-source-enter') && html.includes('movementBlocked'), 'P79 should audit ascension source enter cleanup and movement unblock');

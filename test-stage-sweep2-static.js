@@ -5,7 +5,7 @@ const main = fs.readFileSync('js/main.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 const index = fs.readFileSync('index.html', 'utf8');
 
-const CURRENT_TOKEN = '20260606safearea6';
+const CURRENT_TOKEN = '20260607safearea7';
 const PREVIOUS_TOKEN = '20260525demonstate' + '1';
 
 assert(main.includes('function getStageSweepCost'), 'missing sweep cost helper');
