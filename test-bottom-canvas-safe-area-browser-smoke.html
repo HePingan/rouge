@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea10"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260607safearea11"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -140,7 +140,7 @@
       touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
       const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
-      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea10'));
+      const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260607safearea11'));
 
       done({
         ok: darkPct === 0 && avg[1] >= 145 && avg[2] >= 200 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && safeFillPainted && masksNonBlocking && menuBgBlueOk && menuBtnNotBlack && menuShadowBlueOk && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,

@@ -47,14 +47,14 @@ assert(/\.cbt-drawer-skill span \{ display:none; \}/.test(css), 'drawer skill hi
 assert(/body\.stage-run-active:not\(\.combat-active\):not\(\.panel-open\) #action-buttons,[\s\S]*bottom:\s*calc\(96px \+ var\(--safe-bottom\)\)/.test(css), 'stage/secret run quick buttons should sit above bottom nav without floating high over the map');
 assert(/body\.stage-run-active:not\(\.combat-active\):not\(\.panel-open\) #action-buttons,[\s\S]*flex-direction:\s*row/.test(css), 'stage/secret run quick buttons should use a compact horizontal pair');
 
-assert(html.includes('v=20260607safearea10'), 'index cachebuster should update for combat HUD optimization');
+assert(html.includes('v=20260607safearea11'), 'index cachebuster should update for combat HUD optimization');
 
 const mustBust = [
   'css/style.css',
   'js/main.js',
 ];
 for (const file of mustBust) {
-  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260607safearea10`);
+  const re = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=20260607safearea11`);
   assert(re.test(html), `${file} should use combat HUD cachebuster`);
 }
 

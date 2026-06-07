@@ -283,7 +283,7 @@ this.logs = logs;
   assert(/#skills-dom-panel \.skill-synergy-panel\s*\{[\s\S]*?overflow:\s*visible/.test(css), 'mobile synergy panels should not clip cards, preserving real scroll height');
   assert(/#skills-dom-panel \.synergy-recommend-strip\s*\{[\s\S]*?touch-action:\s*pan-x pan-y/.test(css), 'mobile recommendation strip should not trap vertical swipes');
   assert(/#skills-dom-panel \.skill-attr-bar\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/.test(css), 'mobile attr buttons should fit one compact row');
-  assert(html.includes('20260607safearea10') && mobile.includes('20260607safearea10'), 'entry and mobile verification should use current global cachebuster');
+  assert(html.includes('20260607safearea11') && mobile.includes('20260607safearea11'), 'entry and mobile verification should use current global cachebuster');
   assert(css.includes('.synergy-card.mastery-card'), 'CSS should style mastery milestone cards');
   assert(css.includes('.cbt-skill-btn.synergy-ready') && css.includes('.cbt-drawer-skill.synergy-ready'), 'CSS should style synergy-ready combat skill choices');
 }
