@@ -8392,6 +8392,6 @@ body::after,
 }
 #menu-bar,
 #more-menu { z-index: 32 !important; }
-#touch-controls { z-index: 33 !important; pointer-events: none !important; }
+#touch-controls { z-index: 30 !important; pointer-events: auto !important; }
 #joystick-zone { z-index: 33 !important; pointer-events: auto !important; }
 #action-buttons { z-index: 55 !important; pointer-events: auto !important; }

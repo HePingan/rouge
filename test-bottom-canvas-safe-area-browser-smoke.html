@@ -10,7 +10,7 @@
   </style>
 </head>
 <body data-result="running">
-  <iframe id="phone" src="index.html?v=20260606safearea6&smoke=bottom-canvas-safe-area"></iframe>
+  <iframe id="phone" src="index.html?smoke=bottom-canvas-safe-area&v=20260606safearea6"></iframe>
   <script>
     const done = (payload) => {
       document.body.dataset.result = payload.ok ? 'passed' : 'failed';
@@ -83,15 +83,54 @@
       const bodyMaskZ = Number.parseInt(bodyMask.zIndex, 10) || 0;
       const gameMaskZ = Number.parseInt(gameMask.zIndex, 10) || 0;
       const menuZ = Number.parseInt(win.getComputedStyle(menuBar).zIndex, 10) || 0;
-      const touchZ = Number.parseInt(win.getComputedStyle(doc.querySelector('#touch-controls')).zIndex, 10) || 0;
+      const touchControls = doc.querySelector('#touch-controls');
+      const touchZ = Number.parseInt(win.getComputedStyle(touchControls).zIndex, 10) || 0;
+      const joystickZ = Number.parseInt(win.getComputedStyle(joystick).zIndex, 10) || 0;
       const maskAboveCanvas = bodyMaskZ > canvasZ && gameMaskZ > canvasZ;
       const navAboveMask = menuZ > bodyMaskZ && menuZ > gameMaskZ;
-      const touchAboveMask = touchZ > bodyMaskZ && touchZ > gameMaskZ;
+      const touchPlaneBelowNav = touchZ < menuZ && touchZ > canvasZ;
+      const joystickAboveMask = joystickZ > bodyMaskZ && joystickZ > gameMaskZ;
+      if (stageOpen && typeof win.closeAllPanels === 'function') {
+        win.closeAllPanels();
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+      win.eval(`
+        if (typeof closeAllPanels === 'function') closeAllPanels();
+        if (typeof combatState !== 'undefined') combatState = COMBAT_STATE.NONE;
+        if (typeof showStageSelectUI !== 'undefined') showStageSelectUI = false;
+        if (typeof showMoreMenu !== 'undefined') showMoreMenu = false;
+        if (typeof isInStageRun !== 'undefined') isInStageRun = true;
+        if (typeof syncBodyPanelState === 'function') syncBodyPanelState();
+        document.body.classList.remove('panel-open','stage-open','inventory-open','character-open','skills-open','alchemy-open','more-menu-open');
+        ['stage-dom-panel','inventory-dom-panel','character-dom-panel','skills-dom-panel','alchemy-dom-panel','more-menu'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.style.display = 'none'; el.setAttribute('aria-hidden', 'true'); }
+        });
+      `);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      const candidateMovePoints = [
+        { x: Math.round(win.innerWidth * 0.50), y: Math.round(win.innerHeight * 0.58) },
+        { x: Math.round(win.innerWidth * 0.65), y: Math.round(win.innerHeight * 0.52) },
+        { x: Math.round(win.innerWidth * 0.35), y: Math.round(win.innerHeight * 0.52) },
+        { x: Math.round(win.innerWidth * 0.50), y: Math.round(win.innerHeight * 0.68) },
+      ];
+      const movementProbe = candidateMovePoints.map(p => {
+        const hit = doc.elementFromPoint(p.x, p.y);
+        return { ...p, hit, ok: hit === touchControls || !!hit?.closest?.('#touch-controls') };
+      }).find(p => p.ok) || candidateMovePoints.map(p => ({ ...p, hit: doc.elementFromPoint(p.x, p.y), ok: false }))[0];
+      const moveStart = { x: movementProbe.x, y: movementProbe.y };
+      const moveHit = movementProbe.hit;
+      const movementHitOk = movementProbe.ok;
+      touchControls.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x, clientY: moveStart.y }));
+      touchControls.dispatchEvent(new win.PointerEvent('pointermove', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
+      const joystickMoved = win.eval(`!!(joystick && joystick.active && joystick.distance > 0.2 && joystick.dx > 0.2)`);
+      touchControls.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 907, pointerType: 'touch', isPrimary: true, clientX: moveStart.x + 38, clientY: moveStart.y }));
+      const joystickCleared = win.eval(`!joystick.active && Number(joystick.distance || 0) === 0`);
       const tokens = [...doc.querySelectorAll('link[rel="stylesheet"],script[src]')].map(el => el.href || el.src);
       const allCurrent = tokens.length > 5 && tokens.every(src => src.includes('20260606safearea6'));
 
       done({
-        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchAboveMask && navHitOk && joyHitOk && quickHitOk && stageOpen && stageButtonBottomGap >= 30,
+        ok: darkPct === 0 && avg[2] >= 70 && overflowX <= 0 && errors.length === 0 && allCurrent && bodyMask.display === 'block' && gameMask.display === 'block' && masksPainted && masksNonBlocking && maskAboveCanvas && navAboveMask && touchPlaneBelowNav && joystickAboveMask && navHitOk && joyHitOk && quickHitOk && movementHitOk && joystickMoved && joystickCleared && stageOpen && stageButtonBottomGap >= 30,
         message: 'bottom canvas safe-area smoke',
         canvas: { w, h },
         bottom20Avg: avg,
@@ -109,10 +148,15 @@
           masksPainted,
           masksNonBlocking,
         },
-        zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ },
+        zIndex: { canvas: canvasZ, bodyMask: bodyMaskZ, gameMask: gameMaskZ, menu: menuZ, touch: touchZ, joystick: joystickZ },
         maskAboveCanvas,
         navAboveMask,
-        touchAboveMask,
+        touchPlaneBelowNav,
+        joystickAboveMask,
+        movementHitOk,
+        joystickMoved,
+        joystickCleared,
+        moveHitTag: moveHit?.id || moveHit?.className || moveHit?.tagName || '',
         navHitOk,
         joyHitOk,
         quickHitOk,
